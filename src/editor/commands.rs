@@ -141,7 +141,7 @@ impl Editor {
                     .any(|section| section.kind == K::InlineMath && section.source == wrapped)
                 {
                     self.message = Some(
-                        "Cannot wrap this text as inline math here. Select text within one paragraph or use Display math."
+                        "Cannot insert inline math here. Select text within one paragraph or choose More tools → Display formula."
                             .into(),
                     );
                     return;
