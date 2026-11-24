@@ -12,8 +12,11 @@ use gpui::{
 
 mod commands;
 mod layout;
+mod toolbar;
+#[cfg(test)]
 use commands::Command;
 use layout::{Graphic, ItemPaint, Layout};
+pub(crate) use toolbar::ToolbarAssets;
 
 actions!(
     editor,
@@ -446,28 +449,7 @@ impl Render for Editor {
             .flex_col()
             .bg(rgb(0xffffff))
             .text_color(rgb(0x202531))
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_1()
-                    .p_2()
-                    .bg(rgb(0xf1f3f6))
-                    .children(Command::BUTTONS.iter().map(|&(label, command)| {
-                        div()
-                            .id(label)
-                            .px_2()
-                            .py_1()
-                            .rounded_sm()
-                            .text_sm()
-                            .cursor_pointer()
-                            .hover(|style| style.bg(rgb(0xdde3ef)))
-                            .on_click(cx.listener(move |editor, _, window, cx| {
-                                editor.command(command, window, cx)
-                            }))
-                            .child(label)
-                    })),
-            )
+            .child(toolbar::toolbar(cx))
             .child(
                 div()
                     .id("editor")

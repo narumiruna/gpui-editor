@@ -22,7 +22,8 @@ actions!(
 );
 
 pub fn run() {
-    Application::new().run(|cx| {
+    let app = Application::new().with_assets(editor::ToolbarAssets);
+    app.run(|cx| {
         editor::bind_keys(cx);
         cx.bind_keys([
             KeyBinding::new("cmd-o", ChooseFolder, None),

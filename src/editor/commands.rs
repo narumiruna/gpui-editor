@@ -14,23 +14,6 @@ pub(super) enum Command {
     RemoveItem,
 }
 
-impl Command {
-    pub(super) const BUTTONS: &'static [(&'static str, Self)] = &[
-        ("Heading", Self::Heading),
-        ("List", Self::Bullet),
-        ("Bold", Self::Bold),
-        ("Italic", Self::Italic),
-        ("Front matter", Self::Add(SectionKind::FrontMatter)),
-        ("Mermaid", Self::Add(SectionKind::Mermaid)),
-        ("Inline math", Self::Add(SectionKind::InlineMath)),
-        ("Display math", Self::Add(SectionKind::DisplayMath)),
-        ("Image", Self::Add(SectionKind::Image)),
-        ("Link", Self::Add(SectionKind::Link)),
-        ("Edit link", Self::EditLink),
-        ("Remove item", Self::RemoveItem),
-    ];
-}
-
 fn can_edit_as_item(kind: SectionKind) -> bool {
     matches!(
         kind,

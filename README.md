@@ -16,8 +16,8 @@ This builds and starts the app. It uses `/Applications/Xcode.app` by default. If
 
 The command takes no path. In the window, choose **Open Folder…**, then select a Markdown file from the sidebar. Use **New** for a blank document and **Save** or `Cmd-S` to save. The sidebar lists only the workspace's top-level `.md` files.
 
-- Use the editor toolbar to format a selection or insert an item. Click front matter, a diagram, or a formula to edit its source. Click outside the item to preview the change; this does not save the file.
-- For links, hover to see the full destination in the bottom bar. Click to open the web browser or follow an in-workspace `.md` link. To edit a link without opening it, place the caret at its edge and choose **Edit link**.
+- Use the toolbar icons to format a selection or insert an item. Hover over an icon to see its name. Click front matter, a diagram, or a formula to edit its source. Click outside the item to preview the change; this does not save the file.
+- For links, hover to see the full destination in the bottom bar. Click to open the web browser or follow an in-workspace `.md` link. To edit a link without opening it, place the caret at its edge and choose the **Edit link** icon.
 - Image previews support local or HTTPS PNG, JPEG, GIF, and WebP still images. Relative paths are based on the document's folder. HTTPS previews load directly from the stated host; redirects are not followed.
 - The editor supports a subset of Markdown. The Mermaid renderer supports flat flowcharts; unsupported blocks such as GFM tables are shown as read-only source. If a saved file changed outside the editor, saving reports a conflict instead of overwriting it.
 
