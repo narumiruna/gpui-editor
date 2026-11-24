@@ -32,6 +32,6 @@ cargo test --locked --all-targets
 prek run --all-files
 ```
 
-GitHub Actions runs Rust checks on Linux and macOS. The Linux job checks the portable document, rendering, and file-handling code; only macOS builds the GPUI application. Automated GPUI tests use a simulated window, not the real macOS input method. See the [manual acceptance steps](docs/prd/gpui-editor.md#macos-原生驗收) for the remaining native checks.
+GitHub Actions runs Rust checks with Rust 1.95.0 on Linux and macOS. The Linux job checks the portable document, rendering, and file-handling code; only macOS builds the GPUI application. Automated GPUI tests use a simulated window, not the real macOS input method. See the [manual acceptance steps](docs/prd/gpui-editor.md#macos-原生驗收) for the remaining native checks.
 
 [Changenote](https://github.com/changenote/changenote) uses [`.changenote/`](.changenote/) to maintain release notes and a release pull request. Changes to the editor do not require a manual release workflow run.

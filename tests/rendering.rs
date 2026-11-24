@@ -6,7 +6,14 @@ fn assert_visible(raster: &Raster) {
         raster.bgra.len(),
         raster.width as usize * raster.height as usize * 4
     );
-    assert!(raster.bgra.chunks_exact(4).any(|pixel| pixel[3] != 0));
+    assert!(
+        raster
+            .bgra
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[3] != 0)
+    );
 }
 
 #[test]

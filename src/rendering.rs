@@ -204,7 +204,7 @@ fn rasterize_svg(svg: &str, scale: f32, with_labels: bool) -> Result<Raster, Str
 
     // tiny-skia stores premultiplied RGBA. Convert in place to straight BGRA.
     let mut bgra = pixmap.take();
-    for pixel in bgra.chunks_exact_mut(4) {
+    for pixel in bgra.as_chunks_mut::<4>().0 {
         let [r, g, b, a] = [pixel[0], pixel[1], pixel[2], pixel[3]];
         if a == 0 || a == 255 {
             pixel.swap(0, 2);
