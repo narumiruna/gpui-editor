@@ -1,7 +1,7 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.10"
 
 [[package]]
-name = "rust-cli-template"
+name = "gpui-editor"
 source = { editable = "." }

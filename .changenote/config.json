@@ -9,7 +9,7 @@
     "uv.lock"
   ],
   "packages": {
-    "rust-cli-template": {
+    "gpui-editor": {
       "path": ".",
       "version_file": "Cargo.toml",
       "tag_prefix": "v"

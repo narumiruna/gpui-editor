@@ -13,8 +13,15 @@ concurrency:
 
 jobs:
   rust:
-    name: ci
-    runs-on: ubuntu-latest
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: ci
+          - os: macos-latest
+            name: macOS checks
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
