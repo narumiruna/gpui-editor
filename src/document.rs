@@ -62,6 +62,7 @@ impl Document {
         let mut sections: Vec<Section> = Vec::new();
         let mut open_links: Vec<usize> = Vec::new();
         let mut heading: Option<Section> = None;
+        let mut fenced_body = None;
         let options = Options::ENABLE_MATH
             | Options::ENABLE_TABLES
             | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
@@ -110,18 +111,24 @@ impl Document {
                 Event::InlineMath(_) => Some(delimited(K::InlineMath, source, 1)),
                 Event::DisplayMath(_) => Some(delimited(K::DisplayMath, source, 2)),
                 Event::Start(Tag::MetadataBlock(_)) => {
-                    Some(block(K::FrontMatter, source, text, "---"))
+                    fenced_body = Some((K::FrontMatter, source.start));
+                    None
                 }
                 Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info)))
                     if info.split_whitespace().next() == Some("mermaid") =>
                 {
-                    let fence = if text.trim_start().starts_with('~') {
-                        "~~~"
-                    } else {
-                        "```"
-                    };
-                    Some(block(K::Mermaid, source, text, fence))
+                    fenced_body = Some((K::Mermaid, source.start));
+                    None
                 }
+                Event::Text(_) => {
+                    if let Some((_, end)) = &mut fenced_body {
+                        *end = (*end).max(source.end);
+                    }
+                    None
+                }
+                Event::End(TagEnd::CodeBlock | TagEnd::MetadataBlock(_)) => fenced_body
+                    .take()
+                    .map(|(kind, body_end)| block(kind, source, text, body_end)),
                 Event::Start(Tag::Link {
                     link_type: LinkType::Inline,
                     dest_url,
@@ -184,7 +191,7 @@ impl Document {
     }
 
     pub fn replace(&mut self, range: Range<usize>, text: &str) -> Result<(), EditError> {
-        self.replacement(range, text).map(|_| ())
+        self.replacement(range, text, true).map(|_| ())
     }
 
     // Return the actual old range and inserted byte count for editor offsets.
@@ -193,6 +200,7 @@ impl Document {
         &mut self,
         mut range: Range<usize>,
         text: &str,
+        expand_hidden_delimiters: bool,
     ) -> Result<(Range<usize>, usize), EditError> {
         use SectionKind as K;
 
@@ -200,7 +208,7 @@ impl Document {
             return Err(EditError::InvalidRange);
         }
         let sections = self.sections();
-        if text.is_empty() && !range.is_empty() {
+        if expand_hidden_delimiters && text.is_empty() && !range.is_empty() {
             // Sections are sorted outermost first. Remove inner spans first so
             // an enclosing span also goes away if it becomes empty.
             for section in sections.iter().rev() {
@@ -252,18 +260,18 @@ fn delimited(kind: SectionKind, source: Range<usize>, delimiter_len: usize) -> S
     Section::new(kind, source, content)
 }
 
-fn block(kind: SectionKind, source: Range<usize>, text: &str, delimiter: &str) -> Section {
+fn block(kind: SectionKind, source: Range<usize>, text: &str, body_end: usize) -> Section {
     let start = text.find('\n').map_or(text.len(), |index| index + 1);
-    let without_final_newline = text.trim_end_matches(['\r', '\n']);
-    let end = without_final_newline
+    // Parser text events cover the body but not a valid closing fence.
+    // A fence-like line included in the text stays part of the body.
+    let end = text
+        .trim_end_matches(['\r', '\n'])
         .rfind('\n')
-        .and_then(|index| {
-            without_final_newline[index + 1..]
-                .trim_start()
-                .starts_with(delimiter)
-                .then(|| index - usize::from(index > 0 && text.as_bytes()[index - 1] == b'\r'))
+        .filter(|&index| source.start + index + 1 >= body_end)
+        .filter(|&index| !text[index + 1..].trim().is_empty())
+        .map_or(text.len(), |index| {
+            index - usize::from(index > 0 && text.as_bytes()[index - 1] == b'\r')
         })
-        .unwrap_or(text.len())
         .max(start);
     Section::new(
         kind,

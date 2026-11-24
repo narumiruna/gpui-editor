@@ -24,6 +24,37 @@ fn sidebar_lists_only_top_level_markdown_and_can_open_nested_documents() {
     assert_eq!(nested.source(), "# 中文\n");
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn a_replaced_workspace_requires_reopening_before_listing_or_opening_documents() {
+    let folder = tempdir().unwrap();
+    let root = folder.path().join("workspace");
+    let path = Path::new("document.md");
+    fs::create_dir(&root).unwrap();
+    fs::write(root.join(path), "original").unwrap();
+    let workspace = Workspace::open(&root).unwrap();
+
+    fs::rename(&root, folder.path().join("moved")).unwrap();
+    fs::create_dir(&root).unwrap();
+    fs::write(root.join(path), "replacement").unwrap();
+    for error in [
+        workspace.markdown_files().unwrap_err(),
+        workspace.read_document(path).unwrap_err(),
+    ] {
+        assert!(error.to_string().contains("workspace folder has moved"));
+    }
+
+    let reopened = Workspace::open(&root).unwrap();
+    assert_eq!(
+        reopened.markdown_files().unwrap(),
+        [reopened.root().join(path)]
+    );
+    assert_eq!(
+        reopened.read_document(path).unwrap().source(),
+        "replacement"
+    );
+}
+
 #[test]
 fn missing_non_utf8_and_non_markdown_documents_fail_to_open() {
     let folder = tempdir().unwrap();
@@ -46,9 +77,12 @@ fn missing_non_utf8_and_non_markdown_documents_fail_to_open() {
 fn create_refreshes_listing_and_repeated_saves_keep_a_valid_snapshot() {
     let folder = tempdir().unwrap();
     let workspace = Workspace::open(folder.path()).unwrap();
+    let draft = "# Draft\n\n|  中文  |\n";
     let mut file =
-        DocumentFile::create(Some(&workspace), Path::new("notes"), "draft\n".into()).unwrap();
+        DocumentFile::create(Some(&workspace), Path::new("notes"), draft.into()).unwrap();
     assert_eq!(file.path(), workspace.root().join("notes.md"));
+    assert_eq!(file.source(), draft);
+    assert_eq!(fs::read(file.path()).unwrap(), draft.as_bytes());
     assert_eq!(
         workspace.markdown_files().unwrap(),
         [file.path().to_owned()]
@@ -179,33 +213,32 @@ fn read_only_file_is_not_replaced() {
     assert_eq!(fs::read_to_string(&path).unwrap(), "old");
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
-fn a_replaced_destination_folder_is_not_used_for_an_open_document() {
+fn saves_reject_a_replaced_parent_for_opened_and_created_documents() {
     let folder = tempdir().unwrap();
     let workspace = Workspace::open(folder.path()).unwrap();
     let nested = workspace.root().join("nested");
     let moved = workspace.root().join("moved");
     fs::create_dir(&nested).unwrap();
-    fs::write(nested.join("document.md"), "original").unwrap();
-    let mut file = workspace
-        .read_document(&nested.join("document.md"))
-        .unwrap();
+    fs::write(nested.join("opened.md"), "original").unwrap();
+    let opened = workspace.read_document(&nested.join("opened.md")).unwrap();
+    let created =
+        DocumentFile::create(Some(&workspace), &nested.join("created.md"), "new".into()).unwrap();
 
     fs::rename(&nested, &moved).unwrap();
     fs::create_dir(&nested).unwrap();
-    fs::write(nested.join("document.md"), "different").unwrap();
-    assert!(file.save("draft").is_err());
-    assert_eq!(file.source(), "original");
-    assert_eq!(
-        fs::read_to_string(moved.join("document.md")).unwrap(),
-        "original"
-    );
-    assert_eq!(
-        fs::read_to_string(nested.join("document.md")).unwrap(),
-        "different"
-    );
-    assert_eq!(fs::read_dir(&nested).unwrap().count(), 1);
+    for (mut file, original) in [(opened, "original"), (created, "new")] {
+        // Names can match even though this is a different folder.
+        fs::write(file.path(), "replacement").unwrap();
+        let error = file.save("draft").unwrap_err();
+        assert!(error.to_string().contains("folder has moved"), "{error}");
+        assert_eq!(file.source(), original);
+        let name = file.path().file_name().unwrap();
+        assert_eq!(fs::read_to_string(moved.join(name)).unwrap(), original);
+        assert_eq!(fs::read_to_string(file.path()).unwrap(), "replacement");
+    }
+    assert_eq!(fs::read_dir(&nested).unwrap().count(), 2);
 }
 
 #[cfg(target_os = "macos")]

@@ -1,6 +1,13 @@
-use gpui_editor::document::{Document, EditError, SectionKind};
+use gpui_editor::document::{Document, EditError, Section, SectionKind};
 
 const ORIGINAL: &str = include_str!("fixtures/sample.md");
+
+fn find_section(doc: &Document, kind: SectionKind) -> Section {
+    doc.sections()
+        .into_iter()
+        .find(|section| section.kind == kind)
+        .unwrap()
+}
 
 #[test]
 fn updates_only_the_heading_and_formula() {
@@ -98,25 +105,58 @@ fn inline_labels_end_before_the_destination() {
 
 #[test]
 fn editing_a_fenced_body_preserves_its_closing_line_and_crlf() {
-    let source = "---\r\ntitle: Old\r\n---\r\n\r\n```mermaid\r\nflowchart LR\r\nA --> B\r\n```\r\n\r\n正文\r\n";
-    let mut doc = Document::new(source.into());
-    for (kind, body) in [
-        (SectionKind::FrontMatter, "title: New"),
-        (SectionKind::Mermaid, "flowchart LR\r\nC --> D"),
-    ] {
-        let section = doc
-            .sections()
-            .into_iter()
-            .find(|section| section.kind == kind)
-            .unwrap();
-        doc.replace(section.content, body).unwrap();
+    for closing in ["---", "..."] {
+        let source = format!(
+            "---\r\ntitle: Old\r\n{closing}\r\n\r\n```mermaid\r\nflowchart LR\r\nA --> B\r\n```\r\n\r\n正文\r\n"
+        );
+        let mut doc = Document::new(source.clone());
+        for (kind, body) in [
+            (SectionKind::FrontMatter, "title: New"),
+            (SectionKind::Mermaid, "flowchart LR\r\nC --> D"),
+        ] {
+            let section = find_section(&doc, kind);
+            doc.replace(section.content, body).unwrap();
+        }
+        assert_eq!(
+            doc.source(),
+            source
+                .replace("title: Old", "title: New")
+                .replace("A --> B", "C --> D")
+        );
     }
-    assert_eq!(
-        doc.source(),
-        source
-            .replace("title: Old", "title: New")
-            .replace("A --> B", "C --> D")
-    );
+}
+
+#[test]
+fn mermaid_body_includes_a_final_line_that_is_not_a_closing_fence() {
+    for (opening, line) in [
+        ("````", "```"),
+        ("~~~~", "~~~"),
+        ("````", "~~~~"),
+        ("````", "````not a fence"),
+        ("````", "    ````"),
+    ] {
+        for ending in ["", "\n", "\r\n"] {
+            let body = format!("{line}{ending}");
+            let source = format!("{opening}mermaid\n{body}");
+            let mut doc = Document::new(source);
+            let section = find_section(&doc, SectionKind::Mermaid);
+            assert_eq!(&doc.source()[section.content.clone()], body);
+            doc.replace(section.content, "flowchart LR").unwrap();
+            assert_eq!(doc.source(), format!("{opening}mermaid\nflowchart LR"));
+        }
+    }
+}
+
+#[test]
+fn mermaid_closing_fence_can_be_longer_than_the_opener() {
+    for (opening, closing) in [("````", "`````  "), ("~~~~", "~~~~~  ")] {
+        let source = format!("{opening}mermaid\r\nflowchart LR\r\n{closing}\r\n\r\n正文");
+        let mut doc = Document::new(source.clone());
+        let section = find_section(&doc, SectionKind::Mermaid);
+        assert_eq!(&doc.source()[section.content.clone()], "flowchart LR");
+        doc.replace(section.content, "flowchart TB").unwrap();
+        assert_eq!(doc.source(), source.replace("flowchart LR", "flowchart TB"));
+    }
 }
 
 #[test]
@@ -125,12 +165,7 @@ fn inserts_into_empty_mermaid_blocks_without_moving_the_closing_fence() {
         for empty_line in ["", ending] {
             let source = format!("```mermaid{ending}{empty_line}```{ending}{ending}正文");
             let mut doc = Document::new(source);
-            let mermaid = |doc: &Document| {
-                doc.sections()
-                    .into_iter()
-                    .find(|section| section.kind == SectionKind::Mermaid)
-                    .unwrap()
-            };
+            let mermaid = |doc: &Document| find_section(doc, SectionKind::Mermaid);
             let section = mermaid(&doc);
             assert!(section.content.is_empty());
             let body = format!("flowchart LR{ending}A --> B");

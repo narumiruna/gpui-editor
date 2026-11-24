@@ -1,4 +1,8 @@
-use std::{ops::Range, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Range,
+    sync::Arc,
+};
 
 use gpui::{
     Bounds, Context, FontStyle, FontWeight, Pixels, Point, RenderImage, ShapedLine, SharedString,
@@ -11,6 +15,7 @@ use crate::{
     document::{Section, SectionKind},
     media::{Target, image_target, load_image},
     rendering::{Raster, render_math, render_mermaid},
+    workspace::Workspace,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -416,8 +421,7 @@ impl Editor {
             .filter(|section| section.kind == SectionKind::Image)
             .filter_map(|section| section.destination.as_deref())
             .collect();
-        self.images
-            .retain(|destination, _| image_destinations.contains(destination.as_str()));
+        retain_images(&mut self.images, &image_destinations);
         self.has_blocked_images = false;
         let mut skip_to = 0;
         for section in &sections {
@@ -471,7 +475,7 @@ impl Editor {
                         match image_target(
                             &destination,
                             self.path.as_deref(),
-                            self.workspace.as_deref(),
+                            self.workspace.as_ref().map(Workspace::root),
                         ) {
                             Err(error) => {
                                 self.images
@@ -488,9 +492,10 @@ impl Editor {
                                 let request = self.next_image_request;
                                 self.images
                                     .insert(destination.clone(), ImageEntry::Loading(request));
-                                let task = cx
-                                    .background_executor()
-                                    .spawn(async move { load_image(&target) });
+                                let workspace = self.workspace.clone();
+                                let task = cx.background_executor().spawn(async move {
+                                    load_preview_image(&target, workspace.as_ref())
+                                });
                                 cx.spawn(async move |editor, cx| {
                                     let result = task.await.and_then(|raster| {
                                         Graphic::new(raster, 1.)
@@ -539,18 +544,41 @@ impl Editor {
                 _ => None,
             })
             .sum();
-        let result = result.and_then(|graphic| {
-            (bytes + graphic.bytes <= 64 * 1024 * 1024)
-                .then_some(graphic)
-                .ok_or_else(|| "Image memory limit reached".into())
-        });
-        self.images.insert(destination, ImageEntry::Ready(result));
+        let entry = match &result {
+            Ok(graphic) if bytes + graphic.bytes > 64 * 1024 * 1024 => ImageEntry::BudgetExceeded,
+            _ => ImageEntry::Ready(result),
+        };
+        self.images.insert(destination, entry);
+    }
+}
+
+fn load_preview_image(target: &Target, workspace: Option<&Workspace>) -> Result<Raster, String> {
+    if let Some(workspace) = workspace.filter(|_| matches!(target, Target::Local(_))) {
+        workspace.check_root().map_err(|error| error.to_string())?;
+        let raster = load_image(target)?;
+        workspace.check_root().map_err(|error| error.to_string())?;
+        Ok(raster)
+    } else {
+        load_image(target)
+    }
+}
+
+fn retain_images(images: &mut HashMap<String, ImageEntry>, destinations: &HashSet<&str>) {
+    let mut freed_budget = false;
+    images.retain(|destination, entry| {
+        let keep = destinations.contains(destination.as_str());
+        freed_budget |= !keep && matches!(entry, ImageEntry::Ready(Ok(_)));
+        keep
+    });
+    if freed_budget {
+        images.retain(|_, entry| !matches!(entry, ImageEntry::BudgetExceeded));
     }
 }
 
 fn image_preview(entry: &ImageEntry) -> Result<Graphic, &'static str> {
     match entry {
         ImageEntry::Loading(_) => Err("Loading image"),
+        ImageEntry::BudgetExceeded => Err("Image memory limit reached"),
         ImageEntry::Ready(result) => result
             .as_ref()
             .cloned()
@@ -605,7 +633,14 @@ impl Projection<'_> {
                 ..face
             };
             if let Some(active) = self.active.filter(|active| active.source == section.source) {
-                builder.add_text(self.source, active.content.clone(), face);
+                if active.content.is_empty() {
+                    if builder.row.items.is_empty() {
+                        builder.row.start = active.content.start;
+                    }
+                    builder.row.end = active.content.end;
+                } else {
+                    builder.add_text(self.source, active.content.clone(), face);
+                }
                 self.finish_line(builder, active.content.end, section);
             } else {
                 match section.kind {
@@ -748,4 +783,83 @@ fn front_matter(text: &str) -> Option<String> {
         }
     }
     Some(line)
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::TestAppContext;
+
+    use super::*;
+
+    #[test]
+    fn local_preview_checks_the_selected_workspace_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("workspace");
+        std::fs::create_dir(&root).unwrap();
+        let workspace = Workspace::open(&root).unwrap();
+        let target = Target::Local(workspace.root().join("picture.png"));
+        std::fs::rename(&root, directory.path().join("moved")).unwrap();
+        std::fs::create_dir(&root).unwrap();
+        let error = load_preview_image(&target, Some(&workspace)).unwrap_err();
+        assert!(error.contains("workspace folder has moved"));
+    }
+
+    #[gpui::test]
+    fn image_budget_rejections_retry_only_after_freeing_space(cx: &mut TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(String::new(), window, cx));
+        cx.update(|_, cx| {
+            editor.update(cx, |e, _| {
+                let graphic = |mib: usize| {
+                    let mut graphic = Graphic::new(
+                        Raster {
+                            width: 1,
+                            height: 1,
+                            bgra: vec![0; 4],
+                        },
+                        1.,
+                    )
+                    .unwrap();
+                    graphic.bytes = mib * 1024 * 1024;
+                    graphic
+                };
+                e.images
+                    .insert("large.png".into(), ImageEntry::Ready(Ok(graphic(63))));
+                e.images.insert(
+                    "broken.png".into(),
+                    ImageEntry::Ready(Err("invalid image".into())),
+                );
+                e.images.insert("other.png".into(), ImageEntry::Loading(1));
+                e.image_requests = 1;
+                e.complete_image_request("other.png".into(), 1, Ok(graphic(3)));
+                assert!(matches!(
+                    e.images.get("other.png"),
+                    Some(ImageEntry::BudgetExceeded)
+                ));
+
+                retain_images(
+                    &mut e.images,
+                    &HashSet::from(["large.png", "other.png", "broken.png"]),
+                );
+                assert!(matches!(
+                    e.images.get("other.png"),
+                    Some(ImageEntry::BudgetExceeded)
+                ));
+                retain_images(&mut e.images, &HashSet::from(["other.png", "broken.png"]));
+                assert!(!e.images.contains_key("other.png"));
+                assert!(matches!(
+                    e.images.get("broken.png"),
+                    Some(ImageEntry::Ready(Err(_)))
+                ));
+
+                e.images.insert("other.png".into(), ImageEntry::Loading(2));
+                e.image_requests = 1;
+                e.complete_image_request("other.png".into(), 2, Ok(graphic(3)));
+                assert!(matches!(
+                    e.images.get("other.png"),
+                    Some(ImageEntry::Ready(Ok(_)))
+                ));
+                assert_eq!(e.image_requests, 0);
+            })
+        });
+    }
 }

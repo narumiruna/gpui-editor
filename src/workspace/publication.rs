@@ -18,12 +18,18 @@ use super::{DocumentFile, Stamp, Workspace, external_change};
 
 const VERSION: &CStr = c"version";
 
-pub(super) fn create(workspace: &Workspace, path: &Path, source: &str) -> io::Result<Stamp> {
+pub(super) fn create(
+    workspace: &Workspace,
+    path: &Path,
+    source: &str,
+) -> io::Result<(Stamp, (u64, u64))> {
     let (parent, name, directory) = destination(workspace, path)?;
+    let parent_identity = identity(&directory.0.metadata()?);
     let stage = Stage::new(&directory, parent)?;
     let mut draft = stage.new_file()?;
     draft.write_all(source.as_bytes())?;
     draft.sync_all()?;
+    let draft_stamp = Stamp::read(&draft.metadata()?)?;
     check_parent(workspace, parent, &directory)?;
     // SAFETY: Both directory descriptors and basename pointers are valid. linkat without
     // flags publishes the complete file and fails if any entry already has the name.
@@ -36,9 +42,19 @@ pub(super) fn create(workspace: &Workspace, path: &Path, source: &str) -> io::Re
             0,
         )
     })?;
-    // Removing the staging link can update ctime on the file we just published.
+    // Removing the staging link can update ctime. Verify and take the final stamp afterward.
     drop(stage);
-    Stamp::read(&draft.metadata()?)
+    let verified = (|| {
+        let stamp = check_published(&directory, &name, &draft_stamp, source)?;
+        check_parent(workspace, parent, &directory)?;
+        Ok((stamp, parent_identity))
+    })();
+    verified.map_err(|error: io::Error| {
+        io::Error::other(format!(
+            "could not verify the new file at {} ({error}); the draft may be in the original destination folder if it moved",
+            path.display()
+        ))
+    })
 }
 
 pub(super) fn save(
@@ -48,6 +64,9 @@ pub(super) fn save(
 ) -> io::Result<Stamp> {
     let workspace = &document.directory;
     let (parent, name, directory) = destination(workspace, &document.path)?;
+    if identity(&directory.0.metadata()?) != document.parent_identity {
+        return Err(folder_moved());
+    }
     let mut original = directory.open_file(&name, libc::O_RDWR)?;
     let metadata = check_original(document, &original)?;
     let acl = Acl::read(&original)?;
@@ -99,11 +118,7 @@ pub(super) fn save(
         {
             return Err(external_change());
         }
-        let published = directory.open_file(&name, libc::O_RDONLY)?;
-        let stamp = Stamp::read(&published.metadata()?)?;
-        if !same_after_rename(&stamp, &draft_stamp) {
-            return Err(external_change());
-        }
+        let stamp = check_published(&directory, &name, &draft_stamp, source)?;
         check_parent(workspace, parent, &directory)?;
         Ok(stamp)
     })();
@@ -136,6 +151,20 @@ fn check_original(document: &DocumentFile, file: &File) -> io::Result<Metadata> 
         return Err(external_change());
     }
     Ok(metadata)
+}
+
+fn check_published(directory: &Dir, name: &CStr, draft: &Stamp, source: &str) -> io::Result<Stamp> {
+    let mut published = directory.open_file(name, libc::O_RDONLY)?;
+    let stamp = Stamp::read(&published.metadata()?)?;
+    if !same_after_rename(&stamp, draft) || !same_bytes(&mut published, source)? {
+        return Err(external_change());
+    }
+    // Reopen the named entry to confirm its stamp still matches after reading the bytes.
+    let current = directory.open_file(name, libc::O_RDONLY)?;
+    if stamp != Stamp::read(&current.metadata()?)? {
+        return Err(external_change());
+    }
+    Ok(stamp)
 }
 
 fn same_bytes(file: &mut File, expected: &str) -> io::Result<bool> {
@@ -182,7 +211,7 @@ fn check_parent(workspace: &Workspace, parent: &Path, held: &Dir) -> io::Result<
     Ok(())
 }
 
-fn folder_moved() -> io::Error {
+pub(super) fn folder_moved() -> io::Error {
     io::Error::other("the workspace or destination folder has moved")
 }
 
@@ -272,7 +301,14 @@ impl<'a> Stage<'a> {
                 // SAFETY: parent fd is live and name is NUL-terminated.
                 status(unsafe { libc::mkdirat(parent.fd(), name.as_ptr(), 0o700) })?;
                 // Open for ACL access as well as relative operations.
-                let dir = Dir(parent.open(&name, libc::O_RDONLY | libc::O_DIRECTORY, 0)?);
+                let dir = match parent.open(&name, libc::O_RDONLY | libc::O_DIRECTORY, 0) {
+                    Ok(file) => Dir(file),
+                    Err(error) => {
+                        // Best effort: only remove an empty directory under the held parent.
+                        let _ = parent.unlink(&name, libc::AT_REMOVEDIR);
+                        return Err(error);
+                    }
+                };
                 let meta = dir.0.metadata()?;
                 // SAFETY: geteuid takes no arguments and has no side effects.
                 if meta.uid() != unsafe { libc::geteuid() } || meta.mode() & 0o077 != 0 {

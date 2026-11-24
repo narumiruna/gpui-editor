@@ -46,6 +46,7 @@ impl Workspace {
                 files.push(path);
             }
         }
+        self.check_root()?;
         files.sort_unstable();
         Ok(files)
     }
@@ -53,22 +54,37 @@ impl Workspace {
     /// Open a Markdown file by absolute path or by a path relative to the workspace root.
     pub fn read_document(&self, path: &Path) -> io::Result<DocumentFile> {
         let path = self.resolve_document(path)?;
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let parent = path.parent().expect("an absolute document has a parent");
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let parent_identity = publication::identity(&fs::metadata(parent)?);
         let metadata = file_metadata(&path)?;
         let stamp = Stamp::read(&metadata)?;
         let source = fs::read_to_string(&path)?;
         if self.resolve_document(&path)? != path || Stamp::read(&file_metadata(&path)?)? != stamp {
             return Err(external_change());
         }
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if publication::identity(&fs::metadata(parent)?) != parent_identity {
+            return Err(publication::folder_moved());
+        }
         Ok(DocumentFile {
             directory: self.clone(),
             path,
             source,
             stamp,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            parent_identity,
         })
     }
 
-    fn check_root(&self) -> io::Result<()> {
-        if self.root.canonicalize()? != self.root || !fs::metadata(&self.root)?.is_dir() {
+    pub(crate) fn check_root(&self) -> io::Result<()> {
+        let canonical = self.root.canonicalize()?;
+        let metadata = fs::metadata(&self.root)?;
+        let same_directory = canonical == self.root && metadata.is_dir();
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let same_directory = same_directory && publication::identity(&metadata) == self.identity;
+        if !same_directory {
             return Err(io::Error::other("the workspace folder has moved"));
         }
         Ok(())
@@ -101,6 +117,8 @@ pub struct DocumentFile {
     path: PathBuf,
     source: String,
     stamp: Stamp,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    parent_identity: (u64, u64),
 }
 
 impl DocumentFile {
@@ -113,6 +131,7 @@ impl DocumentFile {
     }
 
     /// Write a new file without replacing an existing entry, even if it appears during Save.
+    /// If publication cannot be verified, the draft may remain in the original folder.
     /// If no workspace is selected, scope subsequent saves to the chosen file's parent folder.
     pub fn create(workspace: Option<&Workspace>, path: &Path, source: String) -> io::Result<Self> {
         let mut path = path.to_owned();
@@ -138,7 +157,7 @@ impl DocumentFile {
         };
         let path = parent.join(name);
         #[cfg(any(target_os = "macos", target_os = "linux"))]
-        let stamp = publication::create(&directory, &path, &source)?;
+        let (stamp, parent_identity) = publication::create(&directory, &path, &source)?;
         #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         let stamp = unsupported_publication(&directory, &path, &source)?;
         Ok(Self {
@@ -146,10 +165,13 @@ impl DocumentFile {
             path,
             source,
             stamp,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            parent_identity,
         })
     }
 
     /// Sync the draft before exchanging it with the file on disk (macOS and Linux).
+    /// Check the original parent folder and verify the published bytes before updating the snapshot.
     /// On a late conflict the draft may be at the document path, but the displaced version
     /// is kept for recovery and the saved snapshot stays unchanged.
     pub fn save(&mut self, source: &str) -> io::Result<()> {

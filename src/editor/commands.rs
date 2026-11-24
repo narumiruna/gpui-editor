@@ -1,7 +1,7 @@
 use gpui::{Context, Window};
 
 use super::Editor;
-use crate::document::{Section, SectionKind};
+use crate::document::{Document, Section, SectionKind};
 
 #[derive(Clone, Copy)]
 pub(super) enum Command {
@@ -38,6 +38,7 @@ impl Editor {
             self.cursor
         };
         self.active = Some(section);
+        self.preferred_x = None;
         self.marked = None;
         self.message = None;
         cx.notify();
@@ -130,7 +131,22 @@ impl Editor {
                     &self.source()[selection.clone()]
                 };
                 let probe = selection.start;
-                (selection, format!("${body}$"), probe)
+                let snippet = format!("${body}$");
+                let mut source = self.source().to_owned();
+                source.replace_range(selection.clone(), &snippet);
+                let wrapped = probe..probe + snippet.len();
+                if !Document::new(source)
+                    .sections()
+                    .iter()
+                    .any(|section| section.kind == K::InlineMath && section.source == wrapped)
+                {
+                    self.message = Some(
+                        "Cannot wrap this text as inline math here. Select text within one paragraph or use Display math."
+                            .into(),
+                    );
+                    return;
+                }
+                (selection, snippet, probe)
             }
             K::Image | K::Link => {
                 let (prefix, placeholder, destination) = if kind == K::Image {
@@ -281,9 +297,71 @@ mod tests {
     use super::*;
 
     #[gpui::test]
+    fn activation_starts_vertical_movement_from_the_new_caret_column(cx: &mut TestAppContext) {
+        let source = "---\ntitle: Document\nwidth: 120\n---";
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source.into(), window, cx));
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.preferred_x = Some(gpui::px(1_000.));
+                editor.command(Command::Add(SectionKind::FrontMatter), window, cx);
+                assert_eq!(editor.cursor, source.find("title").unwrap());
+                editor.layout = Some(editor.shape(window, cx));
+                editor.move_vertical(true, false, cx);
+                assert_eq!(editor.cursor, source.find("width").unwrap());
+                assert_eq!(editor.preferred_x, Some(gpui::px(0.)));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn deleting_a_selection_in_link_source_preserves_visible_delimiters(cx: &mut TestAppContext) {
+        let source = "[**x**](https://example.com)";
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source.into(), window, cx));
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.command(Command::EditLink, window, cx);
+                assert_eq!(editor.active.as_ref().unwrap().kind, SectionKind::Link);
+                editor.anchor = "[**".len();
+                editor.cursor = "[**x".len();
+                editor.remove(false, cx);
+                assert_eq!(editor.source(), "[****](https://example.com)");
+                assert!(editor.active.is_some());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn rejects_unsupported_inline_math_selections_without_an_edit(cx: &mut TestAppContext) {
+        for (prefix, body) in [
+            ("Before ", "a\n\nb"),
+            ("Before ", "a\r\n \t\r\nb"),
+            ("Before ", "a$b"),
+            (r"Before \", "a+b"),
+        ] {
+            let source = format!("{prefix}{body} after");
+            let (editor, cx) =
+                cx.add_window_view(|window, cx| Editor::new(source.clone(), window, cx));
+            cx.update(|window, cx| {
+                editor.update(cx, |editor, cx| {
+                    let selection = prefix.len()..prefix.len() + body.len();
+                    editor.anchor = selection.start;
+                    editor.cursor = selection.end;
+                    editor.command(Command::Add(SectionKind::InlineMath), window, cx);
+                    assert_eq!(editor.source(), source);
+                    assert_eq!(editor.selection(), selection);
+                    assert!(editor.active.is_none());
+                    assert!(editor.undo.is_empty());
+                    assert!(editor.message.as_deref().unwrap().contains("inline math"));
+                });
+            });
+        }
+    }
+
+    #[gpui::test]
     fn inserts_inline_math_and_images_from_the_selection(cx: &mut TestAppContext) {
         for (kind, selected, expected) in [
             (SectionKind::InlineMath, "a+b", "$a+b$"),
+            (SectionKind::InlineMath, "a\nb", "$a\nb$"),
             (
                 SectionKind::Image,
                 r"圖[例]\]",

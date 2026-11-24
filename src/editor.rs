@@ -2,7 +2,10 @@
 
 use std::{collections::HashMap, ops::Range, path::PathBuf};
 
-use crate::document::{Document, Section, SectionKind};
+use crate::{
+    document::{Document, Section, SectionKind},
+    workspace::Workspace,
+};
 use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, ElementInputHandler, EntityInputHandler,
     EventEmitter, FocusHandle, Focusable, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
@@ -83,7 +86,7 @@ pub struct Editor {
     allow_remote_images: bool,
     has_blocked_images: bool,
     path: Option<PathBuf>,
-    workspace: Option<PathBuf>,
+    workspace: Option<Workspace>,
     hover: Option<String>,
     message: Option<String>,
     undo: Vec<Snapshot>,
@@ -93,6 +96,7 @@ pub struct Editor {
 enum ImageEntry {
     Loading(u64),
     Ready(Result<Graphic, String>),
+    BudgetExceeded,
 }
 
 #[derive(Clone)]
@@ -144,18 +148,22 @@ impl Editor {
         self.document.source()
     }
 
-    pub fn set_path(&mut self, path: Option<PathBuf>, workspace: Option<PathBuf>) {
+    pub fn set_path(&mut self, path: Option<PathBuf>, workspace: Option<Workspace>) {
         self.path = path;
         self.workspace = workspace;
         self.images.clear();
         self.allow_remote_images = false;
     }
 
+    pub(crate) fn is_composing(&self) -> bool {
+        self.marked.is_some()
+    }
+
     pub(crate) fn set_input_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        debug_assert!(enabled || !self.is_composing());
         self.input_enabled = enabled;
         if !enabled {
             self.selecting = false;
-            self.marked = None;
         }
         cx.notify();
     }
@@ -200,7 +208,10 @@ impl Editor {
             return false;
         }
         let previous = self.marked.is_none().then(|| self.snapshot());
-        let Ok((range, inserted)) = self.document.replacement(range, text) else {
+        let Ok((range, inserted)) = self
+            .document
+            .replacement(range, text, self.active.is_none())
+        else {
             self.message = Some("Cannot edit this Markdown range".into());
             cx.notify();
             return false;
@@ -284,29 +295,31 @@ impl Editor {
         if selection.is_empty() {
             if let Some(layout) = &self.layout {
                 let mut at = self.cursor;
-                let inline: Vec<_> = self
-                    .document
-                    .sections()
-                    .into_iter()
-                    .filter(|section| {
-                        matches!(section.kind, SectionKind::Strong | SectionKind::Emphasis)
-                    })
-                    .collect();
-                // Move across hidden delimiters before choosing a visible character to delete.
-                while let Some(next) = inline.iter().find_map(|section| {
-                    if right && at == section.source.start {
-                        Some(section.content.start)
-                    } else if right && at == section.content.end {
-                        Some(section.source.end)
-                    } else if !right && at == section.source.end {
-                        Some(section.content.end)
-                    } else if !right && at == section.content.start {
-                        Some(section.source.start)
-                    } else {
-                        None
+                if self.active.is_none() {
+                    let inline: Vec<_> = self
+                        .document
+                        .sections()
+                        .into_iter()
+                        .filter(|section| {
+                            matches!(section.kind, SectionKind::Strong | SectionKind::Emphasis)
+                        })
+                        .collect();
+                    // Skip hidden delimiters in the rendered view, not in source edit mode.
+                    while let Some(next) = inline.iter().find_map(|section| {
+                        if right && at == section.source.start {
+                            Some(section.content.start)
+                        } else if right && at == section.content.end {
+                            Some(section.source.end)
+                        } else if !right && at == section.source.end {
+                            Some(section.content.end)
+                        } else if !right && at == section.content.start {
+                            Some(section.source.start)
+                        } else {
+                            None
+                        }
+                    }) {
+                        at = next;
                     }
-                }) {
-                    at = next;
                 }
                 let other = layout.step(at, right);
                 selection = at.min(other)..at.max(other);
@@ -368,7 +381,7 @@ impl Editor {
         crate::media::link_target(
             section.destination.as_deref().unwrap_or_default(),
             self.path.as_deref(),
-            self.workspace.as_deref(),
+            self.workspace.as_ref().map(Workspace::root),
         )
     }
 
@@ -874,6 +887,50 @@ mod tests {
                 assert_eq!(e.source(), "");
                 assert_eq!(e.cursor, 0);
             })
+        });
+    }
+
+    #[gpui::test]
+    fn backspace_in_source_mode_deletes_a_visible_marker(cx: &mut TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            Editor::new("[**xy**](https://example.com)".into(), window, cx)
+        });
+        cx.update(|window, cx| {
+            editor.update(cx, |e, cx| {
+                window.focus(&e.focus);
+                let link = e
+                    .document
+                    .sections()
+                    .into_iter()
+                    .find(|s| s.kind == SectionKind::Link);
+                e.activate(link.unwrap(), false, cx);
+                e.move_to(3, false, cx);
+            });
+            bind_keys(cx);
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("backspace");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "[*xy**](https://example.com)"));
+    }
+
+    #[gpui::test]
+    fn empty_mermaid_body_has_a_caret_stop(cx: &mut TestAppContext) {
+        let source = "```mermaid\n```";
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source.into(), window, cx));
+        cx.update(|window, cx| {
+            editor.update(cx, |e, cx| {
+                let block = e
+                    .document
+                    .sections()
+                    .into_iter()
+                    .find(|s| s.kind == SectionKind::Mermaid);
+                e.activate(block.unwrap(), false, cx);
+                let layout = e.shape(window, cx);
+                assert_eq!(e.cursor, "```mermaid\n".len());
+                assert!(layout.bounds_at(e.cursor).is_some());
+                assert_eq!(layout.index_at(point(px(40.), px(0.))), e.cursor);
+                assert_eq!(e.source(), source);
+            });
         });
     }
 

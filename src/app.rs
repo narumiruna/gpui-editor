@@ -187,10 +187,7 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let workspace = self
-            .workspace
-            .as_ref()
-            .map(|workspace| workspace.root().to_owned());
+        let workspace = self.workspace.clone();
         let editor = cx.new(|cx| {
             let mut editor = Editor::new(
                 file.as_ref()
@@ -236,6 +233,16 @@ impl Shell {
             {
                 *exit_queued = true;
             }
+            return;
+        }
+        if self
+            .current
+            .as_ref()
+            .is_some_and(|current| current.editor.read(cx).is_composing())
+        {
+            self.error =
+                Some("Finish or cancel the current input composition, then try again.".into());
+            cx.notify();
             return;
         }
         self.active = Some(match intent {
@@ -323,12 +330,7 @@ impl Shell {
         if let Some(current) = &mut self.current {
             if current.file.is_none() {
                 current.editor.update(cx, |editor, cx| {
-                    editor.set_path(
-                        Some(saved.file.path().to_owned()),
-                        self.workspace
-                            .as_ref()
-                            .map(|workspace| workspace.root().to_owned()),
-                    );
+                    editor.set_path(Some(saved.file.path().to_owned()), self.workspace.clone());
                     cx.notify();
                 });
             }
@@ -385,11 +387,7 @@ impl Operation {
                         })
                     })
                     .await?;
-                if self
-                    .workspace
-                    .as_ref()
-                    .is_some_and(|current| current.root() == workspace.root())
-                {
+                if self.workspace.as_ref() == Some(&workspace) {
                     // Opening the same folder refreshes the sidebar, not the document.
                     return Ok((None, Some(Change::RefreshFiles(files))));
                 }
@@ -831,6 +829,49 @@ mod tests {
             fs::read_to_string(&original_path).unwrap(),
             "external update"
         );
+    }
+
+    #[gpui::test]
+    fn save_and_close_wait_for_committed_ime_text(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = Workspace::open(directory.path()).unwrap();
+        let path = workspace.root().join("note.md");
+        fs::write(&path, "original").unwrap();
+        let file = workspace.read_document(&path).unwrap();
+        let (shell, cx) = cx.add_window_view(Shell::new);
+        let editor = cx.update(|window, cx| {
+            shell.update(cx, |shell, cx| {
+                shell.open_editor(Some(file), window, cx);
+                let editor = shell.current.as_ref().unwrap().editor.clone();
+                cx.focus_view(&editor, window);
+                editor.update(cx, |editor, cx| {
+                    editor.replace_and_mark_text_in_range(Some(0..8), "ㄓ", None, window, cx);
+                });
+                shell.start(Intent::Save, window, cx);
+                assert!(shell.active.is_none());
+                editor
+            })
+        });
+        assert!(!cx.simulate_close());
+        cx.run_until_parked();
+        assert!(!cx.has_pending_prompt());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "original");
+        cx.update(|window, cx| {
+            let shell = shell.read(cx);
+            assert!(shell.active.is_none());
+            assert!(shell.error.is_some());
+            editor.update(cx, |editor, cx| {
+                assert!(editor.is_composing());
+                editor.replace_text_in_range(None, "中文", window, cx);
+                assert_eq!(editor.source(), "中文");
+            });
+        });
+        assert!(!cx.simulate_close());
+        cx.run_until_parked();
+        cx.simulate_prompt_answer("Save");
+        cx.run_until_parked();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "中文");
+        cx.cx.read(|cx| assert!(cx.windows().is_empty()));
     }
 
     #[gpui::test]
