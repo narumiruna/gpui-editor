@@ -50,6 +50,9 @@ impl Editor {
         cx: &mut Context<Self>,
     ) {
         use SectionKind as K;
+        if !self.input_enabled {
+            return;
+        }
         window.focus(&self.focus);
         self.message = None;
         match command {
@@ -119,16 +122,25 @@ impl Editor {
                 };
                 (end..end, format!("\n\n{body}\n\n"), end + 2)
             }
-            K::InlineMath => (self.selection(), "$x^2$".into(), self.selection().start),
-            K::Image => (
-                self.selection(),
-                "![Image](image.png)".into(),
-                self.selection().start,
-            ),
-            K::Link => {
+            K::InlineMath => {
+                let selection = self.selection();
+                let body = if selection.is_empty() {
+                    "x^2"
+                } else {
+                    &self.source()[selection.clone()]
+                };
+                let probe = selection.start;
+                (selection, format!("${body}$"), probe)
+            }
+            K::Image | K::Link => {
+                let (prefix, placeholder, destination) = if kind == K::Image {
+                    ("!", "Image", "image.png")
+                } else {
+                    ("", "Link", "https://example.com")
+                };
                 let selection = self.selection();
                 let label = if selection.is_empty() {
-                    "Link"
+                    placeholder
                 } else {
                     &self.source()[selection.clone()]
                 };
@@ -138,7 +150,11 @@ impl Editor {
                     .replace('[', "\\[")
                     .replace(']', "\\]");
                 let probe = selection.start;
-                (selection, format!("[{label}](https://example.com)"), probe)
+                (
+                    selection,
+                    format!("{prefix}[{label}]({destination})"),
+                    probe,
+                )
             }
             _ => return,
         };
@@ -255,5 +271,40 @@ impl Editor {
             start = end;
         }
         self.replace(selection, &content, cx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::TestAppContext;
+
+    use super::*;
+
+    #[gpui::test]
+    fn inserts_inline_math_and_images_from_the_selection(cx: &mut TestAppContext) {
+        for (kind, selected, expected) in [
+            (SectionKind::InlineMath, "a+b", "$a+b$"),
+            (
+                SectionKind::Image,
+                r"圖[例]\]",
+                r"![圖\[例\]\\\]](image.png)",
+            ),
+        ] {
+            let (editor, cx) = cx.add_window_view(|window, cx| {
+                Editor::new(format!("Before {selected} after"), window, cx)
+            });
+            cx.update(|window, cx| {
+                editor.update(cx, |editor, cx| {
+                    editor.anchor = "Before ".len();
+                    editor.cursor = editor.anchor + selected.len();
+                    editor.command(Command::Add(kind), window, cx);
+                    assert_eq!(editor.source(), format!("Before {expected} after"));
+                    assert_eq!(
+                        editor.active.as_ref().map(|section| section.kind),
+                        Some(kind)
+                    );
+                });
+            });
+        }
     }
 }

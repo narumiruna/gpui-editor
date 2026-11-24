@@ -76,8 +76,12 @@ unsafe extern "C-unwind" fn should_terminate(
     });
     match app {
         Some(app) => {
-            // Return NSTerminateCancel now. The ordinary GPUI Quit action can
-            // show a dialog and issue a new, approved quit without reentrancy.
+            // Do not return NSTerminateLater here: AppKit waits in
+            // NSModalPanelRunLoopMode, and GPUI's main-queue work can stall if
+            // terminate: was itself called on the main queue. In particular,
+            // a prompt or a save could never deliver the reply. Cancel and
+            // use ordinary Quit instead. This protects edits but cannot
+            // continue the original logout or restart request.
             app.foreground_executor()
                 .spawn({
                     let app = app.clone();

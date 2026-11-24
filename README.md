@@ -18,8 +18,9 @@ The command takes no path. In the window, choose **Open Folder…**, then select
 
 - Use the toolbar icons to format a selection or insert an item. Hover over an icon to see its name. Click front matter, a diagram, or a formula to edit its source. Click outside the item to preview the change; this does not save the file.
 - For links, hover to see the full destination in the bottom bar. Click to open the web browser or follow an in-workspace `.md` link. To edit a link without opening it, place the caret at its edge and choose the **Edit link** icon.
-- Image previews support local or HTTPS PNG, JPEG, GIF, and WebP still images. Relative paths are based on the document's folder. HTTPS previews load directly from the stated host; redirects are not followed.
-- The editor supports a subset of Markdown. The Mermaid renderer supports flat flowcharts; unsupported blocks such as GFM tables are shown as read-only source. If a saved file changed outside the editor, saving reports a conflict instead of overwriting it.
+- Image previews support local or HTTPS PNG, JPEG, GIF, and WebP still images. Relative paths are based on the document's folder. To fetch HTTPS previews, choose **Load remote images for this document**. The remote host receives the image request; redirects are not followed.
+- The editor supports a subset of Markdown. The Mermaid renderer supports flat flowcharts; unsupported blocks such as GFM tables are shown as read-only source.
+- The editor stops a save if it detects an earlier external change. Existing files need a filesystem that supports atomic exchange. If a competing version appears during the exchange, the app reports a conflict and gives the path to the displaced version in a private `.gpui-save-*` folder. The draft may already be at the original path. Review both versions before continuing.
 
 LaTeX previews use STIX Two Math through Mathra. See the [STIX Two Math license](docs/licenses/stix-two-math.txt).
 
@@ -32,6 +33,6 @@ cargo test --locked --all-targets
 prek run --all-files
 ```
 
-GitHub Actions runs Rust checks with Rust 1.95.0 on Linux and macOS. The Linux job checks the portable document, rendering, and file-handling code; only macOS builds the GPUI application. Automated GPUI tests use a simulated window, not the real macOS input method. See the [manual acceptance steps](docs/prd/gpui-editor.md#macos-原生驗收) for the remaining native checks.
+GitHub Actions runs Rust checks with Rust 1.95.0 on Linux and macOS. The Linux job checks the portable document, rendering, and file-handling code; only macOS builds the GPUI application. Automated GPUI tests use a simulated window, not the real macOS input method. If macOS asks the editor to close during logout or restart, the editor can protect unsaved changes, but the system request must be started again after the editor closes. See the [manual acceptance steps](docs/prd/gpui-editor.md#macos-原生驗收) for the remaining native checks.
 
 [Changenote](https://github.com/changenote/changenote) uses [`.changenote/`](.changenote/) to maintain release notes and a release pull request. Changes to the editor do not require a manual release workflow run.

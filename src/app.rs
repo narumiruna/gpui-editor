@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use gpui::{
     App, Application, AsyncWindowContext, Bounds, Context, Entity, FocusHandle, KeyBinding, Menu,
     MenuItem, OsAction, PathPromptOptions, PromptButton, PromptLevel, SharedString, Stateful,
-    Subscription, TitlebarOptions, Window, WindowBounds, WindowOptions, actions, div, prelude::*,
-    px, rgb, rgba, size,
+    Subscription, TitlebarOptions, Window, WindowBounds, WindowHandle, WindowOptions, actions, div,
+    prelude::*, px, rgb, rgba, size,
 };
 
 use crate::{
@@ -58,17 +58,7 @@ pub fn run() {
             cx.quit();
             return;
         }
-        // A native panel can be active instead of the editor window. Defer the global action
-        // so the editor window can be borrowed even when it was dispatching the shortcut.
-        cx.on_action(move |_: &Quit, cx| {
-            cx.defer(move |cx| {
-                window
-                    .update(cx, |shell, window, cx| {
-                        shell.start(Intent::Exit, window, cx)
-                    })
-                    .ok();
-            });
-        });
+        bind_quit(window, cx);
         cx.set_menus(vec![
             Menu {
                 name: "GPUI Editor".into(),
@@ -101,6 +91,20 @@ pub fn run() {
     });
 }
 
+fn bind_quit(window: WindowHandle<Shell>, cx: &mut App) {
+    // Quit also works when a native panel is active. Defer the action so the window can
+    // be borrowed even when it was dispatching the shortcut.
+    cx.on_action(move |_: &Quit, cx| {
+        cx.defer(move |cx| {
+            window
+                .update(cx, |shell, window, cx| {
+                    shell.start(Intent::Exit, window, cx)
+                })
+                .ok();
+        });
+    });
+}
+
 struct CurrentDocument {
     editor: Entity<Editor>,
     file: Option<DocumentFile>,
@@ -118,8 +122,13 @@ struct Shell {
     workspace: Option<Workspace>,
     files: Vec<PathBuf>,
     current: Option<CurrentDocument>,
-    busy: bool,
+    active: Option<ActiveOperation>,
     error: Option<String>,
+}
+
+enum ActiveOperation {
+    Save { exit_queued: bool },
+    Other,
 }
 
 #[derive(Clone)]
@@ -167,7 +176,7 @@ impl Shell {
             workspace: None,
             files: Vec::new(),
             current: None,
-            busy: false,
+            active: None,
             error: None,
         }
     }
@@ -221,8 +230,26 @@ impl Shell {
     }
 
     fn start(&mut self, intent: Intent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.busy || (matches!(intent, Intent::Save) && self.current.is_none()) {
+        if let Some(active) = &mut self.active {
+            if let ActiveOperation::Save { exit_queued } = active
+                && matches!(intent, Intent::Exit)
+            {
+                *exit_queued = true;
+            }
             return;
+        }
+        self.active = Some(match intent {
+            Intent::Save if self.current.is_none() => return,
+            Intent::Save => ActiveOperation::Save { exit_queued: false },
+            _ => ActiveOperation::Other,
+        });
+        self.error = None;
+        // A native text callback can still reach the editor before the next draw.
+        // Disable mutations before taking the snapshot, not just by moving focus.
+        if let Some(current) = &self.current {
+            current
+                .editor
+                .update(cx, |editor, cx| editor.set_input_enabled(false, cx));
         }
         let operation = Operation {
             workspace: self.workspace.clone(),
@@ -239,18 +266,19 @@ impl Shell {
                 .as_ref()
                 .is_some_and(|current| current.dirty(cx)),
         };
-        self.busy = true;
-        self.error = None;
-        // Keep the document unchanged while the operation works from its source snapshot.
         window.focus(&self.focus);
         cx.notify();
         cx.spawn_in(window, async move |shell, cx| {
             let result = operation.execute(intent, cx).await;
             shell
                 .update_in(cx, |shell, window, cx| {
-                    shell.busy = false;
+                    let exit_queued = matches!(
+                        shell.active.take(),
+                        Some(ActiveOperation::Save { exit_queued: true })
+                    );
                     match result {
                         Ok((saved, change)) => {
+                            let did_save = saved.is_some();
                             if let Some(saved) = saved {
                                 shell.apply_save(saved, cx);
                             }
@@ -269,10 +297,19 @@ impl Shell {
                                 }
                                 None => {}
                             }
+                            // A canceled or failed Save leaves the editor open. After a
+                            // successful Save, evaluate Quit against the new saved baseline.
+                            if exit_queued && did_save {
+                                shell.start(Intent::Exit, window, cx);
+                                return;
+                            }
                         }
                         Err(error) => shell.error = Some(error),
                     }
                     if let Some(current) = &shell.current {
+                        current
+                            .editor
+                            .update(cx, |editor, cx| editor.set_input_enabled(true, cx));
                         cx.focus_view(&current.editor, window);
                     }
                     cx.notify();
@@ -485,7 +522,8 @@ fn button(id: &'static str, label: &'static str, enabled: bool) -> Stateful<gpui
 
 impl Render for Shell {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let can_save = self.current.is_some() && !self.busy;
+        let busy = self.active.is_some();
+        let can_save = self.current.is_some() && !busy;
         let mut sidebar = div()
             .w(px(220.))
             .flex_none()
@@ -566,11 +604,11 @@ impl Render for Shell {
             .bg(rgb(0xf8fafc))
             .border_b_1()
             .border_color(rgb(0xe2e8f0))
-            .child(button("open-folder", "Open Folder…", !self.busy).on_click(
+            .child(button("open-folder", "Open Folder…", !busy).on_click(
                 cx.listener(|shell, _, window, cx| shell.start(Intent::ChooseFolder, window, cx)),
             ))
             .child(
-                button("new", "New", !self.busy).on_click(
+                button("new", "New", !busy).on_click(
                     cx.listener(|shell, _, window, cx| shell.start(Intent::New, window, cx)),
                 ),
             )
@@ -580,7 +618,7 @@ impl Render for Shell {
             .when_some(title, |el, title| {
                 el.child(div().ml_2().min_w_0().truncate().child(title))
             })
-            .when(self.busy, |el| {
+            .when(busy, |el| {
                 el.child(
                     div()
                         .ml_auto()
@@ -645,7 +683,7 @@ impl Render for Shell {
                     .child(sidebar)
                     .child(content),
             )
-            .when(self.busy, |el| {
+            .when(busy, |el| {
                 el.child(div().absolute().inset_0().occlude().bg(rgba(0xffffff18)))
             })
     }
@@ -655,9 +693,87 @@ impl Render for Shell {
 mod tests {
     use std::fs;
 
-    use gpui::{EntityInputHandler as _, TestAppContext};
+    use gpui::{EntityInputHandler as _, TestAppContext, VisualTestContext};
 
     use super::*;
+
+    fn start_save_with_queued_quit(
+        cx: &mut VisualTestContext,
+        shell: &Entity<Shell>,
+        file: DocumentFile,
+    ) -> Entity<Editor> {
+        let editor = cx.update(|window, cx| {
+            bind_quit(window.window_handle().downcast().unwrap(), cx);
+            shell.update(cx, |shell, cx| {
+                shell.open_editor(Some(file), window, cx);
+                let editor = shell.current.as_ref().unwrap().editor.clone();
+                editor.update(cx, |editor, cx| {
+                    editor.replace_text_in_range(Some(0..8), "my draft", window, cx);
+                });
+                shell.start(Intent::Save, window, cx);
+                // Simulate a platform text callback before the input handler is redrawn.
+                editor.update(cx, |editor, cx| {
+                    editor.replace_text_in_range(Some(0..8), "late input", window, cx);
+                    assert_eq!(editor.source(), "my draft");
+                });
+                editor
+            })
+        });
+        // Do not run the executor until both Quit requests reach the shell.
+        cx.cx.update(|cx| cx.dispatch_action(&Quit));
+        cx.cx.update(|cx| cx.dispatch_action(&Quit));
+        cx.update(|_, cx| {
+            assert!(matches!(
+                shell.read(cx).active,
+                Some(ActiveOperation::Save { exit_queued: true })
+            ));
+        });
+        editor
+    }
+
+    #[gpui::test]
+    fn quit_during_save_closes_after_writing_the_snapshot(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = Workspace::open(directory.path()).unwrap();
+        let path = workspace.root().join("note.md");
+        fs::write(&path, "original").unwrap();
+        let file = workspace.read_document(&path).unwrap();
+        let (shell, cx) = cx.add_window_view(Shell::new);
+
+        start_save_with_queued_quit(cx, &shell, file);
+        cx.run_until_parked();
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), "my draft");
+        cx.cx.read(|cx| assert!(cx.windows().is_empty()));
+    }
+
+    #[gpui::test]
+    fn failed_save_cancels_queued_quit_and_restores_editor_input(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = Workspace::open(directory.path()).unwrap();
+        let path = workspace.root().join("note.md");
+        fs::write(&path, "original").unwrap();
+        let file = workspace.read_document(&path).unwrap();
+        fs::write(&path, "external update").unwrap();
+        let (shell, cx) = cx.add_window_view(Shell::new);
+
+        let editor = start_save_with_queued_quit(cx, &shell, file);
+        cx.run_until_parked();
+
+        assert!(!cx.has_pending_prompt());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "external update");
+        cx.update(|window, cx| {
+            let shell = shell.read(cx);
+            assert!(shell.active.is_none());
+            assert!(shell.error.is_some());
+            assert!(shell.current.as_ref().unwrap().dirty(cx));
+            editor.update(cx, |editor, cx| {
+                assert_eq!(editor.source(), "my draft");
+                editor.replace_text_in_range(Some(0..8), "keep editing", window, cx);
+                assert_eq!(editor.source(), "keep editing");
+            });
+        });
+    }
 
     #[gpui::test]
     fn editing_survives_cancel_and_save_failure_before_following_a_link(cx: &mut TestAppContext) {
@@ -742,8 +858,10 @@ mod tests {
         cx.simulate_prompt_answer("Save");
         cx.run_until_parked();
         assert!(cx.did_prompt_for_new_path());
+        assert!(!cx.simulate_close()); // Do not queue another exit during Save on exit.
         cx.simulate_new_path_selection(|_| None);
         cx.run_until_parked();
+        assert!(!cx.has_pending_prompt());
         cx.update(|_, cx| assert!(shell.read(cx).current.as_ref().unwrap().dirty(cx)));
 
         assert!(!cx.simulate_close());

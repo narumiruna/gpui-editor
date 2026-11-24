@@ -75,6 +75,28 @@ fn malformed_latex_has_a_source_range_after_reopening() {
 }
 
 #[test]
+fn inline_labels_end_before_the_destination() {
+    let destination = "https://example.com/a](b)";
+    for (kind, prefix, label) in [
+        (SectionKind::Link, "[", "Label"),
+        (SectionKind::Link, "[", ""),
+        (SectionKind::Link, "[", "label\n  "),
+        (SectionKind::Image, "![", r"圖 [例] \] \[ `](`"),
+        (SectionKind::Link, "[", "![alt](image.png) `$](`"),
+    ] {
+        let source = format!("前段 {prefix}{label}]({destination} \"title ](\")");
+        let doc = Document::new(source.clone());
+        let section = doc
+            .sections()
+            .into_iter()
+            .find(|section| section.kind == kind)
+            .unwrap();
+        assert_eq!(&source[section.content], label);
+        assert_eq!(section.destination.as_deref(), Some(destination));
+    }
+}
+
+#[test]
 fn editing_a_fenced_body_preserves_its_closing_line_and_crlf() {
     let source = "---\r\ntitle: Old\r\n---\r\n\r\n```mermaid\r\nflowchart LR\r\nA --> B\r\n```\r\n\r\n正文\r\n";
     let mut doc = Document::new(source.into());
@@ -95,4 +117,54 @@ fn editing_a_fenced_body_preserves_its_closing_line_and_crlf() {
             .replace("title: Old", "title: New")
             .replace("A --> B", "C --> D")
     );
+}
+
+#[test]
+fn inserts_into_empty_mermaid_blocks_without_moving_the_closing_fence() {
+    for ending in ["\n", "\r\n"] {
+        for empty_line in ["", ending] {
+            let source = format!("```mermaid{ending}{empty_line}```{ending}{ending}正文");
+            let mut doc = Document::new(source);
+            let mermaid = |doc: &Document| {
+                doc.sections()
+                    .into_iter()
+                    .find(|section| section.kind == SectionKind::Mermaid)
+                    .unwrap()
+            };
+            let section = mermaid(&doc);
+            assert!(section.content.is_empty());
+            let body = format!("flowchart LR{ending}A --> B");
+            doc.replace(section.content, &body).unwrap();
+            assert_eq!(
+                doc.source(),
+                format!("```mermaid{ending}{body}{ending}```{ending}{ending}正文")
+            );
+
+            let end = mermaid(&doc).content.end;
+            doc.replace(end..end, " --> C").unwrap();
+            assert_eq!(
+                &doc.source()[mermaid(&doc).content],
+                format!("{body} --> C")
+            );
+        }
+    }
+}
+
+#[test]
+fn removes_delimiters_when_deleting_the_last_formatted_text() {
+    for (source, body) in [("**x**", "x"), ("_x_", "x"), ("***字***", "字")] {
+        let mut doc = Document::new(source.into());
+        let start = source.find(body).unwrap();
+        doc.replace(start..start + body.len(), "").unwrap();
+        assert_eq!(doc.source(), "");
+        doc.replace(0..0, "next").unwrap();
+        assert_eq!(doc.source(), "next");
+    }
+
+    let mut doc = Document::new("Before **xy** after".into());
+    let x = doc.source().find('x').unwrap();
+    doc.replace(x..x + 1, "").unwrap();
+    assert_eq!(doc.source(), "Before **y** after");
+    doc.replace(x..x + 1, "").unwrap();
+    assert_eq!(doc.source(), "Before  after");
 }

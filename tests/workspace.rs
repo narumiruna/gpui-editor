@@ -57,6 +57,7 @@ fn create_refreshes_listing_and_repeated_saves_keep_a_valid_snapshot() {
     file.save("# Final\n\n|  preserved  |\n").unwrap();
     assert_eq!(file.source(), "# Final\n\n|  preserved  |\n");
     assert_eq!(fs::read_to_string(file.path()).unwrap(), file.source());
+    assert_eq!(fs::read_dir(workspace.root()).unwrap().count(), 1);
 }
 
 #[test]
@@ -176,4 +177,106 @@ fn read_only_file_is_not_replaced() {
     );
     assert_eq!(file.source(), "old");
     assert_eq!(fs::read_to_string(&path).unwrap(), "old");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_replaced_destination_folder_is_not_used_for_an_open_document() {
+    let folder = tempdir().unwrap();
+    let workspace = Workspace::open(folder.path()).unwrap();
+    let nested = workspace.root().join("nested");
+    let moved = workspace.root().join("moved");
+    fs::create_dir(&nested).unwrap();
+    fs::write(nested.join("document.md"), "original").unwrap();
+    let mut file = workspace
+        .read_document(&nested.join("document.md"))
+        .unwrap();
+
+    fs::rename(&nested, &moved).unwrap();
+    fs::create_dir(&nested).unwrap();
+    fs::write(nested.join("document.md"), "different").unwrap();
+    assert!(file.save("draft").is_err());
+    assert_eq!(file.source(), "original");
+    assert_eq!(
+        fs::read_to_string(moved.join("document.md")).unwrap(),
+        "original"
+    );
+    assert_eq!(
+        fs::read_to_string(nested.join("document.md")).unwrap(),
+        "different"
+    );
+    assert_eq!(fs::read_dir(&nested).unwrap().count(), 1);
+}
+
+#[cfg(target_os = "macos")]
+fn add_acl(path: &Path, entry: &str) {
+    let result = std::process::Command::new("/bin/chmod")
+        .args(["+a", entry])
+        .arg(path)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn acl_write_denial_overrides_writable_mode_bits() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let folder = tempdir().unwrap();
+    let path = folder.path().join("denied.md");
+    fs::write(&path, "old").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+    add_acl(&path, "everyone deny write,append");
+    let workspace = Workspace::open(folder.path()).unwrap();
+    let mut file = workspace.read_document(&path).unwrap();
+    assert_eq!(
+        file.save("unsaved edit").unwrap_err().kind(),
+        ErrorKind::PermissionDenied
+    );
+    assert_eq!(file.source(), "old");
+    assert_eq!(fs::read_to_string(&path).unwrap(), "old");
+    assert_eq!(fs::read_dir(folder.path()).unwrap().count(), 1);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn save_preserves_explicit_file_acl_and_mode() {
+    use std::{os::unix::fs::PermissionsExt, process::Command};
+
+    fn acl(path: &Path) -> String {
+        let output = Command::new("/bin/ls")
+            .arg("-le")
+            .arg(path)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .skip(1)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    let folder = tempdir().unwrap();
+    let path = folder.path().join("protected.md");
+    fs::write(&path, "old").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+    add_acl(&path, "everyone deny execute");
+    let before = acl(&path);
+    assert!(before.contains("everyone deny execute"), "{before}");
+    let workspace = Workspace::open(folder.path()).unwrap();
+    let mut file = workspace.read_document(&path).unwrap();
+    file.save("saved").unwrap();
+    assert_eq!(acl(&path), before);
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o640
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), "saved");
 }

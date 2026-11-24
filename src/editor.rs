@@ -6,8 +6,8 @@ use crate::document::{Document, Section, SectionKind};
 use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, ElementInputHandler, EntityInputHandler,
     EventEmitter, FocusHandle, Focusable, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
-    Pixels, Point, UTF16Selection, Window, actions, canvas, div, fill, point, prelude::*, px, rgb,
-    rgba, size,
+    Pixels, Point, ScrollHandle, UTF16Selection, Window, actions, canvas, div, fill, point,
+    prelude::*, px, rgb, rgba, size,
 };
 
 mod commands;
@@ -25,6 +25,10 @@ actions!(
         Right,
         SelectLeft,
         SelectRight,
+        Up,
+        Down,
+        SelectUp,
+        SelectDown,
         SelectAll,
         Backspace,
         Delete,
@@ -43,6 +47,10 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("right", Right, Some("Editor")),
         KeyBinding::new("shift-left", SelectLeft, Some("Editor")),
         KeyBinding::new("shift-right", SelectRight, Some("Editor")),
+        KeyBinding::new("up", Up, Some("Editor")),
+        KeyBinding::new("down", Down, Some("Editor")),
+        KeyBinding::new("shift-up", SelectUp, Some("Editor")),
+        KeyBinding::new("shift-down", SelectDown, Some("Editor")),
         KeyBinding::new("cmd-a", SelectAll, Some("Editor")),
         KeyBinding::new("backspace", Backspace, Some("Editor")),
         KeyBinding::new("delete", Delete, Some("Editor")),
@@ -64,14 +72,27 @@ pub struct Editor {
     active: Option<Section>,
     selecting: bool,
     layout: Option<Layout>,
+    input_enabled: bool,
+    scroll: ScrollHandle,
+    reveal_caret: bool,
+    preferred_x: Option<Pixels>,
     graphics: HashMap<(String, SectionKind, u32), Result<Graphic, String>>,
-    images: HashMap<String, Option<Result<Graphic, String>>>,
+    images: HashMap<String, ImageEntry>,
+    next_image_request: u64,
+    image_requests: usize,
+    allow_remote_images: bool,
+    has_blocked_images: bool,
     path: Option<PathBuf>,
     workspace: Option<PathBuf>,
     hover: Option<String>,
     message: Option<String>,
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
+}
+
+enum ImageEntry {
+    Loading(u64),
+    Ready(Result<Graphic, String>),
 }
 
 #[derive(Clone)]
@@ -100,8 +121,16 @@ impl Editor {
             active: None,
             selecting: false,
             layout: None,
+            input_enabled: true,
+            scroll: ScrollHandle::new(),
+            reveal_caret: false,
+            preferred_x: None,
             graphics: HashMap::new(),
             images: HashMap::new(),
+            next_image_request: 0,
+            image_requests: 0,
+            allow_remote_images: false,
+            has_blocked_images: false,
             path: None,
             workspace: None,
             hover: None,
@@ -119,6 +148,16 @@ impl Editor {
         self.path = path;
         self.workspace = workspace;
         self.images.clear();
+        self.allow_remote_images = false;
+    }
+
+    pub(crate) fn set_input_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.input_enabled = enabled;
+        if !enabled {
+            self.selecting = false;
+            self.marked = None;
+        }
+        cx.notify();
     }
 
     fn selection(&self) -> Range<usize> {
@@ -150,22 +189,31 @@ impl Editor {
         self.anchor = state.anchor;
         self.active = state.active;
         self.marked = None;
+        self.layout = None;
+        self.reveal_caret = true;
+        self.preferred_x = None;
         cx.notify();
     }
 
     fn replace(&mut self, range: Range<usize>, text: &str, cx: &mut Context<Self>) -> bool {
+        if !self.input_enabled {
+            return false;
+        }
         let previous = self.marked.is_none().then(|| self.snapshot());
-        if self.document.replace(range.clone(), text).is_err() {
+        let Ok((range, inserted)) = self.document.replacement(range, text) else {
             self.message = Some("Cannot edit this Markdown range".into());
             cx.notify();
             return false;
-        }
+        };
+        self.layout = None;
+        self.reveal_caret = true;
+        self.preferred_x = None;
         self.message = None;
         if let Some(active) = &mut self.active {
             if range.start >= active.content.start && range.end <= active.content.end {
                 let removed = range.len();
                 active.content.end = active.content.end - removed + text.len();
-                active.source.end = active.source.end - removed + text.len();
+                active.source.end = active.source.end - removed + inserted;
             } else {
                 self.active = None;
             }
@@ -198,9 +246,26 @@ impl Editor {
             self.cursor
         };
         self.move_to(position, extend, cx);
+        self.reveal_caret = true;
+    }
+
+    fn move_vertical(&mut self, down: bool, extend: bool, cx: &mut Context<Self>) {
+        if let Some((position, x)) = self
+            .layout
+            .as_ref()
+            .and_then(|layout| layout.vertical(self.cursor, self.preferred_x, down))
+        {
+            self.move_to(position, extend, cx);
+            self.preferred_x = Some(x);
+            self.reveal_caret = true;
+        }
     }
 
     fn move_to(&mut self, position: usize, extend: bool, cx: &mut Context<Self>) {
+        if !self.source().is_char_boundary(position) {
+            return;
+        }
+        self.preferred_x = None;
         self.cursor = position;
         if !extend {
             self.anchor = position;
@@ -218,8 +283,33 @@ impl Editor {
         let mut selection = self.selection();
         if selection.is_empty() {
             if let Some(layout) = &self.layout {
-                let other = layout.step(self.cursor, right);
-                selection = self.cursor.min(other)..self.cursor.max(other);
+                let mut at = self.cursor;
+                let inline: Vec<_> = self
+                    .document
+                    .sections()
+                    .into_iter()
+                    .filter(|section| {
+                        matches!(section.kind, SectionKind::Strong | SectionKind::Emphasis)
+                    })
+                    .collect();
+                // Move across hidden delimiters before choosing a visible character to delete.
+                while let Some(next) = inline.iter().find_map(|section| {
+                    if right && at == section.source.start {
+                        Some(section.content.start)
+                    } else if right && at == section.content.end {
+                        Some(section.source.end)
+                    } else if !right && at == section.source.end {
+                        Some(section.content.end)
+                    } else if !right && at == section.content.start {
+                        Some(section.source.start)
+                    } else {
+                        None
+                    }
+                }) {
+                    at = next;
+                }
+                let other = layout.step(at, right);
+                selection = at.min(other)..at.max(other);
             }
             if selection.is_empty() {
                 return;
@@ -229,6 +319,9 @@ impl Editor {
     }
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.input_enabled {
+            return;
+        }
         let Some(layout) = &self.layout else { return };
         let position = layout.index_at(event.position);
         let item = layout.item_at(event.position);
@@ -346,10 +439,13 @@ impl EntityInputHandler for Editor {
 
     fn selected_text_range(
         &mut self,
-        _: bool,
+        ignore_disabled_input: bool,
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
+        if !self.input_enabled && !ignore_disabled_input {
+            return None;
+        }
         Some(UTF16Selection {
             range: to_utf16(self.source(), self.selection()),
             reversed: self.cursor < self.anchor,
@@ -423,7 +519,7 @@ impl EntityInputHandler for Editor {
         _: &mut Context<Self>,
     ) -> Option<usize> {
         let byte = self.layout.as_ref()?.index_at(position);
-        Some(self.source()[..byte].encode_utf16().count())
+        Some(self.source().get(..byte)?.encode_utf16().count())
     }
 }
 
@@ -457,6 +553,7 @@ impl Render for Editor {
                     .flex_1()
                     .min_h_0()
                     .overflow_scroll()
+                    .track_scroll(&self.scroll)
                     .p_4()
                     .cursor(CursorStyle::IBeam)
                     .key_context("Editor")
@@ -483,6 +580,14 @@ impl Render for Editor {
                     .on_action(
                         cx.listener(|e, _: &SelectRight, _, cx| e.move_horizontal(true, true, cx)),
                     )
+                    .on_action(cx.listener(|e, _: &Up, _, cx| e.move_vertical(false, false, cx)))
+                    .on_action(cx.listener(|e, _: &Down, _, cx| e.move_vertical(true, false, cx)))
+                    .on_action(
+                        cx.listener(|e, _: &SelectUp, _, cx| e.move_vertical(false, true, cx)),
+                    )
+                    .on_action(
+                        cx.listener(|e, _: &SelectDown, _, cx| e.move_vertical(true, true, cx)),
+                    )
                     .on_action(cx.listener(|e, _: &SelectAll, _, cx| {
                         let range = e
                             .active
@@ -490,6 +595,8 @@ impl Render for Editor {
                             .map_or(0..e.source().len(), |section| section.content.clone());
                         e.anchor = range.start;
                         e.cursor = range.end;
+                        e.reveal_caret = true;
+                        e.preferred_x = None;
                         cx.notify();
                     }))
                     .on_action(cx.listener(|e, _: &Backspace, _, cx| e.remove(false, cx)))
@@ -518,13 +625,17 @@ impl Render for Editor {
                         }
                     }))
                     .on_action(cx.listener(|e, _: &Undo, _, cx| {
-                        if let Some(previous) = e.undo.pop() {
+                        if e.input_enabled
+                            && let Some(previous) = e.undo.pop()
+                        {
                             e.redo.push(e.snapshot());
                             e.restore(previous, cx);
                         }
                     }))
                     .on_action(cx.listener(|e, _: &Redo, _, cx| {
-                        if let Some(next) = e.redo.pop() {
+                        if e.input_enabled
+                            && let Some(next) = e.redo.pop()
+                        {
                             e.undo.push(e.snapshot());
                             e.restore(next, cx);
                         }
@@ -540,11 +651,13 @@ impl Render for Editor {
                                 let selection = e.selection();
                                 let cursor = e.cursor;
                                 let focus = e.focus.clone();
-                                window.handle_input(
-                                    &focus,
-                                    ElementInputHandler::new(bounds, editor.clone()),
-                                    cx,
-                                );
+                                if e.input_enabled {
+                                    window.handle_input(
+                                        &focus,
+                                        ElementInputHandler::new(bounds, editor.clone()),
+                                        cx,
+                                    );
+                                }
                                 for row in &layout.rows {
                                     for item in &row.items {
                                         let top = layout.origin + point(item.left, row.y);
@@ -588,7 +701,16 @@ impl Render for Editor {
                                 {
                                     window.paint_quad(fill(caret, rgb(0x1463b7)));
                                 }
-                                editor.update(cx, |e, _| e.layout = Some(layout));
+                                editor.update(cx, |e, _| {
+                                    if std::mem::take(&mut e.reveal_caret)
+                                        && focus.is_focused(window)
+                                        && let Some(caret) = layout.bounds_at(cursor)
+                                        && reveal_caret(&e.scroll, caret)
+                                    {
+                                        window.on_next_frame(|window, _| window.refresh());
+                                    }
+                                    e.layout = Some(layout);
+                                });
                             },
                         )
                         .w(width + px(2.))
@@ -605,9 +727,63 @@ impl Render for Editor {
                     .bg(rgb(0xf1f3f6))
                     .overflow_hidden()
                     .min_h(px(24.))
-                    .child(status),
+                    .child(status)
+                    .when(self.has_blocked_images, |status| {
+                        status.child(
+                            div()
+                                .id("allow-remote-images")
+                                .text_color(rgb(0x145aac))
+                                .cursor_pointer()
+                                .on_click(cx.listener(|e, _, _, cx| {
+                                    e.allow_remote_images = true;
+                                    cx.notify();
+                                }))
+                                .child("Load remote images for this document"),
+                        )
+                    }),
             )
     }
+}
+
+fn reveal_caret(scroll: &ScrollHandle, caret: Bounds<Pixels>) -> bool {
+    let viewport = scroll.bounds().inset(px(4.));
+    if viewport.size.width <= px(0.) || viewport.size.height <= px(0.) {
+        return false;
+    }
+    let current = scroll.offset();
+    let limit = scroll.max_offset();
+    let adjust = |start: Pixels, end: Pixels, low: Pixels, high: Pixels| {
+        if start < low {
+            low - start
+        } else if end > high {
+            high - end
+        } else {
+            px(0.)
+        }
+    };
+    let next = point(
+        (current.x
+            + adjust(
+                caret.left(),
+                caret.right(),
+                viewport.left(),
+                viewport.right(),
+            ))
+        .clamp(-limit.width, px(0.)),
+        (current.y
+            + adjust(
+                caret.top(),
+                caret.bottom(),
+                viewport.top(),
+                viewport.bottom(),
+            ))
+        .clamp(-limit.height, px(0.)),
+    );
+    if next == current {
+        return false;
+    }
+    scroll.set_offset(next);
+    true
 }
 
 #[cfg(test)]
@@ -617,6 +793,152 @@ mod tests {
     use gpui::{Modifiers, TestAppContext};
 
     use super::*;
+
+    #[gpui::test]
+    fn navigation_never_uses_layout_offsets_from_before_an_edit(cx: &mut TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new("a好".into(), window, cx));
+        cx.update(|window, cx| {
+            editor.update(cx, |e, cx| {
+                assert!(e.layout.is_some());
+                assert!(e.replace(0..1, "", cx));
+                assert!(e.layout.is_none());
+                e.move_horizontal(true, false, cx);
+                assert_eq!(
+                    e.selected_text_range(false, window, cx).unwrap().range,
+                    0..0
+                );
+            })
+        });
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            editor.update(cx, |e, cx| {
+                e.move_horizontal(true, false, cx);
+                assert_eq!(e.cursor, "好".len());
+            })
+        });
+    }
+
+    #[gpui::test]
+    fn vertical_movement_keeps_the_column_and_extends_selection(cx: &mut TestAppContext) {
+        let (editor, cx) =
+            cx.add_window_view(|window, cx| Editor::new("ABCDE\nX\nABCDE".into(), window, cx));
+        cx.update(|window, cx| {
+            editor.update(cx, |e, cx| {
+                window.focus(&e.focus);
+                e.move_to(4, false, cx);
+            })
+        });
+        cx.update(|_, cx| bind_keys(cx));
+        cx.simulate_keystrokes("down shift-down");
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert_eq!(e.anchor, "ABCDE\nX".len());
+            assert_eq!(e.cursor, "ABCDE\nX\nABCD".len());
+        });
+    }
+
+    #[gpui::test]
+    fn caret_reveal_scrolls_both_axes_after_paste(cx: &mut TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(String::new(), window, cx));
+        cx.simulate_resize(size(px(360.), px(240.)));
+        cx.update(|window, cx| {
+            editor.update(cx, |e, cx| {
+                window.focus(&e.focus);
+                e.replace(
+                    0..0,
+                    &format!("{}{}", "line\n".repeat(50), "x".repeat(250)),
+                    cx,
+                );
+            })
+        });
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert!(e.scroll.offset().x < px(0.));
+            assert!(e.scroll.offset().y < px(0.));
+        });
+    }
+
+    #[gpui::test]
+    fn trailing_bold_markers_have_a_caret_stop_and_are_removed_with_last_character(
+        cx: &mut TestAppContext,
+    ) {
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new("**x**".into(), window, cx));
+        cx.update(|_, cx| {
+            editor.update(cx, |e, cx| {
+                let layout = e.layout.as_ref().unwrap();
+                assert!(layout.bounds_at(5).is_some());
+                assert_eq!(layout.step(3, true), 5);
+                e.move_to(5, false, cx);
+                e.remove(false, cx);
+                assert_eq!(e.source(), "");
+                assert_eq!(e.cursor, 0);
+            })
+        });
+    }
+
+    #[gpui::test]
+    fn preview_cap_does_not_label_a_valid_formula_invalid(cx: &mut TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(String::new(), window, cx));
+        cx.update(|window, cx| {
+            editor.update(cx, |e, cx| {
+                let formulas: Vec<_> = (0..129).map(|n| format!("x^{n}")).collect();
+                let source = formulas.iter().map(|body| format!("${body}$\n")).collect();
+                e.document = Document::new(source);
+                for body in formulas.into_iter().take(128) {
+                    e.graphics.insert(
+                        (
+                            body,
+                            SectionKind::InlineMath,
+                            window.scale_factor().to_bits(),
+                        ),
+                        Err("test cached preview".into()),
+                    );
+                }
+                cx.notify();
+            })
+        });
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            let item = e.layout.as_ref().unwrap().rows.iter().rev()
+                .find_map(|row| row.items.last()).unwrap();
+            assert!(matches!(&item.paint, ItemPaint::Text(line) if line.text.as_ref() == "Preview limit reached"));
+        });
+    }
+
+    #[gpui::test]
+    fn remote_images_need_consent_and_old_requests_do_not_replace_new_ones(
+        cx: &mut TestAppContext,
+    ) {
+        let image_url = "https://example.invalid/picture.png";
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            Editor::new(format!("![Preview]({image_url})"), window, cx)
+        });
+        cx.update(|_, cx| {
+            editor.update(cx, |e, cx| {
+                assert!(e.has_blocked_images);
+                assert_eq!(e.image_requests, 0);
+                assert!(e.images.is_empty());
+                e.images
+                    .insert("old.png".into(), ImageEntry::Ready(Err("old".into())));
+                cx.notify();
+            })
+        });
+        cx.run_until_parked();
+        cx.update(|_, cx| editor.update(cx, |e, _| {
+            assert!(e.images.is_empty());
+            e.images.insert("same.png".into(), ImageEntry::Loading(1));
+            e.image_requests = 2;
+            e.set_path(Some("new/doc.md".into()), None);
+            e.images.insert("same.png".into(), ImageEntry::Loading(2));
+            e.complete_image_request("same.png".into(), 1, Err("stale".into()));
+            assert!(matches!(e.images.get("same.png"), Some(ImageEntry::Loading(2))));
+            e.complete_image_request("same.png".into(), 2, Err("new".into()));
+            assert!(matches!(e.images.get("same.png"), Some(ImageEntry::Ready(Err(message))) if message == "new"));
+            assert_eq!(e.image_requests, 0);
+        }));
+    }
 
     #[gpui::test]
     fn edits_markdown_in_one_surface(cx: &mut TestAppContext) {

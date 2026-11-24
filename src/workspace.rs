@@ -2,25 +2,33 @@
 
 use std::{
     fs::{self, Metadata, Permissions},
-    io::{self, Write},
+    io,
     path::{Path, PathBuf},
     time::SystemTime,
 };
 
-use tempfile::NamedTempFile;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod publication;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Workspace {
     root: PathBuf,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    identity: (u64, u64),
 }
 
 impl Workspace {
     pub fn open(path: &Path) -> io::Result<Self> {
         let root = path.canonicalize()?;
-        if !fs::metadata(&root)?.is_dir() {
+        let metadata = fs::metadata(&root)?;
+        if !metadata.is_dir() {
             return Err(io::Error::new(io::ErrorKind::NotADirectory, "not a folder"));
         }
-        Ok(Self { root })
+        Ok(Self {
+            root,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            identity: publication::identity(&metadata),
+        })
     }
 
     pub fn root(&self) -> &Path {
@@ -129,11 +137,10 @@ impl DocumentFile {
             directory.root.clone()
         };
         let path = parent.join(name);
-        let (temp, stamp) = write_temp(&parent, &source, None)?;
-        if directory.resolve(&parent)? != parent {
-            return Err(io::Error::other("the destination folder has moved"));
-        }
-        temp.persist_noclobber(&path).map_err(|error| error.error)?;
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let stamp = publication::create(&directory, &path, &source)?;
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        let stamp = unsupported_publication(&directory, &path, &source)?;
         Ok(Self {
             directory,
             path,
@@ -142,41 +149,17 @@ impl DocumentFile {
         })
     }
 
-    /// Replace an existing file only after the complete new version is written and synced.
-    /// Leave the saved snapshot intact if writing or the final conflict check fails.
+    /// Sync the draft before exchanging it with the file on disk (macOS and Linux).
+    /// On a late conflict the draft may be at the document path, but the displaced version
+    /// is kept for recovery and the saved snapshot stays unchanged.
     pub fn save(&mut self, source: &str) -> io::Result<()> {
-        let metadata = self.checked_metadata()?;
-        let permissions = metadata.permissions();
-        if permissions.readonly() {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "the file is read-only",
-            ));
-        }
-        let parent = self.path.parent().expect("a document has a parent folder");
-        let (temp, stamp) = write_temp(parent, source, Some(permissions))?;
-        // Check both bytes and metadata again after writing the temp file. A portable rename
-        // cannot compare and replace atomically, so minimize the gap before the final rename.
-        self.checked_metadata()?;
-        if fs::read(&self.path)? != self.source.as_bytes() {
-            return Err(external_change());
-        }
-        self.checked_metadata()?;
-        temp.persist(&self.path).map_err(|error| error.error)?;
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let stamp = publication::save(self, source, || {})?;
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        let stamp = unsupported_publication(&self.directory, &self.path, source)?;
         source.clone_into(&mut self.source);
         self.stamp = stamp;
         Ok(())
-    }
-
-    fn checked_metadata(&self) -> io::Result<Metadata> {
-        if self.directory.resolve_document(&self.path)? != self.path {
-            return Err(external_change());
-        }
-        let metadata = file_metadata(&self.path)?;
-        if Stamp::read(&metadata)? != self.stamp {
-            return Err(external_change());
-        }
-        Ok(metadata)
     }
 }
 
@@ -187,6 +170,10 @@ struct Stamp {
     permissions: Permissions,
     #[cfg(unix)]
     identity: (u64, u64),
+    #[cfg(unix)]
+    owner: (u32, u32),
+    #[cfg(unix)]
+    changed: (i64, i64),
 }
 
 impl Stamp {
@@ -200,6 +187,10 @@ impl Stamp {
             permissions: metadata.permissions(),
             #[cfg(unix)]
             identity: (metadata.dev(), metadata.ino()),
+            #[cfg(unix)]
+            owner: (metadata.uid(), metadata.gid()),
+            #[cfg(unix)]
+            changed: (metadata.ctime(), metadata.ctime_nsec()),
         })
     }
 }
@@ -233,17 +224,10 @@ fn external_change() -> io::Error {
     io::Error::other("the file changed on disk; reopen it before saving")
 }
 
-fn write_temp(
-    parent: &Path,
-    source: &str,
-    permissions: Option<Permissions>,
-) -> io::Result<(NamedTempFile, Stamp)> {
-    let mut temp = NamedTempFile::new_in(parent)?;
-    temp.write_all(source.as_bytes())?;
-    if let Some(permissions) = permissions {
-        temp.as_file().set_permissions(permissions)?;
-    }
-    temp.as_file().sync_all()?;
-    let stamp = Stamp::read(&temp.as_file().metadata()?)?;
-    Ok((temp, stamp))
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn unsupported_publication(_: &Workspace, _: &Path, _: &str) -> io::Result<Stamp> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "workspace file publication requires macOS or Linux",
+    ))
 }

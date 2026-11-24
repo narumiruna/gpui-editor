@@ -59,7 +59,8 @@ impl Document {
     pub fn sections(&self) -> Vec<Section> {
         use SectionKind as K;
 
-        let mut sections = Vec::new();
+        let mut sections: Vec<Section> = Vec::new();
+        let mut open_links: Vec<usize> = Vec::new();
         let mut heading: Option<Section> = None;
         let options = Options::ENABLE_MATH
             | Options::ENABLE_TABLES
@@ -67,6 +68,21 @@ impl Document {
             | Options::ENABLE_STRIKETHROUGH;
 
         for (event, source) in Parser::new_ext(&self.source, options).into_offset_iter() {
+            if let Some(&index) = open_links.last() {
+                let link = &mut sections[index];
+                if matches!(event, Event::End(TagEnd::Link | TagEnd::Image))
+                    && link.source == source
+                {
+                    // The parser covers brackets, escapes, and nested syntax in its
+                    // child ranges. Only skipped whitespace can precede the close.
+                    if let Some(offset) = self.source[link.content.end..source.end].find("](") {
+                        link.content.end += offset;
+                    }
+                    open_links.pop();
+                } else {
+                    link.content.end = link.content.end.max(source.end);
+                }
+            }
             if let Some(heading) = &mut heading
                 && !matches!(&event, Event::End(TagEnd::Heading(_)))
             {
@@ -110,12 +126,12 @@ impl Document {
                     link_type: LinkType::Inline,
                     dest_url,
                     ..
-                }) => Some(link(K::Link, source, text, 1, dest_url.into_string())),
+                }) => Some(link(K::Link, source, 1, dest_url.into_string())),
                 Event::Start(Tag::Image {
                     link_type: LinkType::Inline,
                     dest_url,
                     ..
-                }) => Some(link(K::Image, source, text, 2, dest_url.into_string())),
+                }) => Some(link(K::Image, source, 2, dest_url.into_string())),
                 Event::Start(
                     Tag::Table(_)
                     | Tag::CodeBlock(_)
@@ -132,7 +148,12 @@ impl Document {
                 | Event::Rule => Some(Section::new(K::ReadOnly, source.clone(), source)),
                 _ => None,
             };
-            sections.extend(section);
+            if let Some(section) = section {
+                if matches!(section.kind, K::Link | K::Image) {
+                    open_links.push(sections.len());
+                }
+                sections.push(section);
+            }
         }
 
         let sort_key =
@@ -163,18 +184,66 @@ impl Document {
     }
 
     pub fn replace(&mut self, range: Range<usize>, text: &str) -> Result<(), EditError> {
+        self.replacement(range, text).map(|_| ())
+    }
+
+    // Return the actual old range and inserted byte count for editor offsets.
+    // The caret belongs directly after `text`, before any added fence separator.
+    pub(crate) fn replacement(
+        &mut self,
+        mut range: Range<usize>,
+        text: &str,
+    ) -> Result<(Range<usize>, usize), EditError> {
+        use SectionKind as K;
+
         if self.source.get(range.clone()).is_none() {
             return Err(EditError::InvalidRange);
         }
-        if self.sections().iter().any(|section| {
-            section.kind == SectionKind::ReadOnly
+        let sections = self.sections();
+        if text.is_empty() && !range.is_empty() {
+            // Sections are sorted outermost first. Remove inner spans first so
+            // an enclosing span also goes away if it becomes empty.
+            for section in sections.iter().rev() {
+                if matches!(section.kind, K::Strong | K::Emphasis)
+                    && range.start <= section.content.start
+                    && section.content.end <= range.end
+                {
+                    range.start = range.start.min(section.source.start);
+                    range.end = range.end.max(section.source.end);
+                }
+            }
+        }
+        if sections.iter().any(|section| {
+            section.kind == K::ReadOnly
                 && range.start < section.source.end
                 && section.source.start < range.end
         }) {
             return Err(EditError::ReadOnly);
         }
-        self.source.replace_range(range, text);
-        Ok(())
+        // There is no body line when the closing fence follows the opening
+        // line directly. Leave a line ending between the new body and fence.
+        let needs_separator = !text.is_empty()
+            && range.is_empty()
+            && sections.iter().any(|section| {
+                matches!(section.kind, K::FrontMatter | K::Mermaid)
+                    && section.content == range
+                    && section.source.end > range.start
+                    && !self.source[range.start..].starts_with(['\r', '\n'])
+            });
+        let inserted = if needs_separator {
+            let ending = if self.source[..range.start].ends_with("\r\n") {
+                "\r\n"
+            } else {
+                "\n"
+            };
+            self.source
+                .replace_range(range.clone(), &format!("{text}{ending}"));
+            text.len() + ending.len()
+        } else {
+            self.source.replace_range(range.clone(), text);
+            text.len()
+        };
+        Ok((range, inserted))
     }
 }
 
@@ -247,22 +316,9 @@ fn malformed_math(text: &str, base: usize, output: &mut Vec<Section>) {
     }
 }
 
-fn link(
-    kind: SectionKind,
-    source: Range<usize>,
-    text: &str,
-    prefix: usize,
-    destination: String,
-) -> Section {
-    let end = text
-        .rfind("](")
-        .filter(|end| *end >= prefix)
-        .unwrap_or(prefix);
-    let mut section = Section::new(
-        kind,
-        source.clone(),
-        source.start + prefix..source.start + end,
-    );
+fn link(kind: SectionKind, source: Range<usize>, prefix: usize, destination: String) -> Section {
+    let start = source.start + prefix;
+    let mut section = Section::new(kind, source, start..start);
     section.destination = Some(destination);
     section
 }

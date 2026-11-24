@@ -6,10 +6,10 @@ use gpui::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::Editor;
+use super::{Editor, ImageEntry};
 use crate::{
     document::{Section, SectionKind},
-    media::{image_target, load_image},
+    media::{Target, image_target, load_image},
     rendering::{Raster, render_math, render_mermaid},
 };
 
@@ -155,7 +155,7 @@ impl Layout {
     }
 
     pub(super) fn bounds_at(&self, offset: usize) -> Option<Bounds<Pixels>> {
-        let row = self.rows.iter().find(|row| offset <= row.end)?;
+        let row = &self.rows[self.row_index(offset)?];
         let x = row
             .items
             .iter()
@@ -165,6 +165,28 @@ impl Layout {
             self.origin + point(x, row.y),
             size(px(1.), row.height),
         ))
+    }
+
+    fn row_index(&self, offset: usize) -> Option<usize> {
+        self.rows.iter().position(|row| offset <= row.end)
+    }
+
+    pub(super) fn vertical(
+        &self,
+        offset: usize,
+        preferred_x: Option<Pixels>,
+        down: bool,
+    ) -> Option<(usize, Pixels)> {
+        let row = self.row_index(offset)?;
+        let next = if down { row + 1 } else { row.checked_sub(1)? };
+        let next = self.rows.get(next)?;
+        let x = preferred_x.unwrap_or(self.bounds_at(offset)?.origin.x - self.origin.x);
+        let position = next
+            .items
+            .iter()
+            .find(|item| x < item.left + item.width)
+            .map_or(next.end, |item| item.offset(x));
+        Some((position, x))
     }
 
     pub(super) fn step(&self, offset: usize, right: bool) -> usize {
@@ -389,7 +411,14 @@ impl Editor {
             .filter_map(|entry| entry.as_ref().ok())
             .map(|graphic| graphic.bytes)
             .sum();
-        let mut pending_images = self.images.values().filter(|entry| entry.is_none()).count();
+        let image_destinations: std::collections::HashSet<_> = sections
+            .iter()
+            .filter(|section| section.kind == SectionKind::Image)
+            .filter_map(|section| section.destination.as_deref())
+            .collect();
+        self.images
+            .retain(|destination, _| image_destinations.contains(destination.as_str()));
+        self.has_blocked_images = false;
         let mut skip_to = 0;
         for section in &sections {
             if section.source.start < skip_to {
@@ -406,86 +435,81 @@ impl Editor {
             }
             let body = &source[section.content.clone()];
             let kind = section.kind;
-            match kind {
+            let preview = match kind {
                 SectionKind::InlineMath | SectionKind::DisplayMath | SectionKind::Mermaid => {
                     let key = (body.to_owned(), kind, scale.to_bits());
                     if self.graphics.len() >= 128 && !self.graphics.contains_key(&key) {
-                        continue;
+                        Err("Preview limit reached")
+                    } else {
+                        let graphic = self.graphics.entry(key).or_insert_with(|| {
+                            let raster = match kind {
+                                SectionKind::Mermaid => render_mermaid(body, scale),
+                                _ => render_math(body, kind == SectionKind::DisplayMath, scale),
+                            }?;
+                            if graphic_bytes + raster.bgra.len() > 64 * 1024 * 1024 {
+                                return Err("Preview memory limit reached".into());
+                            }
+                            graphic_bytes += raster.bgra.len();
+                            Graphic::new(raster, scale)
+                                .ok_or_else(|| "Could not decode preview".into())
+                        });
+                        graphic
+                            .as_ref()
+                            .cloned()
+                            .map_err(|error| preview_error(kind, error))
                     }
-                    let graphic = self.graphics.entry(key).or_insert_with(|| {
-                        let raster = match kind {
-                            SectionKind::Mermaid => render_mermaid(body, scale),
-                            _ => render_math(body, kind == SectionKind::DisplayMath, scale),
-                        }?;
-                        if graphic_bytes + raster.bgra.len() > 64 * 1024 * 1024 {
-                            return Err("Preview memory limit reached".into());
-                        }
-                        graphic_bytes += raster.bgra.len();
-                        Graphic::new(raster, scale).ok_or_else(|| "Could not decode preview".into())
-                    });
-                    previews.insert(section.source.start, graphic.as_ref().ok().cloned());
                 }
                 SectionKind::Image => {
                     let destination = section.destination.clone().unwrap_or_default();
-                    if (self.images.len() >= 32 || pending_images >= 3)
-                        && !self.images.contains_key(&destination)
-                    {
-                        continue;
+                    if let Some(image) = self.images.get(&destination) {
+                        image_preview(image)
+                    } else if self.images.len() >= 32 {
+                        Err("Image limit reached")
+                    } else if self.image_requests >= 3 {
+                        Err("Waiting for image")
+                    } else {
+                        match image_target(
+                            &destination,
+                            self.path.as_deref(),
+                            self.workspace.as_deref(),
+                        ) {
+                            Err(error) => {
+                                self.images
+                                    .insert(destination, ImageEntry::Ready(Err(error)));
+                                Err("Image not loaded")
+                            }
+                            Ok(Target::Web(_)) if !self.allow_remote_images => {
+                                self.has_blocked_images = true;
+                                Err("Remote image blocked")
+                            }
+                            Ok(target) => {
+                                self.image_requests += 1;
+                                self.next_image_request += 1;
+                                let request = self.next_image_request;
+                                self.images
+                                    .insert(destination.clone(), ImageEntry::Loading(request));
+                                let task = cx
+                                    .background_executor()
+                                    .spawn(async move { load_image(&target) });
+                                cx.spawn(async move |editor, cx| {
+                                    let result = task.await.and_then(|raster| {
+                                        Graphic::new(raster, 1.)
+                                            .ok_or_else(|| "Could not decode image".into())
+                                    });
+                                    let _ = editor.update(cx, |editor, cx| {
+                                        editor.complete_image_request(destination, request, result);
+                                        cx.notify();
+                                    });
+                                })
+                                .detach();
+                                Err("Loading image")
+                            }
+                        }
                     }
-                    let entry =
-                        self.images.entry(destination.clone()).or_insert_with(
-                            || match image_target(
-                                &destination,
-                                self.path.as_deref(),
-                                self.workspace.as_deref(),
-                            ) {
-                                Err(error) => Some(Err(error)),
-                                Ok(target) => {
-                                    pending_images += 1;
-                                    let task = cx
-                                        .background_executor()
-                                        .spawn(async move { load_image(&target) });
-                                    cx.spawn(async move |editor, cx| {
-                                        let result = task.await.and_then(|raster| {
-                                            Graphic::new(raster, 1.)
-                                                .ok_or_else(|| "Could not decode image".into())
-                                        });
-                                        let _ = editor.update(cx, |editor, cx| {
-                                            let image_bytes: usize = editor
-                                                .images
-                                                .values()
-                                                .filter_map(|entry| entry.as_ref()?.as_ref().ok())
-                                                .map(|graphic| graphic.bytes)
-                                                .sum();
-                                            if let Some(entry) = editor.images.get_mut(&destination)
-                                            {
-                                                *entry = Some(result.and_then(|graphic| {
-                                                    (image_bytes + graphic.bytes
-                                                        <= 64 * 1024 * 1024)
-                                                        .then_some(graphic)
-                                                        .ok_or_else(|| {
-                                                            "Image memory limit reached".into()
-                                                        })
-                                                }));
-                                                cx.notify();
-                                            }
-                                        });
-                                    })
-                                    .detach();
-                                    None
-                                }
-                            },
-                        );
-                    previews.insert(
-                        section.source.start,
-                        entry
-                            .as_ref()
-                            .and_then(|result| result.as_ref().ok())
-                            .cloned(),
-                    );
                 }
-                _ => {}
-            }
+                _ => continue,
+            };
+            previews.insert(section.source.start, preview);
         }
         let projection = Projection {
             source,
@@ -495,12 +519,62 @@ impl Editor {
         projection.add(&mut builder, 0..source.len(), &sections, Face::default(), 0);
         builder.build()
     }
+
+    pub(super) fn complete_image_request(
+        &mut self,
+        destination: String,
+        request: u64,
+        result: Result<Graphic, String>,
+    ) {
+        self.image_requests -= 1;
+        if !matches!(self.images.get(&destination), Some(ImageEntry::Loading(current)) if *current == request)
+        {
+            return;
+        }
+        let bytes: usize = self
+            .images
+            .values()
+            .filter_map(|entry| match entry {
+                ImageEntry::Ready(Ok(graphic)) => Some(graphic.bytes),
+                _ => None,
+            })
+            .sum();
+        let result = result.and_then(|graphic| {
+            (bytes + graphic.bytes <= 64 * 1024 * 1024)
+                .then_some(graphic)
+                .ok_or_else(|| "Image memory limit reached".into())
+        });
+        self.images.insert(destination, ImageEntry::Ready(result));
+    }
+}
+
+fn image_preview(entry: &ImageEntry) -> Result<Graphic, &'static str> {
+    match entry {
+        ImageEntry::Loading(_) => Err("Loading image"),
+        ImageEntry::Ready(result) => result
+            .as_ref()
+            .cloned()
+            .map_err(|error| preview_error(SectionKind::Image, error)),
+    }
+}
+
+fn preview_error(kind: SectionKind, error: &str) -> &'static str {
+    let error = error.to_ascii_lowercase();
+    if error.contains("limit") || error.starts_with("raster side") {
+        "Preview limit reached"
+    } else {
+        match kind {
+            SectionKind::Image => "Image not loaded",
+            SectionKind::Mermaid => "Invalid Mermaid — click to edit",
+            _ => "Invalid formula — click to edit",
+        }
+    }
 }
 
 struct Projection<'a> {
     source: &'a str,
     active: Option<&'a Section>,
-    previews: std::collections::HashMap<usize, Option<Graphic>>,
+    previews: std::collections::HashMap<usize, Result<Graphic, &'static str>>,
 }
 
 impl Projection<'_> {
@@ -565,6 +639,9 @@ impl Projection<'_> {
                             next,
                             depth + 1,
                         );
+                        if matches!(section.kind, K::Strong | K::Emphasis) {
+                            builder.row.end = section.source.end;
+                        }
                         self.finish_line(builder, section.content.end, section);
                     }
                     K::ReadOnly => {
@@ -597,11 +674,8 @@ impl Projection<'_> {
                         self.finish_line(builder, section.content.end, section);
                     }
                     _ => {
-                        if let Some(graphic) = self
-                            .previews
-                            .get(&section.source.start)
-                            .and_then(Option::as_ref)
-                        {
+                        let preview = self.previews.get(&section.source.start);
+                        if let Some(Ok(graphic)) = preview {
                             let ratio = if section.kind == K::Image {
                                 (px(640.) / graphic.width).min(1.)
                             } else {
@@ -619,10 +693,14 @@ impl Projection<'_> {
                                 ItemPaint::Graphic(graphic),
                             );
                         } else {
-                            let label = match section.kind {
-                                K::Image => format!("[Image not loaded: {}]", one_line(body)),
-                                K::Mermaid => "Invalid Mermaid — click to edit".into(),
-                                _ => "Invalid formula — click to edit".into(),
+                            let reason = match preview {
+                                Some(Err(reason)) => *reason,
+                                _ => "Preview unavailable",
+                            };
+                            let label = if section.kind == K::Image && !body.is_empty() {
+                                format!("[{reason}: {}]", one_line(body))
+                            } else {
+                                reason.into()
                             };
                             builder.text(
                                 &label,
