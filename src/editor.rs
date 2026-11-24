@@ -891,6 +891,37 @@ mod tests {
     }
 
     #[gpui::test]
+    fn closing_heading_markers_have_a_caret_stop_before_the_line_break(cx: &mut TestAppContext) {
+        let heading = "# Title ###";
+        for eol in ["", "\n", "\r\n"] {
+            let source = format!("{heading}{eol}");
+            let (editor, cx) =
+                cx.add_window_view(|window, cx| Editor::new(source.clone(), window, cx));
+            cx.update(|window, cx| {
+                editor.update(cx, |e, cx| {
+                    window.focus(&e.focus);
+                    e.move_to("# Title".len(), false, cx);
+                });
+                bind_keys(cx);
+            });
+            cx.run_until_parked();
+            cx.simulate_keystrokes("right");
+            cx.update(|_, cx| {
+                let editor = editor.read(cx);
+                assert_eq!(editor.cursor, heading.len());
+                let layout = editor.layout.as_ref().unwrap();
+                assert!(layout.bounds_at(editor.cursor).is_some());
+                assert_eq!(
+                    layout.index_at(layout.origin + point(px(500.), px(0.))),
+                    heading.len()
+                );
+            });
+            cx.simulate_keystrokes("enter");
+            cx.update(|_, cx| assert_eq!(editor.read(cx).source(), format!("{heading}\n{eol}")));
+        }
+    }
+
+    #[gpui::test]
     fn backspace_in_source_mode_deletes_a_visible_marker(cx: &mut TestAppContext) {
         let (editor, cx) = cx.add_window_view(|window, cx| {
             Editor::new("[**xy**](https://example.com)".into(), window, cx)

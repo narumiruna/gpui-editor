@@ -676,6 +676,12 @@ impl Projection<'_> {
                         );
                         if matches!(section.kind, K::Strong | K::Emphasis) {
                             builder.row.end = section.source.end;
+                        } else if section.kind == K::Heading {
+                            let suffix = &self.source[section.content.end..section.source.end];
+                            let same_line =
+                                suffix.split('\n').next().unwrap().trim_end_matches('\r');
+                            builder.row.end =
+                                builder.row.end.max(section.content.end + same_line.len());
                         }
                         self.finish_line(builder, section.content.end, section);
                     }
