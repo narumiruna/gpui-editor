@@ -6,13 +6,13 @@ GPUI Editor is a local Markdown editor for macOS. It uses GPUI to show formatted
 
 Install Rust and Xcode. The native build was verified on Apple Silicon with macOS 26.4.1, Rust 1.95.0, and Xcode 26.6. Other configurations are not yet verified. GPUI compiles shaders at runtime, so the separate Metal compiler component is not required.
 
-From the repository root, with Xcode at its default location:
+Install [Just](https://just.systems/) and run this from the repository root:
 
 ```sh
-export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
-cargo build --locked
-./target/debug/gpui-editor
+just run
 ```
+
+This builds and starts the app. It uses `/Applications/Xcode.app` by default. If Xcode is installed elsewhere, set `DEVELOPER_DIR` to that installation's `Contents/Developer` directory before running `just run`.
 
 The command takes no path. In the window, choose **Open Folder…**, then select a Markdown file from the sidebar. Use **New** for a blank document and **Save** or `Cmd-S` to save. The sidebar lists only the workspace's top-level `.md` files.
 
