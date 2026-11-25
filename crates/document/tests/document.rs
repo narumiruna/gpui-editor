@@ -1,4 +1,6 @@
-use gpui_editor_document::{Alignment, BlockPreview, Document, EditError, Section, SectionKind};
+use gpui_editor_document::{
+    Alignment, BlockPreview, Document, EditError, Heading, Section, SectionKind,
+};
 
 const ORIGINAL: &str = include_str!("fixtures/sample.md");
 
@@ -7,6 +9,45 @@ fn find_section(doc: &Document, kind: SectionKind) -> Section {
         .into_iter()
         .find(|section| section.kind == kind)
         .unwrap()
+}
+
+#[test]
+fn outline_uses_markdown_levels_labels_and_utf8_offsets() {
+    let source = concat!(
+        "---\r\n# Not a heading\r\n---\r\n\r\n",
+        "前文\r\n\r\n",
+        "## **相同** &amp; [章節](notes.md) ###\r\n\r\n",
+        "相同 & `章節`\r\n---\r\n\r\n",
+        "```md\r\n# Not a heading\r\nFake\r\n====\r\n```\r\n\r\n",
+        "跨行\r\n標題\r\n====\r\n\r\n",
+        "###### ![圖](figure.png) $x^2$ <b>文字</b>\r\n",
+    );
+    let headings = Document::new(source.into()).headings();
+    assert_eq!(
+        headings,
+        [
+            Heading {
+                level: 2,
+                label: "相同 & 章節".into(),
+                offset: source.find("## **").unwrap(),
+            },
+            Heading {
+                level: 2,
+                label: "相同 & 章節".into(),
+                offset: source.find("相同 &").unwrap(),
+            },
+            Heading {
+                level: 1,
+                label: "跨行 標題".into(),
+                offset: source.find("跨行").unwrap(),
+            },
+            Heading {
+                level: 6,
+                label: "圖 x^2 文字".into(),
+                offset: source.find("######").unwrap(),
+            },
+        ],
+    );
 }
 
 #[test]

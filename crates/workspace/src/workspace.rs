@@ -1,7 +1,7 @@
 //! Local Markdown workspaces and conflict-checked file saves.
 
 use std::{
-    fs::{self, Metadata, Permissions},
+    fs::{self, DirEntry, Metadata, Permissions},
     io,
     path::{Path, PathBuf},
     time::SystemTime,
@@ -9,6 +9,9 @@ use std::{
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod publication;
+mod search;
+
+pub use search::{SearchHit, SearchLocation, SearchResults};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Workspace {
@@ -73,41 +76,12 @@ impl Workspace {
     /// List one folder, with folders first. Do not follow symbolic links.
     pub fn directory_entries(&self, path: &Path) -> io::Result<Vec<DirectoryEntry>> {
         let path = self.root.join(path);
-        let check = || {
-            if self.resolve(&path)? != path {
-                return Err(io::Error::other(
-                    "the folder is not a direct workspace path",
-                ));
-            }
-            Ok(())
-        };
-        check()?;
+        self.check_direct_path(&path)?;
         let mut entries = Vec::new();
         for entry in fs::read_dir(&path)? {
-            let entry = entry?;
-            let file_type = entry.file_type()?;
-            // Private recovery folders are not workspaces to browse.
-            if file_type.is_dir()
-                && entry
-                    .file_name()
-                    .as_encoded_bytes()
-                    .starts_with(b".gpui-save-")
-            {
-                continue;
-            }
-            let path = entry.path();
-            let kind = if file_type.is_dir() {
-                EntryKind::Folder
-            } else if file_type.is_file() && is_markdown(&path) {
-                EntryKind::Markdown
-            } else if file_type.is_file() {
-                EntryKind::File
-            } else {
-                continue;
-            };
-            entries.push(DirectoryEntry { path, kind });
+            entries.extend(classify_entry(&entry?)?);
         }
-        check()?;
+        self.check_direct_path(&path)?;
         entries.sort_unstable_by(|a, b| {
             (a.kind != EntryKind::Folder, &a.path).cmp(&(b.kind != EntryKind::Folder, &b.path))
         });
@@ -173,6 +147,13 @@ impl Workspace {
             ));
         }
         Ok(canonical)
+    }
+
+    fn check_direct_path(&self, path: &Path) -> io::Result<()> {
+        if self.resolve(path)? != path {
+            return Err(io::Error::other("not a direct workspace path"));
+        }
+        Ok(())
     }
 
     fn resolve_markdown_path(&self, path: &Path) -> io::Result<PathBuf> {
@@ -288,6 +269,30 @@ impl Stamp {
             changed: (metadata.ctime(), metadata.ctime_nsec()),
         })
     }
+}
+
+fn classify_entry(entry: &DirEntry) -> io::Result<Option<DirectoryEntry>> {
+    let file_type = entry.file_type()?;
+    if file_type.is_dir()
+        && entry
+            .file_name()
+            .as_encoded_bytes()
+            .starts_with(b".gpui-save-")
+    {
+        // Private recovery folders are not workspaces to browse.
+        return Ok(None);
+    }
+    let path = entry.path();
+    let kind = if file_type.is_dir() {
+        EntryKind::Folder
+    } else if file_type.is_file() && is_markdown(&path) {
+        EntryKind::Markdown
+    } else if file_type.is_file() {
+        EntryKind::File
+    } else {
+        return Ok(None);
+    };
+    Ok(Some(DirectoryEntry { path, kind }))
 }
 
 fn is_markdown(path: &Path) -> bool {

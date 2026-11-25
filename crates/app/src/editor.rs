@@ -3,7 +3,7 @@
 use std::{collections::HashMap, ops::Range, path::PathBuf, time::Duration};
 
 use crate::{
-    document::{Document, Section, SectionKind},
+    document::{Document, Heading, Section, SectionKind},
     theme::Theme,
     workspace::Workspace,
 };
@@ -82,6 +82,7 @@ pub struct Editor {
     input_enabled: bool,
     scroll: ScrollHandle,
     reveal_caret: bool,
+    reveal_source: Option<usize>,
     preferred_x: Option<Pixels>,
     graphics: HashMap<(String, SectionKind, u32), Result<Graphic, String>>,
     images: HashMap<String, ImageEntry>,
@@ -133,6 +134,7 @@ impl Editor {
             input_enabled: true,
             scroll: ScrollHandle::new(),
             reveal_caret: false,
+            reveal_source: None,
             preferred_x: None,
             graphics: HashMap::new(),
             images: HashMap::new(),
@@ -151,6 +153,24 @@ impl Editor {
 
     pub fn source(&self) -> &str {
         self.document.source()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn vertical_scroll_offset(&self) -> Pixels {
+        self.scroll.offset().y
+    }
+
+    pub(crate) fn headings(&self) -> Vec<Heading> {
+        self.document.headings()
+    }
+
+    /// Scroll to a UTF-8 byte offset without moving the caret or taking focus.
+    pub(crate) fn reveal_source(&mut self, offset: usize, cx: &mut Context<Self>) {
+        if self.is_composing() || !self.source().is_char_boundary(offset) {
+            return;
+        }
+        self.reveal_source = Some(offset);
+        cx.notify();
     }
 
     pub fn set_path(&mut self, path: Option<PathBuf>, workspace: Option<Workspace>) {
@@ -210,6 +230,7 @@ impl Editor {
         self.marked = None;
         self.layout = None;
         self.reveal_caret = true;
+        self.reveal_source = None;
         self.preferred_x = None;
         cx.notify();
     }
@@ -229,6 +250,7 @@ impl Editor {
         };
         self.layout = None;
         self.reveal_caret = true;
+        self.reveal_source = None;
         self.preferred_x = None;
         self.message = None;
         if let Some(active) = &mut self.active {
@@ -853,11 +875,16 @@ impl Editor {
                             overlay.paint(window, cx);
                         }
                         editor.update(cx, |e, _| {
-                            if std::mem::take(&mut e.reveal_caret)
-                                && focus.is_focused(window)
-                                && let Some(caret) = caret
-                                && reveal_caret(&e.scroll, caret)
+                            // Scroll bounds and wrap positions now match this frame.
+                            let reveal_caret = std::mem::take(&mut e.reveal_caret);
+                            let target = if let Some(offset) = e.reveal_source.take()
+                                && !e.is_composing()
                             {
+                                layout.source_bounds(offset)
+                            } else {
+                                caret.filter(|_| reveal_caret && focus.is_focused(window))
+                            };
+                            if target.is_some_and(|bounds| reveal_bounds(&e.scroll, bounds)) {
                                 window.on_next_frame(|window, _| window.refresh());
                             }
                             e.layout = Some(layout);
@@ -993,7 +1020,7 @@ impl Overlay {
     }
 }
 
-fn reveal_caret(scroll: &ScrollHandle, caret: Bounds<Pixels>) -> bool {
+fn reveal_bounds(scroll: &ScrollHandle, target: Bounds<Pixels>) -> bool {
     let viewport = scroll.bounds().inset(px(4.));
     if viewport.size.width <= px(0.) || viewport.size.height <= px(0.) {
         return false;
@@ -1012,16 +1039,16 @@ fn reveal_caret(scroll: &ScrollHandle, caret: Bounds<Pixels>) -> bool {
     let next = point(
         (current.x
             + adjust(
-                caret.left(),
-                caret.right(),
+                target.left(),
+                target.right(),
                 viewport.left(),
                 viewport.right(),
             ))
         .clamp(-limit.width, px(0.)),
         (current.y
             + adjust(
-                caret.top(),
-                caret.bottom(),
+                target.top(),
+                target.bottom(),
                 viewport.top(),
                 viewport.bottom(),
             ))
@@ -1105,6 +1132,111 @@ mod tests {
             assert_eq!(e.scroll.offset().x, px(0.));
             assert_eq!(e.scroll.max_offset().width, px(0.));
             assert!(e.scroll.offset().y < px(0.));
+        });
+    }
+
+    #[gpui::test]
+    fn source_reveal_uses_fresh_layout_and_keeps_the_draft_selection_and_undo(
+        cx: &mut TestAppContext,
+    ) {
+        let original = "# 標題\n\n後文";
+        let (editor, cx) =
+            cx.add_window_view(|window, cx| Editor::new(original.into(), window, cx));
+        cx.simulate_resize(size(px(360.), px(240.)));
+        cx.update(|_, cx| bind_keys(cx));
+        let prefix = format!("開頭\n\n{}", "a long wrapped paragraph ".repeat(110)) + "\n\n";
+        let draft = format!("{prefix}{original}");
+        cx.update(|window, cx| {
+            editor.update(cx, |e, cx| {
+                window.focus(&e.focus);
+                assert_eq!(e.headings()[0].offset, 0);
+                assert!(e.replace(0..0, &prefix, cx));
+                assert!(e.layout.is_none());
+                e.anchor = "開頭".len();
+                e.cursor = 0;
+                let headings = e.headings();
+                assert_eq!(headings[0].offset, prefix.len());
+                e.reveal_source(headings[0].offset, cx);
+            });
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            assert!(editor.read(cx).scroll.offset().y < px(0.));
+            window.refresh();
+        });
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            let target = e
+                .layout
+                .as_ref()
+                .unwrap()
+                .source_bounds(prefix.len())
+                .unwrap();
+            assert!(e.scroll.bounds().contains(&target.center()));
+            assert_eq!((e.anchor, e.cursor), ("開頭".len(), 0));
+            assert_eq!(e.source(), draft);
+            assert_eq!(e.undo.len(), 1);
+            assert!(e.redo.is_empty());
+        });
+        cx.simulate_keystrokes("cmd-z");
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert_eq!(e.source(), original);
+            assert_eq!(e.headings()[0].offset, 0);
+        });
+    }
+
+    #[gpui::test]
+    fn source_reveal_uses_the_heading_row_for_hidden_setext_markers(cx: &mut TestAppContext) {
+        let source = format!(
+            "{}\nSetext heading\r\n==============\r\n\nNext row",
+            "line\n\n".repeat(25)
+        );
+        let heading = source.find("Setext heading").unwrap();
+        let underline = source.find("====").unwrap();
+        let next = source.find("Next row").unwrap();
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source, window, cx));
+        cx.simulate_resize(size(px(360.), px(240.)));
+        cx.update(|_, cx| editor.update(cx, |e, cx| e.reveal_source(underline, cx)));
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            assert!(editor.read(cx).scroll.offset().y < px(0.));
+            window.refresh();
+        });
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            let layout = e.layout.as_ref().unwrap();
+            let revealed = layout.source_bounds(underline).unwrap();
+            assert_eq!(revealed.top(), layout.source_bounds(heading).unwrap().top());
+            assert!(revealed.top() < layout.source_bounds(next).unwrap().top());
+            assert!(e.scroll.bounds().contains(&revealed.center()));
+        });
+    }
+
+    #[gpui::test]
+    fn source_reveal_ignores_invalid_offsets_and_ime_composition(cx: &mut TestAppContext) {
+        let source = format!("首行\n\n{}\n# 標題", "line\n".repeat(60));
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source, window, cx));
+        cx.simulate_resize(size(px(360.), px(240.)));
+        cx.update(|window, cx| {
+            editor.update(cx, |e, cx| {
+                e.reveal_source(1, cx);
+                e.reveal_source(usize::MAX, cx);
+                assert_eq!(e.reveal_source, None);
+                window.focus(&e.focus);
+                e.replace_and_mark_text_in_range(None, "組字", None, window, cx);
+                assert!(e.is_composing());
+                e.reveal_source(e.headings()[0].offset, cx);
+                assert_eq!(e.reveal_source, None);
+            });
+        });
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert!(e.is_composing());
+            assert_eq!(e.scroll.offset().y, px(0.));
         });
     }
 

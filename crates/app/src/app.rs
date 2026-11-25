@@ -11,7 +11,7 @@ use gpui::{
 use crate::{
     editor::{self, Editor, OpenLocalDocument, toolbar},
     theme::Theme,
-    workspace::{DocumentFile, Workspace},
+    workspace::{DocumentFile, SearchLocation, Workspace},
 };
 
 pub(crate) mod developer;
@@ -190,6 +190,7 @@ enum Intent {
     ExpandFolder(PathBuf),
     New,
     Open(PathBuf),
+    OpenAt(PathBuf, SearchLocation),
     Save,
     CloseTab(TabId),
     Exit,
@@ -206,10 +207,11 @@ impl Shell {
                 .is_err()
         });
         let appearance = cx.observe_window_appearance(window, |_, _, cx| cx.notify());
+        let sidebar = Sidebar::new(window, cx);
         Self {
             focus,
             workspace: None,
-            sidebar: Sidebar::default(),
+            sidebar,
             tabs: Vec::new(),
             selected: None,
             next_tab: 0,
@@ -356,9 +358,11 @@ impl Shell {
     }
 
     fn is_composing(&self, cx: &App) -> bool {
-        self.tabs
-            .iter()
-            .any(|tab| tab.editor.read(cx).is_composing())
+        self.sidebar.search.is_composing(cx)
+            || self
+                .tabs
+                .iter()
+                .any(|tab| tab.editor.read(cx).is_composing())
     }
 
     fn allow_document_action(&mut self, window_close: bool, cx: &mut Context<Self>) -> bool {
@@ -382,7 +386,7 @@ impl Shell {
                 }
                 match restored {
                     Ok(Some(restored)) => {
-                        shell.sidebar.reset(restored.workspace.root(), restored.tree);
+                        shell.sidebar.reset(restored.workspace.root(), restored.tree, window, cx);
                         shell.workspace = Some(restored.workspace);
                         let mut selected = None;
                         for (index, file) in restored.documents.into_iter().enumerate() {
@@ -472,7 +476,11 @@ impl Render for Shell {
             .on_action(cx.listener(|shell, _: &CloseWindow, window, cx| {
                 shell.start(Intent::Exit, window, cx)
             }))
-            .on_action(cx.listener(|shell, _: &ToggleSidebar, _, cx| shell.toggle_sidebar(cx)))
+            .on_action(
+                cx.listener(|shell, _: &ToggleSidebar, window, cx| {
+                    shell.toggle_sidebar(window, cx)
+                }),
+            )
             .when(self.sidebar.visible, |el| {
                 el.child(self.sidebar(sidebar_width, controls, theme, picker.as_ref(), cx))
             })

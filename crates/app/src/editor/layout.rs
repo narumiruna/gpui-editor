@@ -62,6 +62,7 @@ pub(super) struct Row {
     pub(super) items: Vec<Item>,
     start: usize,
     end: usize,
+    hidden_end: usize,
     soft_end: bool,
     pub(super) y: Pixels,
     pub(super) height: Pixels,
@@ -203,6 +204,10 @@ impl Layout {
 
     pub(super) fn bounds_at(&self, offset: usize, upstream: bool) -> Option<Bounds<Pixels>> {
         let row = &self.rows[self.row_index(offset, upstream)?];
+        Some(self.bounds_in_row(row, offset))
+    }
+
+    fn bounds_in_row(&self, row: &Row, offset: usize) -> Bounds<Pixels> {
         if let Some(item) = row.items.iter().find(|item| {
             matches!(item.paint, ItemPaint::Block(_))
                 && (offset == item.source.start || offset == item.source.end)
@@ -213,15 +218,32 @@ impl Layout {
             } else {
                 row.y
             };
-            return Some(Bounds::new(
-                self.origin + point(item.left, y),
-                size(px(1.), height),
-            ));
+            return Bounds::new(self.origin + point(item.left, y), size(px(1.), height));
         }
-        Some(Bounds::new(
+        Bounds::new(
             self.origin + point(row.x_at(offset), row.y),
             size(px(1.), row.height),
-        ))
+        )
+    }
+
+    pub(super) fn source_bounds(&self, offset: usize) -> Option<Bounds<Pixels>> {
+        let index = self.rows.partition_point(|row| {
+            let end = row.end.max(row.hidden_end);
+            end < offset || (row.soft_end && end == offset)
+        });
+        let row = self.rows.get(index)?;
+        // A preview has no caret stops inside its source range. Reveal its leading edge.
+        if let Some(item) = row
+            .items
+            .iter()
+            .find(|item| item.atomic && item.source.contains(&offset))
+        {
+            return Some(Bounds::new(
+                self.origin + point(item.left, row.y),
+                size(px(1.), row.height.min(px(26.))),
+            ));
+        }
+        Some(self.bounds_in_row(row, offset.min(row.end)))
     }
 
     fn row_index(&self, offset: usize, upstream: bool) -> Option<usize> {
@@ -287,6 +309,7 @@ impl<'a> LayoutBuilder<'a> {
             items: Vec::new(),
             start,
             end: start,
+            hidden_end: 0,
             soft_end: false,
             y,
             height: px(26.),
@@ -1015,7 +1038,12 @@ impl Projection<'_> {
 
     fn finish_line(&self, builder: &mut LayoutBuilder<'_>, content_end: usize, section: &Section) {
         let end = section.source.end;
-        if end > content_end && self.source.as_bytes().get(end - 1) == Some(&b'\n') {
+        let ends_line = end > content_end && self.source.as_bytes().get(end - 1) == Some(&b'\n');
+        if section.kind == SectionKind::Heading {
+            // Source navigation includes the hidden Setext underline, but caret motion does not.
+            builder.row.hidden_end = end - usize::from(ends_line);
+        }
+        if ends_line {
             builder.next_row(end);
         }
     }

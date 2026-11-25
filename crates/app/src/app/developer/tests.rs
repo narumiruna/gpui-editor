@@ -117,6 +117,8 @@ fn picker_selects_toolbar_controls_and_scrolled_rows_without_activating_them(
             shell.sidebar.reset(
                 workspace.root(),
                 crate::app::sidebar::snapshot(&workspace, Vec::new()).unwrap(),
+                window,
+                cx,
             );
             shell.workspace = Some(workspace.clone());
             shell.open_editor(Some(file), window, cx);
