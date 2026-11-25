@@ -2218,7 +2218,7 @@ dependencies = [
 name = "gpui-editor"
 version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "gpui",
  "gpui-editor-document",
  "gpui-editor-preview",
