@@ -339,11 +339,15 @@ impl Editor {
         let position = layout.index_at(event.position);
         let item = layout.item_at(event.position);
         let hit = item.and_then(|item| item.target.clone());
+        let block = item
+            .filter(|item| matches!(item.paint, ItemPaint::Block(_)))
+            .map(|item| item.source.clone());
         let in_source = self.active.as_ref().is_some_and(|active| {
             active.content.start <= position
                 && position <= active.content.end
                 && layout.contains_row(event.position)
                 && hit.is_none()
+                && block.is_none()
         });
         let position = if in_source {
             position
@@ -359,7 +363,10 @@ impl Editor {
         }
         self.selecting = true;
         window.focus(&self.focus);
-        if let Some(section) = hit.filter(|_| !event.modifiers.shift) {
+        if let Some(block) = block.filter(|_| !event.modifiers.shift) {
+            self.move_to(block.start, false, cx);
+            self.move_to(block.end, true, cx);
+        } else if let Some(section) = hit.filter(|_| !event.modifiers.shift) {
             self.selecting = false;
             if section.kind == SectionKind::Link {
                 self.move_to(section.source.start, false, cx);
@@ -697,6 +704,9 @@ impl Render for Editor {
                                                 Default::default(),
                                             ));
                                         }
+                                        if let ItemPaint::Block(block) = &item.paint {
+                                            block.paint_frame(top, window);
+                                        }
                                         let start = selection.start.max(item.source.start);
                                         let end = selection.end.min(item.source.end);
                                         if start < end {
@@ -712,6 +722,9 @@ impl Render for Editor {
                                         match &item.paint {
                                             ItemPaint::Text(line) => {
                                                 let _ = line.paint(top, row.height, window, cx);
+                                            }
+                                            ItemPaint::Block(block) => {
+                                                block.paint_text(top, window, cx)
                                             }
                                             ItemPaint::Graphic(graphic) => {
                                                 let _ = window.paint_image(
@@ -1059,6 +1072,58 @@ mod tests {
             assert!(matches!(e.images.get("same.png"), Some(ImageEntry::Ready(Err(message))) if message == "new"));
             assert_eq!(e.image_requests, 0);
         }));
+    }
+
+    #[gpui::test]
+    fn code_and_tables_render_as_read_only_selection_units(cx: &mut TestAppContext) {
+        let source = "Before\n\n| Name | Value |\n| --- | ---: |\n| First | 1 |\n\n```rust\nfn main() {}\n```\n\nAfter";
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source.into(), window, cx));
+        cx.update(|_, cx| bind_keys(cx));
+        let blocks = cx.update(|_, cx| {
+            let layout = editor.read(cx).layout.as_ref().unwrap();
+            layout
+                .rows
+                .iter()
+                .flat_map(|row| {
+                    row.items
+                        .iter()
+                        .filter(|item| matches!(item.paint, ItemPaint::Block(_)))
+                        .map(|item| {
+                            (
+                                layout.origin + point(item.left + px(12.), row.y + row.height / 2.),
+                                item.source.clone(),
+                            )
+                        })
+                })
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(blocks.len(), 2);
+        assert!(source[blocks[0].1.clone()].starts_with("| Name"));
+        assert!(source[blocks[1].1.clone()].starts_with("```rust"));
+        for (position, range) in blocks {
+            cx.simulate_click(position, Modifiers::none());
+            cx.update(|_, cx| {
+                let e = editor.read(cx);
+                assert_eq!(e.selection(), range);
+                assert!(e.active.is_none());
+            });
+            cx.simulate_input("no change");
+            cx.simulate_keystrokes("backspace");
+            cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source));
+        }
+        let after = cx.update(|_, cx| {
+            editor
+                .read(cx)
+                .layout
+                .as_ref()
+                .unwrap()
+                .bounds_at(source.len())
+                .unwrap()
+                .center()
+        });
+        cx.simulate_click(after, Modifiers::none());
+        cx.simulate_input("!");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), format!("{source}!")));
     }
 
     #[gpui::test]

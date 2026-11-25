@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+pub use pulldown_cmark::Alignment;
 use pulldown_cmark::{CodeBlockKind, Event, LinkType, Options, Parser, Tag, TagEnd};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -17,12 +18,53 @@ pub enum SectionKind {
     ReadOnly,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Section {
     pub kind: SectionKind,
     pub source: Range<usize>,
     pub content: Range<usize>,
     pub destination: Option<String>,
+    pub preview: Option<BlockPreview>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum BlockPreview {
+    Code {
+        body: String,
+    },
+    Table {
+        alignments: Vec<Alignment>,
+        rows: Vec<Vec<String>>,
+    },
+}
+
+impl BlockPreview {
+    fn consume(&mut self, event: Event<'_>) -> bool {
+        match (self, event) {
+            (Self::Code { body }, Event::Text(text)) => body.push_str(&text),
+            (Self::Table { rows, .. }, Event::Start(Tag::TableHead | Tag::TableRow)) => {
+                rows.push(Vec::new());
+            }
+            (Self::Table { rows, .. }, Event::Start(Tag::TableCell)) => {
+                rows.last_mut().unwrap().push(String::new());
+            }
+            (
+                Self::Table { rows, .. },
+                Event::Text(text)
+                | Event::Code(text)
+                | Event::InlineMath(text)
+                | Event::DisplayMath(text)
+                | Event::InlineHtml(text),
+            ) => rows.last_mut().unwrap().last_mut().unwrap().push_str(&text),
+            (Self::Table { rows, .. }, Event::SoftBreak | Event::HardBreak) => {
+                rows.last_mut().unwrap().last_mut().unwrap().push(' ');
+            }
+            (Self::Code { .. }, Event::End(TagEnd::CodeBlock))
+            | (Self::Table { .. }, Event::End(TagEnd::Table)) => return true,
+            _ => {}
+        }
+        false
+    }
 }
 
 impl Section {
@@ -32,7 +74,14 @@ impl Section {
             source,
             content,
             destination: None,
+            preview: None,
         }
+    }
+
+    fn with_preview(source: Range<usize>, preview: BlockPreview) -> Self {
+        let mut section = Self::new(SectionKind::ReadOnly, source.clone(), source);
+        section.preview = Some(preview);
+        section
     }
 }
 
@@ -63,12 +112,19 @@ impl Document {
         let mut open_links: Vec<usize> = Vec::new();
         let mut heading: Option<Section> = None;
         let mut fenced_body = None;
+        let mut block_preview: Option<Section> = None;
         let options = Options::ENABLE_MATH
             | Options::ENABLE_TABLES
             | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
             | Options::ENABLE_STRIKETHROUGH;
 
         for (event, source) in Parser::new_ext(&self.source, options).into_offset_iter() {
+            if let Some(section) = &mut block_preview {
+                if section.preview.as_mut().unwrap().consume(event) {
+                    sections.push(block_preview.take().unwrap());
+                }
+                continue;
+            }
             if let Some(&index) = open_links.last() {
                 let link = &mut sections[index];
                 if matches!(event, Event::End(TagEnd::Link | TagEnd::Image))
@@ -120,6 +176,25 @@ impl Document {
                     fenced_body = Some((K::Mermaid, source.start));
                     None
                 }
+                Event::Start(Tag::CodeBlock(_)) => {
+                    block_preview = Some(Section::with_preview(
+                        source,
+                        BlockPreview::Code {
+                            body: String::new(),
+                        },
+                    ));
+                    None
+                }
+                Event::Start(Tag::Table(alignments)) => {
+                    block_preview = Some(Section::with_preview(
+                        source,
+                        BlockPreview::Table {
+                            alignments,
+                            rows: Vec::new(),
+                        },
+                    ));
+                    None
+                }
                 Event::Text(_) => {
                     if let Some((_, end)) = &mut fenced_body {
                         *end = (*end).max(source.end);
@@ -140,9 +215,7 @@ impl Document {
                     ..
                 }) => Some(link(K::Image, source, 2, dest_url.into_string())),
                 Event::Start(
-                    Tag::Table(_)
-                    | Tag::CodeBlock(_)
-                    | Tag::BlockQuote(_)
+                    Tag::BlockQuote(_)
                     | Tag::List(Some(_))
                     | Tag::Strikethrough
                     | Tag::HtmlBlock

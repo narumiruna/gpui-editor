@@ -1,6 +1,6 @@
 # GPUI Editor
 
-GPUI Editor is a local Markdown editor for macOS. It uses GPUI to show formatted text, images, links, Mermaid flowcharts, and LaTeX formulas in one editing surface. It saves Markdown without rewriting parts you did not edit.
+GPUI Editor is a local Markdown editor for macOS. It uses GPUI to show formatted text, tables, code blocks, images, links, Mermaid flowcharts, and LaTeX formulas in one editing surface. It saves Markdown without rewriting parts you did not edit.
 
 ## Build and run on macOS
 
@@ -34,7 +34,8 @@ The editor stores the folder and tab list locally in `~/Library/Application Supp
 - Use the toolbar icons to format a selection, insert a diagram, add an inline formula, or insert a link. Hover over a main toolbar icon to see its name, including **Open Folder…**, **New note**, and **Save**. The three-dot **More tools** button shows front matter, display formulas, images, and item actions. Click front matter, a diagram, or a formula to edit its source. Click elsewhere in the document to preview the change; this does not save the file.
 - For links, hover to see the full destination in the bottom bar. Click to open the web browser or follow an in-workspace `.md` link. To edit a link without opening it, place the caret at its edge and choose **More tools** → **Edit link**.
 - Image previews support local or HTTPS PNG, JPEG, GIF, and WebP still images. Relative paths are based on the document's folder. To fetch HTTPS previews, choose **Load remote images for this document**. The remote host receives the image request; redirects are not followed.
-- The editor supports a subset of Markdown. Inline math cannot span paragraph breaks. The Mermaid renderer supports flat flowcharts; unsupported blocks such as GFM tables are shown as read-only source.
+- GFM tables show a grid with a header and aligned plain-text cells. Ordinary fenced and indented code blocks show monospaced text without syntax highlighting. Both previews are read-only and scroll with the document. Click either preview to select the entire block; `Cmd-C` copies its original Markdown.
+- The editor supports a subset of Markdown. Inline math cannot span paragraph breaks. The Mermaid renderer supports flat flowcharts; unsupported blocks such as block quotes are shown as read-only source.
 - The editor stops a save if it detects an earlier external change. Existing files need a filesystem that supports atomic exchange. If a competing version appears during the exchange, the app reports a conflict and gives the path to the displaced version in a private `.gpui-save-*` folder. The draft may already be at the original path. Review both versions before continuing. If the editor reports that the folder moved during a first save, the draft may be in the moved folder. Check that folder before retrying. If a different folder takes the workspace path, select it again to switch workspaces.
 
 LaTeX previews use STIX Two Math through Mathra. See the [STIX Two Math license](docs/licenses/stix-two-math.txt).

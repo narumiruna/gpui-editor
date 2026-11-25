@@ -1,4 +1,4 @@
-use gpui_editor_document::{Document, EditError, Section, SectionKind};
+use gpui_editor_document::{Alignment, BlockPreview, Document, EditError, Section, SectionKind};
 
 const ORIGINAL: &str = include_str!("fixtures/sample.md");
 
@@ -48,7 +48,7 @@ fn source_positions_support_multiline_utf8_edits() {
 }
 
 #[test]
-fn rejects_edits_that_touch_an_unsupported_table() {
+fn rejects_edits_that_touch_a_table() {
     let mut doc = Document::new(ORIGINAL.into());
     let table = doc
         .sections()
@@ -61,7 +61,78 @@ fn rejects_edits_that_touch_an_unsupported_table() {
     );
     let inside = table.source.start + "| ".len();
     assert_eq!(doc.replace(inside..inside, "欄"), Err(EditError::ReadOnly));
+    assert!(matches!(table.preview, Some(BlockPreview::Table { .. })));
     assert_eq!(doc.source(), ORIGINAL);
+}
+
+#[test]
+fn projects_gfm_table_headers_alignment_and_cell_text() {
+    let source = concat!(
+        "| **功能** | `值` | 連結 |\r\n",
+        "| :--- | :---: | ---: |\r\n",
+        "| a\\|b | &amp; | [說明](notes.md) |\r\n",
+        "| 少一欄 | |\r\n",
+        "\r\n後段\r\n",
+    );
+    let doc = Document::new(source.into());
+    let sections = doc.sections();
+    assert_eq!(sections.len(), 1);
+    let table = &sections[0];
+    assert_eq!(table.kind, SectionKind::ReadOnly);
+    assert_eq!(
+        &source[table.source.clone()],
+        &source[..source.find("\r\n後段").unwrap()]
+    );
+    assert_eq!(
+        table.preview,
+        Some(BlockPreview::Table {
+            alignments: vec![Alignment::Left, Alignment::Center, Alignment::Right],
+            rows: vec![
+                vec!["功能".into(), "值".into(), "連結".into()],
+                vec!["a|b".into(), "&".into(), "說明".into()],
+                vec!["少一欄".into(), "".into(), "".into()],
+            ],
+        })
+    );
+    assert_eq!(doc.source(), source);
+}
+
+#[test]
+fn projects_code_as_literal_text_without_fences_or_structural_indent() {
+    for (raw, body) in [
+        (
+            "~~~~rust\r\nfn main() {\r\n\t$literal$\r\n}\r\n~~~~\r\n",
+            "fn main() {\n\t$literal$\n}\n",
+        ),
+        (
+            "    let x = 1;\n        next();\n",
+            "let x = 1;\n    next();\n",
+        ),
+        ("```\n```", ""),
+        ("```text\nstill code", "still code"),
+    ] {
+        let mut doc = Document::new(raw.into());
+        let sections = doc.sections();
+        assert_eq!(sections.len(), 1, "{raw:?}");
+        let code = &sections[0];
+        assert_eq!(code.kind, SectionKind::ReadOnly);
+        assert_eq!(
+            code.preview,
+            Some(BlockPreview::Code { body: body.into() }),
+            "{raw:?}"
+        );
+        assert_eq!(
+            doc.replace(code.source.clone(), ""),
+            Err(EditError::ReadOnly)
+        );
+        assert_eq!(doc.source(), raw);
+    }
+    let mermaid = Document::new("```mermaid\nflowchart LR\nA --> B\n```\n".into());
+    assert!(
+        find_section(&mermaid, SectionKind::Mermaid)
+            .preview
+            .is_none()
+    );
 }
 
 #[test]
