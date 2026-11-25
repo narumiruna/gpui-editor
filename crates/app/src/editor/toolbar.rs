@@ -5,7 +5,7 @@ use gpui::{
 };
 
 use super::{Editor, commands::Command};
-use crate::document::SectionKind;
+use crate::{app::developer::Picker, document::SectionKind};
 
 struct Tool {
     name: &'static str,
@@ -55,6 +55,12 @@ const SHELL_ICONS: &[(&str, &str)] = &[
     ("Workspace", glyph!("M3 6h7l2 2h9v11H3z")),
     ("File", glyph!("M6 3h8l4 4v14H6zM14 3v5h5M9 12h6m-6 4h6")),
     ("Saved", glyph!("m5 12 5 5L19 8")),
+    (
+        "Developer target",
+        glyph!(
+            "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-4 0a5 5 0 1 1-10 0 5 5 0 0 1 10 0Zm-4 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"
+        ),
+    ),
 ];
 
 const FORMAT: &[Tool] = &[
@@ -152,7 +158,15 @@ pub(crate) fn icon(name: &'static str, size: f32) -> gpui::Svg {
     svg().path(name).size(px(size)).flex_none()
 }
 
-pub(crate) fn button(name: &'static str, enabled: bool) -> Stateful<Div> {
+pub(crate) fn marked_button(
+    name: &'static str,
+    enabled: bool,
+    picker: Option<&Picker>,
+) -> Stateful<Div> {
+    Picker::mark(picker, button(name, enabled), name, name)
+}
+
+fn button(name: &'static str, enabled: bool) -> Stateful<Div> {
     let primary = name == "Save" && enabled;
     let color = rgb(if primary {
         0xffffff
@@ -188,24 +202,33 @@ pub(crate) fn group() -> Div {
     div().flex().flex_wrap().items_center().gap_1()
 }
 
-pub(crate) fn primary_groups(editor: &Entity<Editor>, enabled: bool) -> [Div; 2] {
+pub(crate) fn primary_groups(
+    editor: &Entity<Editor>,
+    enabled: bool,
+    picker: Option<&Picker>,
+) -> [Div; 2] {
     [FORMAT, INSERT].map(|tools| {
-        tool_group(tools, editor, enabled)
+        tool_group(tools, editor, enabled, picker)
             .pl_2()
             .border_l_1()
             .border_color(rgb(0xd3dce9))
     })
 }
 
-pub(crate) fn more_group(editor: &Entity<Editor>, enabled: bool) -> Div {
-    tool_group(MORE, editor, enabled)
+pub(crate) fn more_group(editor: &Entity<Editor>, enabled: bool, picker: Option<&Picker>) -> Div {
+    tool_group(MORE, editor, enabled, picker)
 }
 
-fn tool_group(tools: &[Tool], editor: &Entity<Editor>, enabled: bool) -> Div {
+fn tool_group(
+    tools: &[Tool],
+    editor: &Entity<Editor>,
+    enabled: bool,
+    picker: Option<&Picker>,
+) -> Div {
     group().children(tools.iter().map(|tool| {
         let command = tool.command;
         let editor = editor.clone();
-        button(tool.name, enabled).when(enabled, |button| {
+        marked_button(tool.name, enabled, picker).when(enabled, |button| {
             button.on_click(move |_, window, cx| {
                 editor.update(cx, |editor, cx| editor.command(command, window, cx));
             })

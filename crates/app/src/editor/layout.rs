@@ -10,7 +10,7 @@ use gpui::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::{Editor, ImageEntry};
+use super::{Editor, ImageEntry, PreviewDiagnostic};
 use crate::{
     document::{Section, SectionKind},
     media::{Target, image_target, load_image},
@@ -459,7 +459,14 @@ impl Editor {
                             let raster = match kind {
                                 SectionKind::Mermaid => render_mermaid(body, scale),
                                 _ => render_math(body, kind == SectionKind::DisplayMath, scale),
-                            }?;
+                            }
+                            .inspect_err(|_| {
+                                cx.emit(PreviewDiagnostic(if kind == SectionKind::Mermaid {
+                                    "Mermaid preview failed"
+                                } else {
+                                    "Math preview failed"
+                                }));
+                            })?;
                             if graphic_bytes + raster.bgra.len() > 64 * 1024 * 1024 {
                                 return Err("Preview memory limit reached".into());
                             }
@@ -488,6 +495,7 @@ impl Editor {
                             self.workspace.as_ref().map(Workspace::root),
                         ) {
                             Err(error) => {
+                                cx.emit(PreviewDiagnostic("Image destination rejected"));
                                 self.images
                                     .insert(destination, ImageEntry::Ready(Err(error)));
                                 Err("Image not loaded")
@@ -512,6 +520,9 @@ impl Editor {
                                             .ok_or_else(|| "Could not decode image".into())
                                     });
                                     let _ = editor.update(cx, |editor, cx| {
+                                        if result.is_err() {
+                                            cx.emit(PreviewDiagnostic("Image preview failed"));
+                                        }
                                         editor.complete_image_request(destination, request, result);
                                         cx.notify();
                                     });

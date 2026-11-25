@@ -14,11 +14,21 @@ use crate::{
     workspace::{DocumentFile, Workspace},
 };
 
+pub(crate) mod developer;
 mod quit;
+
+use developer::{Developer, Picker};
 
 actions!(
     shell,
-    [ChooseFolder, NewDocument, SaveDocument, Close, Quit]
+    [
+        ChooseFolder,
+        NewDocument,
+        SaveDocument,
+        Close,
+        Quit,
+        Preferences
+    ]
 );
 
 pub fn run() {
@@ -31,6 +41,7 @@ pub fn run() {
             KeyBinding::new("cmd-s", SaveDocument, None),
             KeyBinding::new("cmd-w", Close, None),
             KeyBinding::new("cmd-q", Quit, None),
+            KeyBinding::new("cmd-,", Preferences, None),
         ]);
         let window = cx.open_window(
             WindowOptions {
@@ -62,7 +73,11 @@ pub fn run() {
         cx.set_menus(vec![
             Menu {
                 name: "GPUI Editor".into(),
-                items: vec![MenuItem::action("Quit GPUI Editor", Quit)],
+                items: vec![
+                    MenuItem::action("Preferences…", Preferences),
+                    MenuItem::separator(),
+                    MenuItem::action("Quit GPUI Editor", Quit),
+                ],
             },
             Menu {
                 name: "File".into(),
@@ -108,7 +123,7 @@ fn bind_quit(window: WindowHandle<Shell>, cx: &mut App) {
 struct CurrentDocument {
     editor: Entity<Editor>,
     file: Option<DocumentFile>,
-    _subscriptions: [Subscription; 2],
+    _subscriptions: [Subscription; 3],
 }
 
 impl CurrentDocument {
@@ -125,6 +140,7 @@ struct Shell {
     active: Option<ActiveOperation>,
     error: Option<String>,
     show_more_tools: bool,
+    developer: Developer,
 }
 
 enum ActiveOperation {
@@ -180,6 +196,7 @@ impl Shell {
             active: None,
             error: None,
             show_more_tools: false,
+            developer: Developer::default(),
         }
     }
 
@@ -221,11 +238,15 @@ impl Shell {
             },
         );
         let updates = cx.observe(&editor, |_, _, cx| cx.notify());
+        let diagnostics =
+            cx.subscribe(&editor, |shell, _, event: &editor::PreviewDiagnostic, _| {
+                shell.developer.record(event.0);
+            });
         self.show_more_tools = false;
         self.current = Some(CurrentDocument {
             editor,
             file,
-            _subscriptions: [events, updates],
+            _subscriptions: [events, updates, diagnostics],
         });
     }
 
@@ -248,6 +269,16 @@ impl Shell {
             cx.notify();
             return;
         }
+        if self.developer.blocks_document_actions() && !matches!(intent, Intent::Exit) {
+            return;
+        }
+        let (operation_name, failure) = match &intent {
+            Intent::ChooseFolder => ("Choose workspace", "Choose workspace failed"),
+            Intent::New => ("New document", "New document failed"),
+            Intent::Open(_) => ("Open document", "Open document failed"),
+            Intent::Save => ("Save document", "Save document failed"),
+            Intent::Exit => ("Close editor", "Close editor failed"),
+        };
         self.active = Some(match intent {
             Intent::Save if self.current.is_none() => return,
             Intent::Save => ActiveOperation::Save { exit_queued: false },
@@ -288,6 +319,13 @@ impl Shell {
                     );
                     match result {
                         Ok((saved, change)) => {
+                            shell
+                                .developer
+                                .record(if saved.is_some() || change.is_some() {
+                                    operation_name
+                                } else {
+                                    "Document operation canceled"
+                                });
                             let did_save = saved.is_some();
                             if let Some(saved) = saved {
                                 shell.apply_save(saved, cx);
@@ -314,13 +352,21 @@ impl Shell {
                                 return;
                             }
                         }
-                        Err(error) => shell.error = Some(error),
+                        Err(error) => {
+                            shell.developer.record(failure);
+                            shell.error = Some(error);
+                        }
                     }
                     if let Some(current) = &shell.current {
                         current
                             .editor
                             .update(cx, |editor, cx| editor.set_input_enabled(true, cx));
-                        cx.focus_view(&current.editor, window);
+                        if !shell.developer.blocks_document_actions() {
+                            cx.focus_view(&current.editor, window);
+                        }
+                    }
+                    if shell.developer.blocks_document_actions() {
+                        shell.resume_developer_focus(window, cx);
                     }
                     cx.notify();
                 })
@@ -510,6 +556,7 @@ impl Render for Shell {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let busy = self.active.is_some();
         let current = self.current.as_ref();
+        let picker = self.developer.picker();
         let can_save = current.is_some() && !busy;
         let workspace_name = self
             .workspace
@@ -565,7 +612,8 @@ impl Render for Shell {
                 .and_then(|current| current.file.as_ref())
                 .is_some_and(|file| file.path() == path);
             let path = path.clone();
-            files = files.child(
+            files = files.child(Picker::mark(
+                picker.as_ref(),
                 div()
                     .id(("file", index))
                     .px_2()
@@ -586,7 +634,9 @@ impl Render for Shell {
                     .on_click(cx.listener(move |shell, _, window, cx| {
                         shell.start(Intent::Open(path.clone()), window, cx)
                     })),
-            );
+                "sidebar.file",
+                "Workspace file row",
+            ));
         }
         if self.files.is_empty() {
             files = files.child(div().px_2().pb_2().text_color(rgb(0x64748b)).child(
@@ -597,25 +647,42 @@ impl Render for Shell {
                 },
             ));
         }
-        let sidebar = sidebar.child(files);
+        let sidebar = Picker::mark(
+            picker.as_ref(),
+            sidebar.child(files),
+            "sidebar",
+            "Workspace sidebar",
+        );
         let file_tools = toolbar::group()
             .child(
-                toolbar::button("Open Folder…", !busy).when(!busy, |button| {
-                    button.on_click(cx.listener(|shell, _, window, cx| {
-                        shell.start(Intent::ChooseFolder, window, cx)
-                    }))
+                toolbar::marked_button("Open Folder…", !busy, picker.as_ref()).when(
+                    !busy,
+                    |button| {
+                        button.on_click(cx.listener(|shell, _, window, cx| {
+                            shell.start(Intent::ChooseFolder, window, cx)
+                        }))
+                    },
+                ),
+            )
+            .child(
+                toolbar::marked_button("New note", !busy, picker.as_ref()).when(!busy, |button| {
+                    button.on_click(
+                        cx.listener(|shell, _, window, cx| shell.start(Intent::New, window, cx)),
+                    )
                 }),
             )
-            .child(toolbar::button("New note", !busy).when(!busy, |button| {
-                button.on_click(
-                    cx.listener(|shell, _, window, cx| shell.start(Intent::New, window, cx)),
-                )
-            }))
-            .child(toolbar::button("Save", can_save).when(can_save, |button| {
-                button.on_click(
-                    cx.listener(|shell, _, window, cx| shell.start(Intent::Save, window, cx)),
-                )
-            }));
+            .child(
+                toolbar::marked_button("Save", can_save, picker.as_ref()).when(
+                    can_save,
+                    |button| {
+                        button.on_click(
+                            cx.listener(|shell, _, window, cx| {
+                                shell.start(Intent::Save, window, cx)
+                            }),
+                        )
+                    },
+                ),
+            );
         let mut tools = div()
             .flex()
             .flex_wrap()
@@ -633,16 +700,23 @@ impl Render for Shell {
                 "More tools"
             };
             tools = tools
-                .children(toolbar::primary_groups(&current.editor, edit_enabled))
-                .child(toolbar::button(label, !busy).when(!busy, |button| {
-                    button.on_click(cx.listener(|shell, _, _, cx| {
-                        shell.show_more_tools = !shell.show_more_tools;
-                        cx.notify();
-                    }))
-                }));
+                .children(toolbar::primary_groups(
+                    &current.editor,
+                    edit_enabled,
+                    picker.as_ref(),
+                ))
+                .child(toolbar::marked_button(label, !busy, picker.as_ref()).when(
+                    !busy,
+                    |button| {
+                        button.on_click(cx.listener(|shell, _, _, cx| {
+                            shell.show_more_tools = !shell.show_more_tools;
+                            cx.notify();
+                        }))
+                    },
+                ));
             if self.show_more_tools {
                 more_tools = Some(
-                    toolbar::more_group(&current.editor, edit_enabled)
+                    toolbar::more_group(&current.editor, edit_enabled, picker.as_ref())
                         .px_2()
                         .py_1()
                         .border_t_1()
@@ -655,7 +729,22 @@ impl Render for Shell {
             .bg(rgb(0xf9fbff))
             .border_b_1()
             .border_color(rgb(0xd3dce9))
-            .child(tools)
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .child(tools.flex_1().min_w_0())
+                    .when_some(self.developer_status(), |el, text| {
+                        el.child(
+                            div()
+                                .py_2()
+                                .text_xs()
+                                .text_color(rgb(0x475569))
+                                .child(text.to_owned()),
+                        )
+                    })
+                    .children(self.developer_icon(!busy, cx)),
+            )
             .children(more_tools);
         let path = current.map(|current| {
             current
@@ -718,6 +807,12 @@ impl Render for Shell {
                     })
                     .child(status),
             );
+        let document_bar = Picker::mark(
+            picker.as_ref(),
+            document_bar,
+            "document.status",
+            "Document status bar",
+        );
         let content = div().flex_1().min_w_0().min_h_0().overflow_hidden();
         let content = match &self.current {
             Some(current) => content.child(current.editor.clone()),
@@ -733,6 +828,12 @@ impl Render for Shell {
                     "Open a workspace folder or create a new document."
                 }),
         };
+        let content = Picker::mark(
+            picker.as_ref(),
+            content,
+            "editor.surface",
+            "Markdown editing surface",
+        );
         div()
             .relative()
             .track_focus(&self.focus)
@@ -742,6 +843,18 @@ impl Render for Shell {
             .bg(rgb(0xffffff))
             .text_color(rgb(0x0f172a))
             .text_sm()
+            .on_action(cx.listener(|shell, _: &Preferences, window, cx| {
+                shell.developer_preferences(window, cx);
+            }))
+            .capture_key_down(
+                cx.listener(|shell, event: &gpui::KeyDownEvent, window, cx| {
+                    if shell.developer.blocks_document_actions() && event.keystroke.key == "escape"
+                    {
+                        cx.stop_propagation();
+                        shell.cancel_developer(window, cx);
+                    }
+                }),
+            )
             .on_action(cx.listener(|shell, _: &ChooseFolder, window, cx| {
                 shell.start(Intent::ChooseFolder, window, cx)
             }))
@@ -778,6 +891,7 @@ impl Render for Shell {
                     .child(sidebar)
                     .child(content),
             )
+            .children(self.developer_layer(picker, cx))
             .when(busy, |el| {
                 el.child(div().absolute().inset_0().occlude().bg(rgba(0xffffff18)))
             })

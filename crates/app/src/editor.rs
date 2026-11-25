@@ -411,6 +411,10 @@ impl Editor {
 pub struct OpenLocalDocument(pub PathBuf);
 impl EventEmitter<OpenLocalDocument> for Editor {}
 
+pub(crate) struct PreviewDiagnostic(pub &'static str);
+
+impl EventEmitter<PreviewDiagnostic> for Editor {}
+
 impl Focusable for Editor {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
