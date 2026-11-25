@@ -35,6 +35,12 @@ impl Workspace {
         &self.root
     }
 
+    /// Return the device and inode captured when the workspace was opened, without I/O.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub fn root_identity(&self) -> (u64, u64) {
+        self.identity
+    }
+
     /// List only regular files directly in the workspace. Do not follow sidebar symlinks.
     pub fn markdown_files(&self) -> io::Result<Vec<PathBuf>> {
         self.check_root()?;
@@ -51,9 +57,16 @@ impl Workspace {
         Ok(files)
     }
 
+    /// Resolve an absolute or workspace-relative Markdown file path without reading the file.
+    pub fn resolve_document(&self, path: &Path) -> io::Result<PathBuf> {
+        let path = self.resolve_markdown_path(path)?;
+        file_metadata(&path)?;
+        Ok(path)
+    }
+
     /// Open a Markdown file by absolute path or by a path relative to the workspace root.
     pub fn read_document(&self, path: &Path) -> io::Result<DocumentFile> {
-        let path = self.resolve_document(path)?;
+        let path = self.resolve_markdown_path(path)?;
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         let parent = path.parent().expect("an absolute document has a parent");
         #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -61,7 +74,9 @@ impl Workspace {
         let metadata = file_metadata(&path)?;
         let stamp = Stamp::read(&metadata)?;
         let source = fs::read_to_string(&path)?;
-        if self.resolve_document(&path)? != path || Stamp::read(&file_metadata(&path)?)? != stamp {
+        if self.resolve_markdown_path(&path)? != path
+            || Stamp::read(&file_metadata(&path)?)? != stamp
+        {
             return Err(external_change());
         }
         #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -103,7 +118,7 @@ impl Workspace {
         Ok(canonical)
     }
 
-    fn resolve_document(&self, path: &Path) -> io::Result<PathBuf> {
+    fn resolve_markdown_path(&self, path: &Path) -> io::Result<PathBuf> {
         check_extension(path)?;
         let path = self.resolve(path)?;
         check_extension(&path)?;

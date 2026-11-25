@@ -111,7 +111,7 @@ impl Editor {
     pub fn new(source: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         cx.on_blur(&focus, window, |editor, _, cx| {
-            editor.finish_active();
+            editor.selecting = false;
             editor.marked = None;
             cx.notify();
         })

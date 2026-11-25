@@ -113,7 +113,7 @@ fn picker_selects_wrapped_controls_and_scrolled_rows_without_activating_them(
             shell.files = workspace.markdown_files().unwrap();
             shell.workspace = Some(workspace.clone());
             shell.open_editor(Some(file), window, cx);
-            let editor = &shell.current.as_ref().unwrap().editor;
+            let editor = &shell.current().unwrap().editor;
             editor.update(cx, |editor, cx| {
                 editor.replace_text_in_range(Some(0..8), "draft", window, cx)
             });
@@ -137,7 +137,7 @@ fn picker_selects_wrapped_controls_and_scrolled_rows_without_activating_them(
             let shell = shell.read(cx);
             assert_eq!(shell.developer.draft.as_ref().unwrap().target.id, target);
             assert!(!shell.show_more_tools);
-            assert!(shell.current.as_ref().unwrap().dirty(cx));
+            assert!(shell.current().unwrap().dirty(cx));
         });
         click(cx, "Cancel");
     }
@@ -158,17 +158,7 @@ fn picker_selects_wrapped_controls_and_scrolled_rows_without_activating_them(
             shell.developer.draft.as_ref().unwrap().target.id,
             "sidebar.file"
         );
-        assert_eq!(
-            shell
-                .current
-                .as_ref()
-                .unwrap()
-                .file
-                .as_ref()
-                .unwrap()
-                .path(),
-            file
-        );
+        assert_eq!(shell.current().unwrap().file.as_ref().unwrap().path(), file);
     });
     assert_eq!(fs::read_to_string(&file).unwrap(), "original");
 }
@@ -184,7 +174,7 @@ fn a_disconnected_draft_survives_until_explicitly_canceled(cx: &mut TestAppConte
     cx.update(|window, cx| {
         shell.update(cx, |shell, cx| {
             shell.developer_event(Event::Disconnected { id: 1 }, window, cx);
-            assert!(shell.current.is_none());
+            assert!(shell.current().is_none());
             assert_eq!(
                 shell.developer.draft.as_ref().unwrap().text.read(cx).text(),
                 "keep this draft\n文字"
@@ -364,14 +354,7 @@ fn only_explicit_send_delivers_feedback_to_the_approved_socket(cx: &mut TestAppC
     cx.update(|_, cx| {
         let shell = shell.read(cx);
         assert_eq!(
-            shell
-                .current
-                .as_ref()
-                .unwrap()
-                .file
-                .as_ref()
-                .unwrap()
-                .path(),
+            shell.current().unwrap().file.as_ref().unwrap().path(),
             preview_file
         );
         assert!(shell.developer.draft.is_none());

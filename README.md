@@ -14,13 +14,27 @@ just run
 
 This builds and starts the app. It uses `/Applications/Xcode.app` by default. If Xcode is installed elsewhere, set `DEVELOPER_DIR` to that installation's `Contents/Developer` directory before running `just run`.
 
-The command takes no path. In the window, choose **Open Folder…**, then select a Markdown file from the sidebar. Use **New note** for a blank document and **Save** or `Cmd-S` to save. The document bar shows the filename and save status. The sidebar lists only the workspace's top-level `.md` files.
+The command takes no path. If there is no workspace to restore, choose **Open Folder…** in the window. The sidebar lists only the workspace's top-level `.md` files. Opening a file from the sidebar or following a Markdown link within the workspace opens a tab or selects its existing tab. **New note** opens a separate blank tab.
 
-- Use the toolbar icons to format a selection, insert a diagram, add an inline formula, or insert a link. Hover over a main toolbar icon to see its name, including **Open Folder…**, **New note**, and **Save**. The three-dot **More tools** button shows front matter, display formulas, images, and item actions. Click front matter, a diagram, or a formula to edit its source. Click outside the item to preview the change; this does not save the file.
+### Work with tabs
+
+- Click a tab to switch without saving. Each open tab keeps its own draft, caret, and undo history. The tab bar shows the selected tab and marks unsaved changes. Scroll the tab bar if not all tabs fit. **Save** or `Cmd-S` saves only the selected tab.
+- Use a tab's close button or `Cmd-W` to close a tab. `Cmd-W` targets the selected tab. When you close the selected tab, the editor selects the tab to its right, or the one to its left if there is none on the right. Closing the last tab leaves the workspace and sidebar open. With no tabs, `Cmd-W` closes the window.
+- Closing a tab checks that tab for unsaved changes. Switching to a different workspace, using **Close Window** or the window close button, or quitting with `Cmd-Q` checks all tabs in order. For each draft, choose **Save**, **Don’t Save**, or **Cancel**. If you cancel or a save fails, the editor returns to the original tab. Changes already saved stay saved; the other drafts stay open. Choosing the same workspace again only refreshes the sidebar.
+- Finish or cancel any active input method composition before saving, closing, or switching tabs. Then try the action again.
+
+### Reopen the last workspace
+
+After a normal exit, the next launch opens the last workspace and its saved tabs in order. It skips missing or unreadable files and selects the last selected tab if it can be restored, or the first available tab. If no tabs can be restored, it opens only the workspace. If the workspace is missing, inaccessible, or has been replaced, choose a folder again with **Open Folder…**. A missing or unreadable session record does not prevent manual selection, and the editor never opens the Terminal's current folder automatically.
+
+The editor stores the folder and tab list locally in `~/Library/Application Support/GPUI Editor/session.json`, not in the workspace. It does not autosave documents or recover drafts after a crash. Standalone files saved outside a workspace, caret positions, undo history, remote image permissions, Developer Mode, and Pi pairings do not return on restart. If the editor cannot update the session record when closing, it leaves the previous record in place and offers **Keep Window Open** or **Quit Without Updating**.
+
+### Edit Markdown
+
+- Use the toolbar icons to format a selection, insert a diagram, add an inline formula, or insert a link. Hover over a main toolbar icon to see its name, including **Open Folder…**, **New note**, and **Save**. The three-dot **More tools** button shows front matter, display formulas, images, and item actions. Click front matter, a diagram, or a formula to edit its source. Click elsewhere in the document to preview the change; this does not save the file.
 - For links, hover to see the full destination in the bottom bar. Click to open the web browser or follow an in-workspace `.md` link. To edit a link without opening it, place the caret at its edge and choose **More tools** → **Edit link**.
 - Image previews support local or HTTPS PNG, JPEG, GIF, and WebP still images. Relative paths are based on the document's folder. To fetch HTTPS previews, choose **Load remote images for this document**. The remote host receives the image request; redirects are not followed.
 - The editor supports a subset of Markdown. Inline math cannot span paragraph breaks. The Mermaid renderer supports flat flowcharts; unsupported blocks such as GFM tables are shown as read-only source.
-- Finish or cancel any active input method composition before saving, closing, or switching documents. Then try the action again.
 - The editor stops a save if it detects an earlier external change. Existing files need a filesystem that supports atomic exchange. If a competing version appears during the exchange, the app reports a conflict and gives the path to the displaced version in a private `.gpui-save-*` folder. The draft may already be at the original path. Review both versions before continuing. If the editor reports that the folder moved during a first save, the draft may be in the moved folder. Check that folder before retrying. If a different folder takes the workspace path, select it again to switch workspaces.
 
 LaTeX previews use STIX Two Math through Mathra. See the [STIX Two Math license](docs/licenses/stix-two-math.txt).
