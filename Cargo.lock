@@ -2216,7 +2216,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-editor"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "gpui",
