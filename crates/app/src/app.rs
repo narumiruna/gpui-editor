@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use gpui::{
     App, Application, Bounds, Context, Entity, FocusHandle, KeyBinding, Menu, MenuItem, OsAction,
-    Pixels, ScrollHandle, Subscription, TitlebarOptions, Window, WindowBounds, WindowHandle,
-    WindowOptions, actions, div, point, prelude::*, px, size,
+    Pixels, ScrollHandle, Subscription, TitlebarOptions, WeakEntity, Window, WindowBounds,
+    WindowHandle, WindowOptions, actions, div, point, prelude::*, px, size,
 };
 
 use crate::{
@@ -17,6 +17,7 @@ use crate::{
 pub(crate) mod developer;
 mod editor_pane;
 mod operation;
+mod palette;
 mod quit;
 mod session;
 mod sidebar;
@@ -26,6 +27,7 @@ mod tests;
 mod window_chrome;
 
 use developer::Developer;
+use palette::Palette;
 use sidebar::Sidebar;
 
 actions!(
@@ -38,7 +40,8 @@ actions!(
         CloseWindow,
         ToggleSidebar,
         Quit,
-        Preferences
+        Preferences,
+        OpenPalette
     ]
 );
 
@@ -54,6 +57,7 @@ pub fn run() {
             KeyBinding::new("cmd-q", Quit, None),
             KeyBinding::new("cmd-,", Preferences, None),
             KeyBinding::new("cmd-alt-s", ToggleSidebar, None),
+            KeyBinding::new("cmd-p", OpenPalette, None),
         ]);
         let window = cx.open_window(
             WindowOptions {
@@ -121,7 +125,10 @@ pub fn run() {
             },
             Menu {
                 name: "View".into(),
-                items: vec![MenuItem::action("Toggle Sidebar", ToggleSidebar)],
+                items: vec![
+                    MenuItem::action("Command Palette…", OpenPalette),
+                    MenuItem::action("Toggle Sidebar", ToggleSidebar),
+                ],
             },
         ]);
         cx.activate(true);
@@ -170,13 +177,16 @@ struct Shell {
     next_tab: TabId,
     tab_scroll: ScrollHandle,
     tab_strip_width: Option<Pixels>,
+    document_drag: Option<WeakEntity<tabs::DragPreview>>,
     _appearance: Subscription,
+    _activation: Subscription,
     session_path: Option<PathBuf>,
     restoring: bool,
     active: Option<ActiveOperation>,
     error: Option<String>,
     show_more_tools: bool,
     developer: Developer,
+    palette: Option<Palette>,
 }
 
 enum ActiveOperation {
@@ -207,6 +217,11 @@ impl Shell {
                 .is_err()
         });
         let appearance = cx.observe_window_appearance(window, |_, _, cx| cx.notify());
+        let activation = cx.observe_window_activation(window, |shell, window, cx| {
+            if !window.is_window_active() {
+                shell.cancel_document_drag(window, cx);
+            }
+        });
         let sidebar = Sidebar::new(window, cx);
         Self {
             focus,
@@ -217,13 +232,16 @@ impl Shell {
             next_tab: 0,
             tab_scroll: ScrollHandle::new(),
             tab_strip_width: None,
+            document_drag: None,
             _appearance: appearance,
+            _activation: activation,
             session_path: None,
             restoring: false,
             active: None,
             error: None,
             show_more_tools: false,
             developer: Developer::default(),
+            palette: None,
         }
     }
 
@@ -315,6 +333,9 @@ impl Shell {
     }
 
     fn focus_document(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.palette.is_some() {
+            return;
+        }
         if self.developer.blocks_document_actions() {
             self.resume_developer_focus(window, cx);
         } else if let Some(current) = self.current() {
@@ -347,7 +368,9 @@ impl Shell {
     }
 
     fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.selected.is_none() && self.developer.blocks_document_actions() {
+        if self.palette.is_some()
+            || (self.selected.is_none() && self.developer.blocks_document_actions())
+        {
             return;
         }
         self.start(
@@ -358,7 +381,8 @@ impl Shell {
     }
 
     fn is_composing(&self, cx: &App) -> bool {
-        self.sidebar.search.is_composing(cx)
+        self.palette_is_composing(cx)
+            || self.sidebar.search.is_composing(cx)
             || self
                 .tabs
                 .iter()
@@ -372,7 +396,7 @@ impl Shell {
             cx.notify();
             return false;
         }
-        window_close || !self.developer.blocks_document_actions()
+        window_close || (self.palette.is_none() && !self.developer.blocks_document_actions())
     }
 
     fn restore_session(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
@@ -435,9 +459,9 @@ impl Render for Shell {
             .relative()
             .track_focus(&self.focus)
             .capture_any_mouse_down(cx.listener(|shell, _, window, cx| {
-                // The shell's default mouse focus would blur the editor before the
-                // clicked control can check for marked text.
-                if shell.is_composing(cx) {
+                // Keep focus in the palette, or in the field with marked text,
+                // until the clicked control decides how to handle the input.
+                if shell.palette.is_some() || shell.is_composing(cx) {
                     window.prevent_default();
                 }
             }))
@@ -452,7 +476,16 @@ impl Render for Shell {
             .capture_key_down(
                 cx.listener(|shell, event: &gpui::KeyDownEvent, window, cx| {
                     if event.keystroke.key == "escape" {
-                        if shell.developer.blocks_document_actions() {
+                        if shell.cancel_document_drag(window, cx) {
+                            cx.stop_propagation();
+                            window.prevent_default();
+                        } else if shell.palette.is_some() {
+                            if !shell.palette_is_composing(cx) {
+                                cx.stop_propagation();
+                                window.prevent_default();
+                                shell.close_palette(window, cx);
+                            }
+                        } else if shell.developer.blocks_document_actions() {
                             cx.stop_propagation();
                             shell.cancel_developer(window, cx);
                         } else if shell.show_more_tools && !shell.is_composing(cx) {
@@ -463,6 +496,9 @@ impl Render for Shell {
                     }
                 }),
             )
+            .on_action(cx.listener(|shell, _: &OpenPalette, window, cx| {
+                shell.open_palette(window, cx);
+            }))
             .on_action(cx.listener(|shell, _: &ChooseFolder, window, cx| {
                 shell.start(Intent::ChooseFolder, window, cx)
             }))
@@ -486,6 +522,7 @@ impl Render for Shell {
             })
             .child(self.editor_pane(controls, theme, picker.as_ref(), cx))
             .children(self.developer_layer(picker, cx))
+            .children(self.palette_layer(theme, window, cx))
             .when(busy, |el| {
                 el.child(
                     div()

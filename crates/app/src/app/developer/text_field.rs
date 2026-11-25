@@ -1,4 +1,4 @@
-//! Plain text input for feedback and search. Long lines scroll without wrapping.
+//! Plain text input for feedback, search, and the command palette.
 
 use std::{borrow::Cow, ops::Range};
 
@@ -18,14 +18,22 @@ use crate::{
 const MAX_BYTES: usize = 16 * 1024;
 const FEEDBACK_CONTEXT: &str = "FeedbackTextField";
 const SEARCH_CONTEXT: &str = "SearchTextField";
+const PALETTE_CONTEXT: &str = "PaletteTextField";
 
 /// The user pressed Enter in the search field without an active IME composition.
 pub struct SearchSubmitted;
+
+pub(crate) enum PaletteInput {
+    Previous,
+    Next,
+    Run,
+}
 
 #[derive(Clone, Copy)]
 enum Mode {
     Feedback,
     Search,
+    Palette,
 }
 
 struct KeysInstalled;
@@ -50,6 +58,8 @@ actions!(
         Delete,
         Newline,
         SubmitSearch,
+        RunPalette,
+        KeepPaletteFocus,
     ]
 );
 
@@ -78,10 +88,14 @@ impl TextField {
         Self::with_mode(Mode::Search, cx)
     }
 
+    pub(crate) fn palette(cx: &mut Context<Self>) -> Self {
+        Self::with_mode(Mode::Palette, cx)
+    }
+
     fn with_mode(mode: Mode, cx: &mut Context<Self>) -> Self {
         if !cx.has_global::<KeysInstalled>() {
             cx.set_global(KeysInstalled);
-            for context in [Some(FEEDBACK_CONTEXT), Some(SEARCH_CONTEXT)] {
+            for context in [FEEDBACK_CONTEXT, SEARCH_CONTEXT, PALETTE_CONTEXT].map(Some) {
                 cx.bind_keys([
                     KeyBinding::new("left", Left, context),
                     KeyBinding::new("right", Right, context),
@@ -109,6 +123,11 @@ impl TextField {
                 KeyBinding::new("shift-enter", Newline, feedback),
                 KeyBinding::new("enter", SubmitSearch, Some(SEARCH_CONTEXT)),
                 KeyBinding::new("shift-enter", Newline, Some(SEARCH_CONTEXT)),
+                KeyBinding::new("up", Up, Some(PALETTE_CONTEXT)),
+                KeyBinding::new("down", Down, Some(PALETTE_CONTEXT)),
+                KeyBinding::new("enter", RunPalette, Some(PALETTE_CONTEXT)),
+                KeyBinding::new("tab", KeepPaletteFocus, Some(PALETTE_CONTEXT)),
+                KeyBinding::new("shift-tab", KeepPaletteFocus, Some(PALETTE_CONTEXT)),
             ]);
         }
         Self {
@@ -168,7 +187,7 @@ impl TextField {
         }
         let text = match self.mode {
             Mode::Feedback => Cow::Borrowed(text),
-            Mode::Search => single_line(text),
+            Mode::Search | Mode::Palette => single_line(text),
         };
         let available = MAX_BYTES - (self.text.len() - range.len());
         let inserted = &text[..text.floor_char_boundary(available)];
@@ -263,7 +282,16 @@ impl TextField {
         true
     }
 
+    fn palette_input(&self, input: PaletteInput, cx: &mut Context<Self>) {
+        if self.editable && !self.is_composing() {
+            cx.emit(input);
+        }
+    }
+
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.mode, Mode::Palette) && self.is_composing() {
+            return;
+        }
         self.focus(window);
         if let Some(layout) = &self.layout {
             self.selecting = true;
@@ -281,6 +309,7 @@ impl TextField {
 }
 
 impl EventEmitter<SearchSubmitted> for TextField {}
+impl EventEmitter<PaletteInput> for TextField {}
 
 impl Focusable for TextField {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -647,11 +676,16 @@ impl Render for TextField {
                     selection: rgba(0x4a86ed50),
                 },
             ),
-            Mode::Search => {
+            Mode::Search | Mode::Palette => {
                 let theme = Theme::for_window(window);
+                let (id, context) = if matches!(self.mode, Mode::Palette) {
+                    ("palette-text-field", PALETTE_CONTEXT)
+                } else {
+                    ("search-text-field", SEARCH_CONTEXT)
+                };
                 (
-                    "search-text-field",
-                    SEARCH_CONTEXT,
+                    id,
+                    context,
                     px(38.),
                     FieldColors {
                         surface: theme.surface,
@@ -678,6 +712,7 @@ impl Render for TextField {
         let field = cx.entity();
         div()
             .id(id)
+            .debug_selector(move || id.into())
             .w_full()
             .h(field_height)
             .min_w_0()
@@ -688,7 +723,7 @@ impl Render for TextField {
             .bg(colors.surface)
             .map(|element| match self.mode {
                 Mode::Feedback => element.overflow_scroll(),
-                Mode::Search => element
+                Mode::Search | Mode::Palette => element
                     .tab_index(0)
                     .flex_none()
                     .overflow_y_hidden()
@@ -712,8 +747,20 @@ impl Render for TextField {
             .on_action(cx.listener(|e, _: &Right, _, cx| e.horizontal(true, false, cx)))
             .on_action(cx.listener(|e, _: &SelectLeft, _, cx| e.horizontal(false, true, cx)))
             .on_action(cx.listener(|e, _: &SelectRight, _, cx| e.horizontal(true, true, cx)))
-            .on_action(cx.listener(|e, _: &Up, _, cx| e.vertical(false, false, cx)))
-            .on_action(cx.listener(|e, _: &Down, _, cx| e.vertical(true, false, cx)))
+            .on_action(cx.listener(|e, _: &Up, _, cx| {
+                if matches!(e.mode, Mode::Palette) {
+                    e.palette_input(PaletteInput::Previous, cx);
+                } else {
+                    e.vertical(false, false, cx);
+                }
+            }))
+            .on_action(cx.listener(|e, _: &Down, _, cx| {
+                if matches!(e.mode, Mode::Palette) {
+                    e.palette_input(PaletteInput::Next, cx);
+                } else {
+                    e.vertical(true, false, cx);
+                }
+            }))
             .on_action(cx.listener(|e, _: &SelectUp, _, cx| e.vertical(false, true, cx)))
             .on_action(cx.listener(|e, _: &SelectDown, _, cx| e.vertical(true, true, cx)))
             .on_action(cx.listener(|e, _: &LineStart, _, cx| e.line_edge(false, false, cx)))
@@ -737,6 +784,13 @@ impl Render for TextField {
                         cx.emit(SearchSubmitted);
                     }
                 }))
+            })
+            .when(matches!(self.mode, Mode::Palette), |element| {
+                element
+                    .on_action(cx.listener(|e, _: &RunPalette, _, cx| {
+                        e.palette_input(PaletteInput::Run, cx);
+                    }))
+                    .on_action(|_: &KeepPaletteFocus, _, _| {})
             })
             .on_action(cx.listener(|e, _: &Copy, _, cx| {
                 e.copy(cx);

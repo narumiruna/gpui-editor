@@ -1,9 +1,16 @@
 //! The scrollable tab strip and labels shared with unsaved-change prompts.
 
-use gpui::{Context, Div, FontWeight, Pixels, SharedString, Window, div, prelude::*, px};
+use gpui::{
+    Context, Div, FontWeight, MouseButton, Pixels, SharedString, Window, div, prelude::*, px,
+};
 
 use super::{DocumentTab, Intent, Shell, developer::Picker, filename, window_chrome};
 use crate::{editor::toolbar::TextTooltip, theme::Theme};
+
+mod reorder;
+pub(super) use reorder::DragPreview;
+#[cfg(test)]
+mod tests;
 
 const DRAG_AREA_WIDTH: Pixels = px(16.);
 
@@ -111,7 +118,9 @@ impl Shell {
             .flex()
             .min_w_0()
             .overflow_x_scroll()
-            .track_scroll(&self.tab_scroll);
+            .track_scroll(&self.tab_scroll)
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::drop_document_tab));
+        let can_drag = self.can_drag_document_tabs(cx);
         for (index, tab) in self.tabs.iter().enumerate() {
             let id = tab.id;
             let selected = self.selected == Some(id);
@@ -162,6 +171,20 @@ impl Shell {
                             })
                             .child(div().min_w_0().truncate().child(title))
                             .tooltip(move |_, cx| cx.new(|_| TextTooltip(tip.clone())).into())
+                            .when(can_drag, |tab| {
+                                let shell = cx.weak_entity();
+                                tab.on_mouse_down(MouseButton::Left, |_, window, _| {
+                                    // The click can select on release. Do not blur the editor
+                                    // while GPUI determines whether this is a drag instead.
+                                    window.prevent_default();
+                                })
+                                .on_drag(
+                                    reorder::DocumentDrag(id),
+                                    move |drag, _, window, cx| {
+                                        drag.preview(shell.clone(), theme.accent, window, cx)
+                                    },
+                                )
+                            })
                             .on_click(cx.listener(move |shell, _, window, cx| {
                                 if shell.active.is_none() && shell.allow_document_action(false, cx)
                                 {

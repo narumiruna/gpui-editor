@@ -18,6 +18,12 @@ The command takes no path. If there is no workspace to restore, choose **Open Fo
 
 Drag the divider to resize the sidebar. Use the sidebar chevron, **View → Toggle Sidebar**, or `Cmd-Option-S` to hide or show it without changing its state or the active document tab. When the sidebar is hidden, **Open Folder…** and **New note** move to the editor toolbar. The macOS window controls share the top row; drag an empty part of that row to move the window.
 
+### Run commands from the keyboard
+
+Press `Cmd-P` to open the Command Palette. Type part of a command name to find **Open Folder…**, **New note**, **Save**, or **Toggle Sidebar**, regardless of letter case. Use the up and down arrow keys to select a command and `Enter` to run it. If you use an input method, finish composing before running the command. Press `Esc` to close the palette without running a command and return to your previous focus.
+
+The palette uses the same rules as the toolbar and menus. For example, you cannot run **Save** without a document, and opening a different folder still checks for unsaved changes. To find files or text in the workspace, use **Search** in the sidebar instead.
+
 ### Find documents in the sidebar
 
 The sidebar starts on **Tree**. Select a tab below the sidebar toolbar to show one view at a time. At narrow widths, hover over a tab icon to see its name. Drag a sidebar tab to reorder it. Switching or reordering sidebar tabs does not switch, save, or reorder document tabs.
@@ -35,13 +41,14 @@ The selected sidebar view, tab order, and width stay in the window when you hide
 ### Work with tabs
 
 - Click a tab to switch without saving. Each open tab keeps its own draft, caret, and undo history. The tab bar shows the selected tab and marks unsaved changes. Scroll the tab bar if not all tabs fit. **Save** or `Cmd-S` saves only the selected tab.
+- Drag a document tab to reorder it without switching documents or changing drafts, carets, or undo history. The insertion line shows where the tab will go. Drag near either edge to scroll to tabs that do not fit. Drop outside the document tab row or press `Esc` to cancel. Sidebar tabs and document tabs cannot move between rows.
 - Use a tab's close button or `Cmd-W` to close a tab. `Cmd-W` targets the selected tab. When you close the selected tab, the editor selects the tab to its right, or the one to its left if there is none on the right. Closing the last tab leaves the workspace and sidebar open. With no tabs, `Cmd-W` closes the window.
 - Closing a tab checks that tab for unsaved changes. Switching to a different workspace, using **Close Window** or the window close button, or quitting with `Cmd-Q` checks all tabs in order. For each draft, choose **Save**, **Don’t Save**, or **Cancel**. If you cancel or a save fails, the editor returns to the original tab. Changes already saved stay saved; the other drafts stay open. Choosing the same workspace again only refreshes the sidebar.
 - Finish or cancel any active input method composition before saving, closing, or switching tabs. Then try the action again.
 
 ### Reopen the last workspace
 
-After a normal exit, the next launch opens the last workspace and its saved tabs in order. It skips missing or unreadable files and selects the last selected tab if it can be restored, or the first available tab. If no tabs can be restored, it opens only the workspace. If the workspace is missing, inaccessible, or has been replaced, choose a folder again with **Open Folder…**. A missing or unreadable session record does not prevent manual selection, and the editor never opens the Terminal's current folder automatically.
+After a normal exit, the next launch opens the last workspace and its saved tabs in their last order, including any changes made by dragging. It skips missing or unreadable files and selects the last selected tab if it can be restored, or the first available tab. If no tabs can be restored, it opens only the workspace. If the workspace is missing, inaccessible, or has been replaced, choose a folder again with **Open Folder…**. A missing or unreadable session record does not prevent manual selection, and the editor never opens the Terminal's current folder automatically.
 
 The editor stores the folder and tab list locally in `~/Library/Application Support/GPUI Editor/session.json`, not in the workspace. It does not autosave documents or recover drafts after a crash. Standalone files saved outside a workspace, caret positions, undo history, remote image permissions, Developer Mode, and Pi pairings do not return on restart. If the editor cannot update the session record when closing, it leaves the previous record in place and offers **Keep Window Open** or **Quit Without Updating**.
 
@@ -91,6 +98,6 @@ prek run --all-files
 bun test ./.pi/tests/gpui-editor.test.ts
 ```
 
-GitHub Actions runs Rust checks with Rust 1.95.0 on Linux and macOS. The Linux job checks the portable document, rendering, and file-handling code; only macOS builds the GPUI application. Automated GPUI tests use a simulated window, not the real macOS input method. If macOS asks the editor to close during logout or restart, the editor can protect unsaved changes, but the system request must be started again after the editor closes. See the [manual acceptance steps](docs/prd/gpui-editor.md#macos-原生驗收) for the remaining native checks.
+GitHub Actions runs Rust checks with Rust 1.95.0 on Linux and macOS. The Linux job checks the portable document, rendering, and file-handling code; only macOS builds the GPUI application. Automated GPUI tests use a simulated window and do not verify native macOS input, drag behavior, or dialogs. If macOS asks the editor to close during logout or restart, the editor can protect unsaved changes, but the system request must be started again after the editor closes. See the [manual acceptance steps](docs/prd/gpui-editor.md#macos-原生驗收) for the remaining native checks.
 
 [Changenote](https://github.com/changenote/changenote) uses [`.changenote/`](.changenote/) to maintain release notes and a release pull request. Changes to the editor do not require a manual release workflow run.
