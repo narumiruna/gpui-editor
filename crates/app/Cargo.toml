@@ -1,0 +1,26 @@
+[package]
+name = "gpui-editor"
+version = "0.0.0"
+edition.workspace = true
+description = "A local Markdown editor for macOS"
+readme = "../../README.md"
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+gpui-editor-document = { path = "../document" }
+gpui-editor-preview = { path = "../preview" }
+gpui-editor-workspace = { path = "../workspace" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+gpui.workspace = true
+image.workspace = true
+objc2 = "0.6.5"
+serde_yaml_ng = "0.10.0"
+unicode-segmentation = "1.12.0"
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+resvg.workspace = true
+tempfile.workspace = true

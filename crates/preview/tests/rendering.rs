@@ -1,4 +1,4 @@
-use gpui_editor::rendering::{Raster, render_math, render_mermaid};
+use gpui_editor_preview::rendering::{Raster, render_math, render_mermaid};
 
 fn assert_visible(raster: &Raster) {
     assert!(raster.width > 0 && raster.height > 0);

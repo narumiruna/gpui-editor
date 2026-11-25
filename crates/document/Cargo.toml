@@ -1,0 +1,11 @@
+[package]
+name = "gpui-editor-document"
+version = "0.0.0"
+edition.workspace = true
+description = "Markdown source editing for GPUI Editor"
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+pulldown-cmark = { version = "0.13.6", default-features = false }

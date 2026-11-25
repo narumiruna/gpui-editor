@@ -75,7 +75,7 @@ flowchart TD
 
 ### 共用驗收案例
 
-在暫存資料夾建立兩個測試工作區 A 與 B，不使用原有文件。將 [sample.md](../../tests/fixtures/sample.md) 複製到 A 根目錄，並保留一份未修改的基準副本在 A 之外。在 A 另建 `other.md`、`ignore.txt`、`notes/guide.md`，以及任一有效 PNG `images/example.png`。在 B 建立一份不同名稱的 `.md` 檔案。每個 `.md` 都應有可辨識的標題。
+在暫存資料夾建立兩個測試工作區 A 與 B，不使用原有文件。將 [sample.md](../../crates/document/tests/fixtures/sample.md) 複製到 A 根目錄，並保留一份未修改的基準副本在 A 之外。在 A 另建 `other.md`、`ignore.txt`、`notes/guide.md`，以及任一有效 PNG `images/example.png`。在 B 建立一份不同名稱的 `.md` 檔案。每個 `.md` 都應有可辨識的標題。
 
 1. 開啟 A。確認側欄只列出 `sample.md` 與 `other.md`，且兩者都可開啟。只修改 `sample.md` 的標題並儲存，用 `diff -u` 與基準副本比對。確認只有標題一行不同，包含 front matter、粗體標記與表格空格的其他原文均未變。
 2. 分別點擊並修改 front matter、流程圖以及兩種公式。點到項目外後確認預覽已更新、磁碟檔案尚未變更。再於一個項目仍在編輯時儲存並重開，核對語法與預覽。用副本分別測試無效 YAML、Mermaid 和 LaTeX，確認錯誤可見、原文可儲存且可就地修正。

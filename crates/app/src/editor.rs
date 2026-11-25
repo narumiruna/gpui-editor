@@ -1032,7 +1032,7 @@ mod tests {
     fn edits_markdown_in_one_surface(cx: &mut TestAppContext) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("sample.md");
-        let original = include_str!("../tests/fixtures/sample.md");
+        let original = include_str!("../../document/tests/fixtures/sample.md");
         fs::write(&path, original).unwrap();
         let (editor, cx) = cx.add_window_view(|window, cx| {
             Editor::new(fs::read_to_string(&path).unwrap(), window, cx)

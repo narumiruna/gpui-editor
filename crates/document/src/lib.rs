@@ -194,9 +194,9 @@ impl Document {
         self.replacement(range, text, true).map(|_| ())
     }
 
-    // Return the actual old range and inserted byte count for editor offsets.
-    // The caret belongs directly after `text`, before any added fence separator.
-    pub(crate) fn replacement(
+    /// Apply the edit and return the actual old range and inserted byte count.
+    /// Place the caret after `text`, before any added fence separator.
+    pub fn replacement(
         &mut self,
         mut range: Range<usize>,
         text: &str,

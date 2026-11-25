@@ -1,4 +1,4 @@
-use gpui_editor::document::{Document, EditError, Section, SectionKind};
+use gpui_editor_document::{Document, EditError, Section, SectionKind};
 
 const ORIGINAL: &str = include_str!("fixtures/sample.md");
 

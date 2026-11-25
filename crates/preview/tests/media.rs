@@ -5,7 +5,7 @@ use std::{
     os::unix::{fs::symlink, net::UnixListener},
 };
 
-use gpui_editor::media::{Target, image_target, link_target, load_image};
+use gpui_editor_preview::media::{Target, image_target, link_target, load_image};
 use image::{GrayImage, ImageFormat, RgbImage, Rgba, RgbaImage};
 use tempfile::tempdir;
 use url::Url;
