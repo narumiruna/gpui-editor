@@ -78,7 +78,8 @@ impl Workspace {
         })
     }
 
-    pub(crate) fn check_root(&self) -> io::Result<()> {
+    /// Check that the workspace root still points to the opened directory.
+    pub fn check_root(&self) -> io::Result<()> {
         let canonical = self.root.canonicalize()?;
         let metadata = fs::metadata(&self.root)?;
         let same_directory = canonical == self.root && metadata.is_dir();

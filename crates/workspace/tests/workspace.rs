@@ -1,6 +1,6 @@
 use std::{fs, io::ErrorKind, path::Path};
 
-use gpui_editor::workspace::{DocumentFile, Workspace};
+use gpui_editor_workspace::{DocumentFile, Workspace};
 use tempfile::tempdir;
 
 #[test]

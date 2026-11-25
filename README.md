@@ -25,6 +25,18 @@ The command takes no path. In the window, choose **Open Folder…**, then select
 
 LaTeX previews use STIX Two Math through Mathra. See the [STIX Two Math license](docs/licenses/stix-two-math.txt).
 
+## Develop
+
+The Cargo workspace separates the [app](crates/app/), [Markdown model](crates/document/), [previews](crates/preview/), and [file handling](crates/workspace/). App-only changes reuse the other compiled crates. The crates share the root `target/` directory and lockfile.
+
+Run checks for a single component with `-p`. For example, this tests the Markdown model without building GPUI:
+
+```sh
+cargo test --locked -p gpui-editor-document
+```
+
+The app and its internal crates build from source as a workspace. They are not published separately to crates.io.
+
 ## Checks
 
 ```sh

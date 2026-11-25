@@ -2219,19 +2219,44 @@ name = "gpui-editor"
 version = "0.0.0"
 dependencies = [
  "gpui",
+ "gpui-editor-document",
+ "gpui-editor-preview",
+ "gpui-editor-workspace",
  "image",
- "libc",
- "mathra",
- "mmdflux",
  "objc2",
- "pulldown-cmark",
  "resvg",
- "roxmltree",
  "serde_yaml_ng",
  "tempfile",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "gpui-editor-document"
+version = "0.0.0"
+dependencies = [
+ "pulldown-cmark",
+]
+
+[[package]]
+name = "gpui-editor-preview"
+version = "0.0.0"
+dependencies = [
+ "image",
+ "mathra",
+ "mmdflux",
+ "resvg",
+ "roxmltree",
+ "tempfile",
  "ureq",
  "url",
+]
+
+[[package]]
+name = "gpui-editor-workspace"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "tempfile",
 ]
 
 [[package]]

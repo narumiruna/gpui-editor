@@ -16,13 +16,15 @@ build-backend = "maturin"
 
 [tool.maturin]
 bindings = "bin"
-manifest-path = "Cargo.toml"
+manifest-path = "crates/app/Cargo.toml"
 strip = true
+include = ["docs/licenses/stix-two-math.txt"]
 
 [tool.uv]
 cache-keys = [
   { file = "pyproject.toml" },
   { file = "Cargo.toml" },
   { file = "Cargo.lock" },
-  { file = "src/**/*.rs" },
+  { file = "crates/*/Cargo.toml" },
+  { file = "crates/*/src/**/*.rs" },
 ]
