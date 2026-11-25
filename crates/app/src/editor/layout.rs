@@ -62,6 +62,15 @@ pub(super) struct Row {
     pub(super) width: Pixels,
 }
 
+impl Row {
+    fn x_at(&self, offset: usize) -> Pixels {
+        self.items
+            .iter()
+            .find(|item| offset <= item.source.end)
+            .map_or(self.width, |item| item.x(offset))
+    }
+}
+
 pub(super) struct Item {
     pub(super) source: Range<usize>,
     pub(super) target: Option<Section>,
@@ -77,6 +86,12 @@ pub(super) enum ItemPaint {
 }
 
 impl Item {
+    pub(super) fn framed_graphic(&self) -> bool {
+        self.target
+            .as_ref()
+            .is_some_and(|section| is_block_preview(section.kind))
+    }
+
     pub(super) fn offset(&self, x: Pixels) -> usize {
         let x = x - self.left;
         match &self.paint {
@@ -161,13 +176,8 @@ impl Layout {
 
     pub(super) fn bounds_at(&self, offset: usize) -> Option<Bounds<Pixels>> {
         let row = &self.rows[self.row_index(offset)?];
-        let x = row
-            .items
-            .iter()
-            .find(|item| offset <= item.source.end)
-            .map_or(row.width, |item| item.x(offset));
         Some(Bounds::new(
-            self.origin + point(x, row.y),
+            self.origin + point(row.x_at(offset), row.y),
             size(px(1.), row.height),
         ))
     }
@@ -185,7 +195,7 @@ impl Layout {
         let row = self.row_index(offset)?;
         let next = if down { row + 1 } else { row.checked_sub(1)? };
         let next = self.rows.get(next)?;
-        let x = preferred_x.unwrap_or(self.bounds_at(offset)?.origin.x - self.origin.x);
+        let x = preferred_x.unwrap_or_else(|| self.rows[row].x_at(offset));
         let position = next
             .items
             .iter()
@@ -725,12 +735,13 @@ impl Projection<'_> {
                             let mut graphic = graphic.clone();
                             graphic.width *= ratio;
                             graphic.height *= ratio;
+                            let framed = is_block_preview(section.kind);
                             builder.item(
                                 section.source.clone(),
                                 Some(section.clone()),
                                 true,
-                                graphic.width,
-                                graphic.height + px(8.),
+                                graphic.width + px(if framed { 24. } else { 0. }),
+                                graphic.height + px(if framed { 24. } else { 8. }),
                                 ItemPaint::Graphic(graphic),
                             );
                         } else {
@@ -768,6 +779,10 @@ impl Projection<'_> {
             builder.next_row(end);
         }
     }
+}
+
+fn is_block_preview(kind: SectionKind) -> bool {
+    matches!(kind, SectionKind::Mermaid | SectionKind::DisplayMath)
 }
 
 fn one_line(text: &str) -> String {

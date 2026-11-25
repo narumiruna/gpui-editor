@@ -10,12 +10,12 @@ use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, ElementInputHandler, EntityInputHandler,
     EventEmitter, FocusHandle, Focusable, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
     Pixels, Point, ScrollHandle, UTF16Selection, Window, actions, canvas, div, fill, point,
-    prelude::*, px, rgb, rgba, size,
+    prelude::*, px, quad, rgb, rgba, size,
 };
 
 mod commands;
 mod layout;
-mod toolbar;
+pub(crate) mod toolbar;
 #[cfg(test)]
 use commands::Command;
 use layout::{Graphic, ItemPaint, Layout};
@@ -557,8 +557,7 @@ impl Render for Editor {
             .flex()
             .flex_col()
             .bg(rgb(0xffffff))
-            .text_color(rgb(0x202531))
-            .child(toolbar::toolbar(cx))
+            .text_color(rgb(0x172336))
             .child(
                 div()
                     .id("editor")
@@ -656,7 +655,12 @@ impl Render for Editor {
                     .child(
                         canvas(
                             move |bounds, _, _| Layout {
-                                origin: bounds.origin,
+                                origin: bounds.origin
+                                    + point(
+                                        ((bounds.size.width - width.max(px(620.))) / 2.)
+                                            .max(px(0.)),
+                                        px(0.),
+                                    ),
                                 ..layout
                             },
                             move |bounds, layout, window, cx| {
@@ -674,6 +678,21 @@ impl Render for Editor {
                                 for row in &layout.rows {
                                     for item in &row.items {
                                         let top = layout.origin + point(item.left, row.y);
+                                        let framed = item.framed_graphic()
+                                            && matches!(&item.paint, ItemPaint::Graphic(_));
+                                        if framed {
+                                            window.paint_quad(quad(
+                                                Bounds::new(
+                                                    top + point(px(0.), px(4.)),
+                                                    size(item.width, row.height - px(8.)),
+                                                ),
+                                                px(8.),
+                                                rgb(0xf9fbff),
+                                                gpui::Edges::all(px(1.)),
+                                                rgb(0xd3dce9),
+                                                Default::default(),
+                                            ));
+                                        }
                                         let start = selection.start.max(item.source.start);
                                         let end = selection.end.min(item.source.end);
                                         if start < end {
@@ -694,7 +713,7 @@ impl Render for Editor {
                                                 let _ = window.paint_image(
                                                     Bounds::new(
                                                         top + point(
-                                                            px(0.),
+                                                            px(if framed { 12. } else { 0. }),
                                                             (row.height - graphic.height) / 2.,
                                                         ),
                                                         size(graphic.width, graphic.height),
@@ -734,13 +753,23 @@ impl Render for Editor {
             )
             .child(
                 div()
+                    .flex_none()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_2()
                     .px_3()
                     .py_1()
-                    .text_sm()
-                    .bg(rgb(0xf1f3f6))
-                    .overflow_hidden()
-                    .min_h(px(24.))
-                    .child(status)
+                    .text_xs()
+                    .text_color(rgb(0x475569))
+                    .bg(rgb(0xf2f5fa))
+                    .border_t_1()
+                    .border_color(rgb(0xd3dce9))
+                    .min_h(px(26.))
+                    .child(div().flex_none().child("UTF-8 Markdown"))
+                    .when(!status.is_empty(), |bar| {
+                        bar.child(div().min_w_0().truncate().child(status))
+                    })
                     .when(self.has_blocked_images, |status| {
                         status.child(
                             div()
