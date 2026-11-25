@@ -18,6 +18,10 @@ use crate::{
     workspace::Workspace,
 };
 
+mod blocks;
+
+use blocks::BlockLayout;
+
 #[derive(Clone, Copy, Default)]
 struct Face {
     heading: bool,
@@ -83,6 +87,7 @@ pub(super) struct Item {
 pub(super) enum ItemPaint {
     Text(Box<ShapedLine>),
     Graphic(Graphic),
+    Block(Box<BlockLayout>),
 }
 
 impl Item {
@@ -176,6 +181,21 @@ impl Layout {
 
     pub(super) fn bounds_at(&self, offset: usize) -> Option<Bounds<Pixels>> {
         let row = &self.rows[self.row_index(offset)?];
+        if let Some(item) = row.items.iter().find(|item| {
+            matches!(item.paint, ItemPaint::Block(_))
+                && (offset == item.source.start || offset == item.source.end)
+        }) {
+            let height = px(26.);
+            let y = if offset == item.source.end {
+                row.y + row.height - height
+            } else {
+                row.y
+            };
+            return Some(Bounds::new(
+                self.origin + point(item.left, y),
+                size(px(1.), height),
+            ));
+        }
         Some(Bounds::new(
             self.origin + point(row.x_at(offset), row.y),
             size(px(1.), row.height),
@@ -707,7 +727,20 @@ impl Projection<'_> {
                         self.finish_line(builder, section.content.end, section);
                     }
                     K::ReadOnly => {
-                        builder.add_text(self.source, section.source.clone(), face_muted)
+                        if let Some(preview) = &section.preview {
+                            let block = BlockLayout::new(preview, builder.window);
+                            builder.item(
+                                section.source.clone(),
+                                None,
+                                true,
+                                block.width,
+                                block.height,
+                                ItemPaint::Block(Box::new(block)),
+                            );
+                            self.finish_line(builder, section.source.start, section);
+                        } else {
+                            builder.add_text(self.source, section.source.clone(), face_muted);
+                        }
                     }
                     K::Link => {
                         let text = if body.is_empty() {
