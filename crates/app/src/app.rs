@@ -952,9 +952,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn unified_toolbar_fits_on_one_desktop_row_and_wraps_in_a_narrow_window(
-        cx: &mut TestAppContext,
-    ) {
+    fn compact_toolbar_fits_on_one_row_at_minimum_window_width(cx: &mut TestAppContext) {
         let (shell, cx) = cx.add_window_view(Shell::new);
         click_tool(cx, "New note");
         cx.update(|_, cx| assert!(shell.read(cx).current.is_some()));
@@ -969,11 +967,50 @@ mod tests {
         cx.update(|window, _| assert_eq!(window.viewport_size().width, px(560.)));
         let open = cx.debug_bounds("Open Folder…").unwrap();
         let more = cx.debug_bounds("More tools").unwrap();
-        assert!(more.top() > open.top());
+        assert_eq!(more.top(), open.top());
         assert!(more.right() <= px(560.));
         click_tool(cx, "More tools");
+        assert_eq!(cx.debug_bounds("Fewer tools").unwrap(), more);
         let remove_item = cx.debug_bounds("Remove item").unwrap();
         assert!(remove_item.right() <= px(560.));
+        click_tool(cx, "Fewer tools");
+        cx.update(|_, cx| assert!(!shell.read(cx).show_more_tools));
+    }
+
+    #[gpui::test]
+    fn main_toolbar_buttons_show_labels_on_hover(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(Shell::new);
+        click_tool(cx, "New note");
+        for name in [
+            "Open Folder…",
+            "New note",
+            "Save",
+            "Heading",
+            "Bold",
+            "Italic",
+            "List",
+            "Diagram",
+            "Formula",
+            "Link",
+            "More tools",
+        ] {
+            assert_eq!(cx.debug_bounds(name).unwrap().size, size(px(30.), px(30.)));
+        }
+        for (name, tooltip) in [
+            ("Heading", "toolbar-tooltip: Heading"),
+            ("Open Folder…", "toolbar-tooltip: Open Folder…"),
+            ("More tools", "toolbar-tooltip: More tools"),
+        ] {
+            assert!(cx.debug_bounds(tooltip).is_none());
+            let center = cx.debug_bounds(name).unwrap().center();
+            cx.simulate_mouse_move(center, None, Modifiers::none());
+            cx.run_until_parked();
+            cx.cx
+                .executor()
+                .advance_clock(std::time::Duration::from_secs(1));
+            cx.run_until_parked();
+            assert!(cx.debug_bounds(tooltip).is_some());
+        }
     }
 
     fn start_save_with_queued_quit(

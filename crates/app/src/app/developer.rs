@@ -485,7 +485,7 @@ impl Shell {
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .child(toolbar::icon("Developer target", 18.).text_color(color))
                 .child("Select element")
-                .tooltip(move |_, cx| cx.new(|_| Tooltip(reason)).into())
+                .tooltip(move |_, cx| cx.new(|_| toolbar::Tooltip(reason)).into())
                 .when(ready, |el| {
                     el.cursor_pointer()
                         .hover(|style| style.bg(rgb(0xd3e3ff)))
@@ -662,18 +662,4 @@ fn button(label: &'static str, enabled: bool) -> Stateful<Div> {
             el.cursor_pointer().hover(|el| el.bg(rgb(0xd3e3ff)))
         })
         .child(label)
-}
-
-struct Tooltip(&'static str);
-
-impl gpui::Render for Tooltip {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .px_2()
-            .py_1()
-            .rounded_md()
-            .bg(rgb(0x1e293b))
-            .text_color(rgb(0xffffff))
-            .child(self.0)
-    }
 }

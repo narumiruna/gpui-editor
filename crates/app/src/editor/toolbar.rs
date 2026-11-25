@@ -1,7 +1,8 @@
 use std::borrow::Cow;
 
 use gpui::{
-    AssetSource, Div, Entity, FontWeight, SharedString, Stateful, div, prelude::*, px, rgb, svg,
+    AssetSource, Context, Div, Entity, FontWeight, SharedString, Stateful, Window, div, prelude::*,
+    px, rgb, svg,
 };
 
 use super::{Editor, commands::Command};
@@ -50,8 +51,7 @@ const SHELL_ICONS: &[(&str, &str)] = &[
         "Save",
         glyph!("M12 3v11m-4-4 4 4 4-4M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"),
     ),
-    ("More tools", glyph!("m6 9 6 6 6-6")),
-    ("Fewer tools", glyph!("m6 15 6-6 6 6")),
+    ("More tools", glyph!("M5 12h.01M12 12h.01M19 12h.01")),
     ("Workspace", glyph!("M3 6h7l2 2h9v11H3z")),
     ("File", glyph!("M6 3h8l4 4v14H6zM14 3v5h5M9 12h6m-6 4h6")),
     ("Saved", glyph!("m5 12 5 5L19 8")),
@@ -163,11 +163,13 @@ pub(crate) fn marked_button(
     enabled: bool,
     picker: Option<&Picker>,
 ) -> Stateful<Div> {
-    Picker::mark(picker, button(name, enabled), name, name)
+    Picker::mark(picker, button(name, enabled, true), name, name)
 }
 
-fn button(name: &'static str, enabled: bool) -> Stateful<Div> {
+fn button(name: &'static str, enabled: bool, icon_only: bool) -> Stateful<Div> {
     let primary = name == "Save" && enabled;
+    let expanded = name == "Fewer tools";
+    let icon_name = if expanded { "More tools" } else { name };
     let color = rgb(if primary {
         0xffffff
     } else if enabled {
@@ -189,13 +191,34 @@ fn button(name: &'static str, enabled: bool) -> Stateful<Div> {
         .text_size(px(13.))
         .text_color(color)
         .when(primary, |el| el.bg(rgb(0x2859ad)))
+        .when(expanded, |el| el.bg(rgb(0xe4eeff)))
         .when(enabled, |el| {
             el.cursor_pointer()
                 .hover(move |s| s.bg(rgb(if primary { 0x21478e } else { 0xe4eeff })))
                 .active(move |s| s.bg(rgb(if primary { 0x18376f } else { 0xd3e3ff })))
         })
-        .child(icon(name, 17.).text_color(color))
-        .child(name)
+        .child(icon(icon_name, 17.).text_color(color))
+        .when(icon_only, |el| {
+            el.w(px(30.))
+                .justify_center()
+                .tooltip(move |_, cx| cx.new(|_| Tooltip(name)).into())
+        })
+        .when(!icon_only, |el| el.child(name))
+}
+
+pub(crate) struct Tooltip(pub(crate) &'static str);
+
+impl gpui::Render for Tooltip {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .debug_selector(|| format!("toolbar-tooltip: {}", self.0))
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .bg(rgb(0x1e293b))
+            .text_color(rgb(0xffffff))
+            .child(self.0)
+    }
 }
 
 pub(crate) fn group() -> Div {
@@ -208,7 +231,7 @@ pub(crate) fn primary_groups(
     picker: Option<&Picker>,
 ) -> [Div; 2] {
     [FORMAT, INSERT].map(|tools| {
-        tool_group(tools, editor, enabled, picker)
+        tool_group(tools, editor, enabled, picker, true)
             .pl_2()
             .border_l_1()
             .border_color(rgb(0xd3dce9))
@@ -216,7 +239,7 @@ pub(crate) fn primary_groups(
 }
 
 pub(crate) fn more_group(editor: &Entity<Editor>, enabled: bool, picker: Option<&Picker>) -> Div {
-    tool_group(MORE, editor, enabled, picker)
+    tool_group(MORE, editor, enabled, picker, false)
 }
 
 fn tool_group(
@@ -224,11 +247,13 @@ fn tool_group(
     editor: &Entity<Editor>,
     enabled: bool,
     picker: Option<&Picker>,
+    icon_only: bool,
 ) -> Div {
     group().children(tools.iter().map(|tool| {
         let command = tool.command;
         let editor = editor.clone();
-        marked_button(tool.name, enabled, picker).when(enabled, |button| {
+        let button = button(tool.name, enabled, icon_only);
+        Picker::mark(picker, button, tool.name, tool.name).when(enabled, |button| {
             button.on_click(move |_, window, cx| {
                 editor.update(cx, |editor, cx| editor.command(command, window, cx));
             })
