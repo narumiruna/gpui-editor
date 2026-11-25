@@ -1,4 +1,4 @@
-use gpui::{Context, Div, Pixels, Window, div, prelude::*, px};
+use gpui::{Context, Div, Pixels, Rgba, Svg, Window, div, prelude::*, px};
 
 use super::{Picker, Shell, Theme, toolbar};
 
@@ -28,6 +28,10 @@ impl View {
             Self::Outline => "Outline",
             Self::Search => "Search",
         }
+    }
+
+    fn icon(self, color: Rgba) -> Svg {
+        toolbar::icon(self.label(), 15.).text_color(color)
     }
 }
 
@@ -69,6 +73,7 @@ impl Shell {
             .children(self.sidebar.order.map(|view| {
                 let label = view.label();
                 let selected = view == self.sidebar.view;
+                let color = if selected { theme.accent } else { theme.text };
                 let tab = div()
                     .id(label)
                     .debug_selector(move || format!("sidebar-tab-{label}"))
@@ -86,12 +91,12 @@ impl Shell {
                     .gap_1()
                     .rounded_md()
                     .text_xs()
-                    .text_color(if selected { theme.accent } else { theme.text })
+                    .text_color(color)
                     .when(selected, |tab| tab.bg(theme.selected))
                     .hover(move |tab| tab.bg(theme.selected))
                     .cursor_pointer()
                     .tooltip(move |_, cx| cx.new(|_| toolbar::Tooltip(label)).into())
-                    .child(toolbar::icon(label, 15.))
+                    .child(view.icon(color))
                     .when(show_labels, |tab| tab.child(label))
                     .on_click(cx.listener(move |shell, _, window, cx| {
                         shell.select_sidebar_view(view, window, cx);
@@ -137,5 +142,30 @@ impl Shell {
                     }));
                 Picker::mark(picker, tab, "sidebar.tab", label)
             }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::rgb;
+
+    use super::*;
+
+    #[test]
+    fn sidebar_tab_icons_set_their_own_color() {
+        for view in View::DEFAULT_ORDER {
+            for color in [rgb(0x000000), rgb(0xffffff)] {
+                assert_eq!(
+                    view.icon(color)
+                        .style()
+                        .text
+                        .as_ref()
+                        .and_then(|text| text.color),
+                    Some(color.into()),
+                    "{} icon",
+                    view.label()
+                );
+            }
+        }
     }
 }
