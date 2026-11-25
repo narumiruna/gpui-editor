@@ -16,7 +16,7 @@ This builds and starts the app. It uses `/Applications/Xcode.app` by default. If
 
 The command takes no path. In the window, choose **Open Folder…**, then select a Markdown file from the sidebar. Use **New note** for a blank document and **Save** or `Cmd-S` to save. The document bar shows the filename and save status. The sidebar lists only the workspace's top-level `.md` files.
 
-- Use the labeled toolbar to format a selection, insert a diagram, add an inline formula, or insert a link. **More tools** shows front matter, display formulas, images, and item actions. Click front matter, a diagram, or a formula to edit its source. Click outside the item to preview the change; this does not save the file.
+- Use the toolbar icons to format a selection, insert a diagram, add an inline formula, or insert a link. Hover over a main toolbar icon to see its name, including **Open Folder…**, **New note**, and **Save**. The three-dot **More tools** button shows front matter, display formulas, images, and item actions. Click front matter, a diagram, or a formula to edit its source. Click outside the item to preview the change; this does not save the file.
 - For links, hover to see the full destination in the bottom bar. Click to open the web browser or follow an in-workspace `.md` link. To edit a link without opening it, place the caret at its edge and choose **More tools** → **Edit link**.
 - Image previews support local or HTTPS PNG, JPEG, GIF, and WebP still images. Relative paths are based on the document's folder. To fetch HTTPS previews, choose **Load remote images for this document**. The remote host receives the image request; redirects are not followed.
 - The editor supports a subset of Markdown. Inline math cannot span paragraph breaks. The Mermaid renderer supports flat flowcharts; unsupported blocks such as GFM tables are shown as read-only source.
@@ -37,13 +37,27 @@ cargo test --locked -p gpui-editor-document
 
 The app and its internal crates build from source as a workspace. They are not published separately to crates.io.
 
+### Developer Mode and Pi
+
+1. Start GPUI Editor with `just run`. In **GPUI Editor → Preferences…**, turn on **Developer Mode**. A **Select element** button with a target icon appears in the upper-right corner.
+2. Start Pi 1.6.0 or later in this repository. Trust the project if you want Pi to load [its local extension](.pi/extensions/gpui-editor.ts). In Pi, run `/gpui-pair`. If Pi finds more than one editor, choose the one to pair. Verify the code in both apps, then choose **Pair** in GPUI Editor.
+3. Click **Select element**, then click an element such as **Save**, a sidebar row, or the editing surface. Picking does not run the element's usual action. Press `Esc` to leave picking mode.
+4. Write your feedback. Choose **Capture Window** to attach a screenshot of GPUI Editor, or **Paste Image** to attach a PNG, JPEG, or TIFF image from the clipboard. If macOS denies Screen & System Audio Recording, use **Paste Image** or send text only. Review attachments before choosing **Send to Pi**. An image requires an image-capable Pi model.
+
+Feedback goes to the paired session as a user message. If Pi is busy, it follows the current task. Pi may save feedback in its session history or send it to its model provider. You cannot edit the draft while it waits for a receipt. A receipt confirms only that the extension handed feedback to Pi. If Pi rejects the feedback or the connection drops before the receipt, the draft becomes editable again. After a dropped connection, check Pi before resending.
+
+With a live pairing, Pi can call `gpui_editor_logs` to read a bounded history of editor diagnostics. It does not read documents, raw paths, or system logs. To disconnect, use `/gpui-unpair` in Pi, choose **Unpair Pi** in Preferences, or turn Developer Mode off. Pi session changes, reloads, and exits also disconnect. The editor starts with the mode off and does not reopen pairings. See [ADR 0002](docs/decisions/0002-local-pi-session-pairing.md) for the data boundaries.
+
 ## Checks
+
+Install [Bun](https://bun.com/) to run the Pi extension tests.
 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
 prek run --all-files
+bun test ./.pi/tests/gpui-editor.test.ts
 ```
 
 GitHub Actions runs Rust checks with Rust 1.95.0 on Linux and macOS. The Linux job checks the portable document, rendering, and file-handling code; only macOS builds the GPUI application. Automated GPUI tests use a simulated window, not the real macOS input method. If macOS asks the editor to close during logout or restart, the editor can protect unsaved changes, but the system request must be started again after the editor closes. See the [manual acceptance steps](docs/prd/gpui-editor.md#macos-原生驗收) for the remaining native checks.

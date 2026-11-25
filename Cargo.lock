@@ -2218,13 +2218,18 @@ dependencies = [
 name = "gpui-editor"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
  "gpui",
  "gpui-editor-document",
  "gpui-editor-preview",
  "gpui-editor-workspace",
  "image",
+ "libc",
  "objc2",
+ "raw-window-handle",
  "resvg",
+ "serde",
+ "serde_json",
  "serde_yaml_ng",
  "tempfile",
  "unicode-segmentation",

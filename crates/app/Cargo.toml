@@ -14,13 +14,18 @@ gpui-editor-preview = { path = "../preview" }
 gpui-editor-workspace = { path = "../workspace" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+base64 = "0.22"
 gpui.workspace = true
-image.workspace = true
+image = { workspace = true, features = ["jpeg", "png", "tiff"] }
+libc = "0.2"
 objc2 = "0.6.5"
+raw-window-handle = "0.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 serde_yaml_ng = "0.10.0"
+tempfile.workspace = true
 unicode-segmentation = "1.12.0"
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
 resvg.workspace = true
-tempfile.workspace = true
