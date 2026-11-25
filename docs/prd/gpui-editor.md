@@ -177,6 +177,22 @@ test_home="$(mktemp -d /private/tmp/gpui-editor-test-home.XXXXXX)" &&
 
 側欄外觀、原生拖曳、輸入法、焦點、對話框與重啟等上述案例均未實測。不執行發布。
 
+#### 編輯器核心與輸入法：原生交接
+
+**狀態：未驗證。** 2026-11-26 本機預檢：可連線至 WindowServer，允許擷取畫面，無合成輸入權限。未啟動 App 或送出桌面輸入。GPUI 模擬測試不驗證 macOS 候選視窗或實際回呼順序。
+
+由驗收者在獨立 macOS 測試桌面手動操作，啟用繁體中文輸入法。使用上方的隔離 `HOME` 啟動方式，先核對工作階段路徑；無法確認隔離時，不啟動。只在暫存位置準備下列 UTF-8 檔案（行尾為 CRLF，最後一行無換行）：
+
+```sh
+test -n "$test_home" && mkdir "$test_home/workspace" &&
+  printf '%b' '---\r\ntitle: Draft\r\n---\r\n\r\n原稿\r\n\r\n```rust\r\nlet n = 1;\r\n```' > "$test_home/workspace/ime.md" &&
+  printf '%b' '---\r\ntitle: 測試\r\n---\r\n\r\n中文\r\n\r\n```rust\r\nlet n = 1;\r\n```' > "$test_home/ime.expected"
+```
+
+1. 開啟暫存工作區及 `ime.md`。選取正文的「原稿」，用繁體中文輸入法組字，確認候選視窗出現並選取「中文」。按一次 `Cmd-Z` 應還原「原稿」，再按一次 `Cmd-Shift-Z` 應恢復「中文」。
+2. 點擊 front matter 預覽。只選取 `Draft`，組字並選取「測試」。按一次 `Cmd-Z` 應還原 `Draft`，再按一次 `Cmd-Shift-Z` 應恢復「測試」；正文應維持「中文」。點回正文，核對 front matter 恢復預覽並顯示新值。
+3. 存檔、關閉分頁並重開。確認 front matter 預覽及唯讀 Rust 程式碼區塊仍在。點擊程式碼區塊並嘗試輸入與刪除，確認內容不變。用 `cmp "$test_home/ime.expected" "$test_home/workspace/ime.md"` 核對檔案須逐位元組相同。
+
 ## 成功衡量
 
 請首批試用者在沒有操作示範的情況下，啟動應用程式、選擇資料夾、找到指定文件、改一個標題、更新一張流程圖並儲存。記錄首次無提示完成率（無額外協助即完成全部任務的人數 ÷ 參與總人數），另記錄卡住或切換工具的步驟，以及試用者與現有做法的比較。

@@ -735,7 +735,7 @@ impl Editor {
     }
 
     fn projected_sections(&self) -> Vec<Section> {
-        let mut sections = self.document.sections();
+        let mut sections = self.markdown().sections();
         if let Some(active) = &self.active {
             sections.retain(|section| section.source != active.source);
             sections.push(active.clone());
@@ -796,7 +796,7 @@ impl Editor {
         width: Pixels,
     ) -> Layout {
         let scale = window.scale_factor();
-        let source = self.document.source();
+        let source = self.history.state().text().as_str();
         let mut builder = LayoutBuilder::new(window, self.marked.clone(), width);
         let sections = self.projected_sections();
         let visible_previews = self.preview_sections(&sections);
@@ -1278,7 +1278,7 @@ mod tests {
                             .is_none()
                     );
                     let section = editor
-                        .document
+                        .markdown()
                         .sections()
                         .into_iter()
                         .find(|section| section.kind == kind)

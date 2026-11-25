@@ -3,7 +3,7 @@
 use std::{collections::HashMap, ops::Range, path::PathBuf, time::Duration};
 
 use crate::{
-    document::{Document, Heading, Section, SectionKind},
+    document::{Heading, Markdown, Section, SectionKind},
     theme::Theme,
     workspace::Workspace,
 };
@@ -13,6 +13,10 @@ use gpui::{
     MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Point, ScrollHandle, Size, Task,
     UTF16Selection, Window, WindowAppearance, actions, canvas, div, fill, point, prelude::*, px,
     quad, rgb, size,
+};
+
+use gpui_editor_codemirror::{
+    Change, ChangeSet, EditorSelection, EditorState, History, SelectionRange, Transaction,
 };
 
 mod commands;
@@ -70,9 +74,7 @@ pub fn bind_keys(cx: &mut App) {
 
 pub struct Editor {
     focus: FocusHandle,
-    document: Document,
-    anchor: usize,
-    cursor: usize,
+    history: History<Option<Section>>,
     // A soft break shares a byte offset between the end of one row and the start of the next.
     upstream: bool,
     marked: Option<Range<usize>>,
@@ -94,8 +96,12 @@ pub struct Editor {
     hover: Option<Range<usize>>,
     message: Option<String>,
     message_timeout: Option<(String, Task<()>)>,
-    undo: Vec<Snapshot>,
-    redo: Vec<Snapshot>,
+}
+
+#[derive(Clone, Copy)]
+enum EditScope {
+    Active,
+    Document,
 }
 
 enum ImageEntry {
@@ -104,28 +110,18 @@ enum ImageEntry {
     BudgetExceeded,
 }
 
-#[derive(Clone)]
-struct Snapshot {
-    source: String,
-    anchor: usize,
-    cursor: usize,
-    active: Option<Section>,
-}
-
 impl Editor {
     pub fn new(source: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         cx.on_blur(&focus, window, |editor, _, cx| {
             editor.selecting = false;
-            editor.marked = None;
+            editor.finish_composition();
             cx.notify();
         })
         .detach();
         Self {
             focus,
-            document: Document::new(source),
-            anchor: 0,
-            cursor: 0,
+            history: History::new(EditorState::new(source)),
             upstream: false,
             marked: None,
             active: None,
@@ -146,13 +142,15 @@ impl Editor {
             hover: None,
             message: None,
             message_timeout: None,
-            undo: Vec::new(),
-            redo: Vec::new(),
         }
     }
 
     pub fn source(&self) -> &str {
-        self.document.source()
+        self.history.state().text().as_str()
+    }
+
+    fn markdown(&self) -> Markdown<'_> {
+        Markdown::new(self.source())
     }
 
     #[cfg(test)]
@@ -161,7 +159,7 @@ impl Editor {
     }
 
     pub(crate) fn headings(&self) -> Vec<Heading> {
-        self.document.headings()
+        self.markdown().headings()
     }
 
     /// Scroll to a UTF-8 byte offset without moving the caret or taking focus.
@@ -198,84 +196,139 @@ impl Editor {
         cx.notify();
     }
 
+    fn anchor(&self) -> usize {
+        self.history.state().selection().main().anchor()
+    }
+
+    fn cursor(&self) -> usize {
+        self.history.state().selection().main().head()
+    }
+
     fn selection(&self) -> Range<usize> {
-        self.anchor.min(self.cursor)..self.anchor.max(self.cursor)
+        self.history.state().selection().main().range()
+    }
+
+    fn set_selection(&mut self, anchor: usize, head: usize) {
+        self.history
+            .set_selection(EditorSelection::single(anchor, head))
+            .expect("selection must use source byte boundaries");
     }
 
     fn finish_active(&mut self) {
         if let Some(active) = self.active.take() {
-            for position in [&mut self.cursor, &mut self.anchor] {
-                if *position > active.source.start && *position < active.source.end {
-                    *position = active.source.end;
+            let snap_outside = |position| {
+                if active.source.start < position && position < active.source.end {
+                    active.source.end
+                } else {
+                    position
                 }
-            }
+            };
+            self.set_selection(snap_outside(self.anchor()), snap_outside(self.cursor()));
         }
     }
 
-    fn snapshot(&self) -> Snapshot {
-        Snapshot {
-            source: self.source().to_owned(),
-            anchor: self.anchor,
-            cursor: self.cursor,
-            active: self.active.clone(),
-        }
-    }
-
-    fn restore(&mut self, state: Snapshot, cx: &mut Context<Self>) {
-        self.document = Document::new(state.source);
-        self.cursor = state.cursor;
-        self.upstream = false;
-        self.anchor = state.anchor;
-        self.active = state.active;
+    fn finish_composition(&mut self) {
         self.marked = None;
+        self.history.end_group();
+    }
+
+    fn invalidate_edit_layout(&mut self) {
         self.layout = None;
+        self.upstream = false;
         self.reveal_caret = true;
         self.reveal_source = None;
         self.preferred_x = None;
-        cx.notify();
+    }
+
+    fn replay_history(&mut self, redo: bool, cx: &mut Context<Self>) {
+        if !self.input_enabled {
+            return;
+        }
+        let active = if redo {
+            self.history.redo()
+        } else {
+            self.history.undo()
+        };
+        if let Some(active) = active {
+            self.active = active;
+            self.finish_composition();
+            self.invalidate_edit_layout();
+            cx.notify();
+        }
     }
 
     fn replace(&mut self, range: Range<usize>, text: &str, cx: &mut Context<Self>) -> bool {
-        if !self.input_enabled {
+        self.replace_and_finish(EditScope::Active, range, text, |_, _, _| {}, cx)
+    }
+
+    fn replace_and_finish(
+        &mut self,
+        scope: EditScope,
+        range: Range<usize>,
+        text: &str,
+        finish: impl FnOnce(&str, &mut SelectionRange, &mut Option<Section>),
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.replace_with(scope, range, text, finish, cx).is_none() {
             return false;
         }
-        let previous = self.marked.is_none().then(|| self.snapshot());
-        let Ok((range, inserted)) = self.document.replacement(range, text, self.active.as_ref())
-        else {
+        self.finish_composition();
+        true
+    }
+
+    fn replace_with(
+        &mut self,
+        scope: EditScope,
+        range: Range<usize>,
+        text: &str,
+        finish: impl FnOnce(&str, &mut SelectionRange, &mut Option<Section>),
+        cx: &mut Context<Self>,
+    ) -> Option<usize> {
+        if !self.input_enabled {
+            return None;
+        }
+        let active = match scope {
+            EditScope::Active => self.active.as_ref(),
+            EditScope::Document => None,
+        };
+        let Ok((range, inserted)) = self.markdown().plan_replacement(range, text, active) else {
             self.message = Some("Cannot edit this Markdown range".into());
             cx.notify();
-            return false;
+            return None;
         };
-        self.layout = None;
-        self.reveal_caret = true;
-        self.reveal_source = None;
-        self.preferred_x = None;
+        let start = range.start;
+        let caret = start + text.len();
+        let mut active = active
+            .filter(|section| {
+                range.start >= section.content.start && range.end <= section.content.end
+            })
+            .cloned();
+        if let Some(section) = &mut active {
+            section.content.end = section.content.end - range.len() + text.len();
+            section.source.end = section.source.end - range.len() + inserted.len();
+            if section.kind == SectionKind::DraftCode && section.source.is_empty() {
+                active = None;
+            }
+        }
+        let changes = ChangeSet::single(Change::new(range, inserted))
+            .expect("Markdown plans a valid replacement");
+        let transaction =
+            Transaction::new(changes).with_selection(EditorSelection::single(caret, caret));
+        self.active = self
+            .history
+            .update(transaction, self.active.clone(), |state| {
+                let initial = state.selection().main();
+                let mut selection = initial;
+                finish(state.text().as_str(), &mut selection, &mut active);
+                let selection = (selection != initial)
+                    .then(|| EditorSelection::single(selection.anchor(), selection.head()));
+                (selection, active)
+            })
+            .expect("Markdown edits and carets must use source byte boundaries");
+        self.invalidate_edit_layout();
         self.message = None;
-        if let Some(active) = &mut self.active {
-            if range.start >= active.content.start && range.end <= active.content.end {
-                let removed = range.len();
-                active.content.end = active.content.end - removed + text.len();
-                active.source.end = active.source.end - removed + inserted;
-                if active.kind == SectionKind::DraftCode && active.source.is_empty() {
-                    self.active = None;
-                }
-            } else {
-                self.active = None;
-            }
-        }
-        if let Some(previous) = previous {
-            if self.undo.len() == 100 {
-                self.undo.remove(0);
-            }
-            self.undo.push(previous);
-            self.redo.clear();
-        }
-        self.marked = None;
-        self.cursor = range.start + text.len();
-        self.upstream = false;
-        self.anchor = self.cursor;
         cx.notify();
-        true
+        Some(start)
     }
 
     fn move_horizontal(&mut self, right: bool, extend: bool, cx: &mut Context<Self>) {
@@ -287,9 +340,9 @@ impl Editor {
                 selection.start
             }
         } else if let Some(layout) = &self.layout {
-            layout.step(self.cursor, right)
+            layout.step(self.cursor(), right)
         } else {
-            self.cursor
+            self.cursor()
         };
         self.move_to(position, extend, cx);
         self.upstream = !right;
@@ -297,13 +350,11 @@ impl Editor {
     }
 
     fn move_vertical(&mut self, down: bool, extend: bool, cx: &mut Context<Self>) {
-        if let Some(((position, upstream), x)) = self
-            .layout
-            .as_ref()
-            .and_then(|layout| layout.vertical(self.cursor, self.upstream, self.preferred_x, down))
-        {
+        if let Some(((position, upstream), x)) = self.layout.as_ref().and_then(|layout| {
+            layout.vertical(self.cursor(), self.upstream, self.preferred_x, down)
+        }) {
             self.move_to(position, extend, cx);
-            self.upstream = upstream && self.cursor == position;
+            self.upstream = upstream && self.cursor() == position;
             self.preferred_x = Some(x);
             self.reveal_caret = true;
         }
@@ -314,17 +365,14 @@ impl Editor {
             return;
         }
         self.preferred_x = None;
-        self.cursor = position;
+        self.set_selection(if extend { self.anchor() } else { position }, position);
         self.upstream = false;
-        if !extend {
-            self.anchor = position;
-        }
         if self.active.as_ref().is_some_and(|section| {
             position < section.content.start || position > section.content.end
         }) {
             self.finish_active();
         }
-        self.marked = None;
+        self.finish_composition();
         cx.notify();
     }
 
@@ -332,10 +380,10 @@ impl Editor {
         let mut selection = self.selection();
         if selection.is_empty() {
             if let Some(layout) = &self.layout {
-                let mut at = self.cursor;
+                let mut at = self.cursor();
                 if self.active.is_none() {
                     let inline: Vec<_> = self
-                        .document
+                        .markdown()
                         .sections()
                         .into_iter()
                         .filter(|section| {
@@ -419,7 +467,7 @@ impl Editor {
             }
         } else {
             self.move_to(position, event.modifiers.shift, cx);
-            self.upstream = upstream && self.cursor == position;
+            self.upstream = upstream && self.cursor() == position;
         }
     }
 
@@ -444,7 +492,7 @@ impl Editor {
         if self.selecting {
             let (position, upstream) = layout.position_at(event.position);
             self.move_to(position, true, cx);
-            self.upstream = upstream && self.cursor == position;
+            self.upstream = upstream && self.cursor() == position;
         } else if self.hover.as_ref()
             != Self::hovered_link(layout, event.position).map(|item| &item.source)
         {
@@ -533,7 +581,7 @@ impl EntityInputHandler for Editor {
         }
         Some(UTF16Selection {
             range: to_utf16(self.source(), self.selection()),
-            reversed: self.cursor < self.anchor,
+            reversed: self.cursor() < self.anchor(),
         })
     }
 
@@ -544,7 +592,7 @@ impl EntityInputHandler for Editor {
     }
 
     fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        self.marked = None;
+        self.finish_composition();
         cx.notify();
     }
 
@@ -561,7 +609,7 @@ impl EntityInputHandler for Editor {
             .unwrap_or_else(|| self.selection());
         if text == "`"
             && range.is_empty()
-            && range.start == self.cursor
+            && range.start == self.cursor()
             && self.marked.is_none()
             && self.complete_code_fence(range.start, cx)
         {
@@ -582,14 +630,30 @@ impl EntityInputHandler for Editor {
             .map(|range| from_utf16(self.source(), range))
             .or_else(|| self.marked.clone())
             .unwrap_or_else(|| self.selection());
+        let starting = self.marked.is_none();
+        if starting {
+            self.history.start_group();
+        }
         let start = range.start;
-        if self.replace(range, text, cx) && !text.is_empty() {
-            self.marked = Some(start..start + text.len());
-            if let Some(selected) = selected {
-                let selected = from_utf16(text, selected);
-                self.anchor = start + selected.start;
-                self.cursor = start + selected.end;
-            }
+        let applied = self.replace_with(
+            EditScope::Active,
+            range,
+            text,
+            |_, selection, _| {
+                if !text.is_empty()
+                    && let Some(selected) = selected
+                {
+                    let selected = from_utf16(text, selected);
+                    *selection = SelectionRange::new(start + selected.start, start + selected.end);
+                }
+            },
+            cx,
+        );
+        match applied {
+            Some(start) if !text.is_empty() => self.marked = Some(start..start + text.len()),
+            Some(_) => self.finish_composition(),
+            None if starting => self.history.end_group(),
+            None => {}
         }
     }
 
@@ -603,7 +667,7 @@ impl EntityInputHandler for Editor {
         let offset = from_utf16(self.source(), range).start;
         self.layout
             .as_ref()?
-            .bounds_at(offset, offset == self.cursor && self.upstream)
+            .bounds_at(offset, offset == self.cursor() && self.upstream)
     }
 
     fn character_index_for_point(
@@ -659,7 +723,7 @@ impl Editor {
             && self
                 .layout
                 .as_ref()
-                .and_then(|layout| layout.bounds_at(self.cursor, self.upstream))
+                .and_then(|layout| layout.bounds_at(self.cursor(), self.upstream))
                 .is_some_and(|caret| previous.intersects(&caret))
         {
             self.reveal_caret = true;
@@ -722,8 +786,7 @@ impl Editor {
                     .active
                     .as_ref()
                     .map_or(0..e.source().len(), |section| section.content.clone());
-                e.anchor = range.start;
-                e.cursor = range.end;
+                e.set_selection(range.start, range.end);
                 e.upstream = false;
                 e.reveal_caret = true;
                 e.preferred_x = None;
@@ -755,22 +818,8 @@ impl Editor {
                     e.replace(range, &text, cx);
                 }
             }))
-            .on_action(cx.listener(|e, _: &Undo, _, cx| {
-                if e.input_enabled
-                    && let Some(previous) = e.undo.pop()
-                {
-                    e.redo.push(e.snapshot());
-                    e.restore(previous, cx);
-                }
-            }))
-            .on_action(cx.listener(|e, _: &Redo, _, cx| {
-                if e.input_enabled
-                    && let Some(next) = e.redo.pop()
-                {
-                    e.undo.push(e.snapshot());
-                    e.restore(next, cx);
-                }
-            }))
+            .on_action(cx.listener(|e, _: &Undo, _, cx| e.replay_history(false, cx)))
+            .on_action(cx.listener(|e, _: &Redo, _, cx| e.replay_history(true, cx)))
             .child(
                 canvas(
                     move |bounds, window, cx| {
@@ -790,7 +839,7 @@ impl Editor {
                     move |bounds, (layout, hover, overlay), window, cx| {
                         let e = editor.read(cx);
                         let selection = e.selection();
-                        let caret = layout.bounds_at(e.cursor, e.upstream);
+                        let caret = layout.bounds_at(e.cursor(), e.upstream);
                         let focus = e.focus.clone();
                         if e.input_enabled {
                             window.handle_input(
@@ -925,7 +974,7 @@ impl Editor {
             .flatten();
         let hover = link.map(|item| item.source.clone());
         let caret = (self.selection().is_empty() && self.focus.is_focused(window))
-            .then(|| layout.bounds_at(self.cursor, self.upstream))
+            .then(|| layout.bounds_at(self.cursor(), self.upstream))
             .flatten();
         if let Some(message) = &self.message {
             return (
@@ -1103,7 +1152,7 @@ mod tests {
         cx.update(|_, cx| {
             editor.update(cx, |e, cx| {
                 e.move_horizontal(true, false, cx);
-                assert_eq!(e.cursor, "好".len());
+                assert_eq!(e.cursor(), "好".len());
             })
         });
     }
@@ -1122,8 +1171,8 @@ mod tests {
         cx.simulate_keystrokes("down shift-down");
         cx.update(|_, cx| {
             let e = editor.read(cx);
-            assert_eq!(e.anchor, "ABCDE\nX".len());
-            assert_eq!(e.cursor, "ABCDE\nX\nABCD".len());
+            assert_eq!(e.anchor(), "ABCDE\nX".len());
+            assert_eq!(e.cursor(), "ABCDE\nX\nABCD".len());
         });
     }
 
@@ -1167,8 +1216,7 @@ mod tests {
                 assert_eq!(e.headings()[0].offset, 0);
                 assert!(e.replace(0..0, &prefix, cx));
                 assert!(e.layout.is_none());
-                e.anchor = "開頭".len();
-                e.cursor = 0;
+                e.set_selection("開頭".len(), 0);
                 let headings = e.headings();
                 assert_eq!(headings[0].offset, prefix.len());
                 e.reveal_source(headings[0].offset, cx);
@@ -1189,10 +1237,10 @@ mod tests {
                 .source_bounds(prefix.len())
                 .unwrap();
             assert!(e.scroll.bounds().contains(&target.center()));
-            assert_eq!((e.anchor, e.cursor), ("開頭".len(), 0));
+            assert_eq!((e.anchor(), e.cursor()), ("開頭".len(), 0));
             assert_eq!(e.source(), draft);
-            assert_eq!(e.undo.len(), 1);
-            assert!(e.redo.is_empty());
+            assert!(e.history.can_undo());
+            assert!(!e.history.can_redo());
         });
         cx.simulate_keystrokes("cmd-z");
         cx.update(|_, cx| {
@@ -1315,7 +1363,7 @@ mod tests {
         cx.simulate_click(position, Modifiers::none());
         cx.update(|window, cx| {
             editor.update(cx, |editor, cx| {
-                assert_eq!(editor.cursor, offset);
+                assert_eq!(editor.cursor(), offset);
                 let caret = editor
                     .bounds_for_range(offset..offset, editor.scroll.bounds(), window, cx)
                     .unwrap();
@@ -1325,11 +1373,11 @@ mod tests {
                     .layout
                     .as_ref()
                     .unwrap()
-                    .bounds_at(editor.cursor, editor.upstream)
+                    .bounds_at(editor.cursor(), editor.upstream)
                     .unwrap();
                 assert_eq!(caret.top(), next_row_y);
-                assert_eq!(editor.anchor, offset);
-                assert!(editor.cursor > offset);
+                assert_eq!(editor.anchor(), offset);
+                assert!(editor.cursor() > offset);
                 assert_eq!(editor.source(), source);
             })
         });
@@ -1511,7 +1559,7 @@ mod tests {
                 e.move_to(5, false, cx);
                 e.remove(false, cx);
                 assert_eq!(e.source(), "");
-                assert_eq!(e.cursor, 0);
+                assert_eq!(e.cursor(), 0);
             })
         });
     }
@@ -1534,9 +1582,9 @@ mod tests {
             cx.simulate_keystrokes("right");
             cx.update(|_, cx| {
                 let editor = editor.read(cx);
-                assert_eq!(editor.cursor, heading.len());
+                assert_eq!(editor.cursor(), heading.len());
                 let layout = editor.layout.as_ref().unwrap();
-                assert!(layout.bounds_at(editor.cursor, editor.upstream).is_some());
+                assert!(layout.bounds_at(editor.cursor(), editor.upstream).is_some());
                 assert_eq!(
                     layout.index_at(layout.origin + point(px(500.), px(0.))),
                     heading.len()
@@ -1556,7 +1604,7 @@ mod tests {
             editor.update(cx, |e, cx| {
                 window.focus(&e.focus);
                 let link = e
-                    .document
+                    .markdown()
                     .sections()
                     .into_iter()
                     .find(|s| s.kind == SectionKind::Link);
@@ -1577,16 +1625,16 @@ mod tests {
         cx.update(|window, cx| {
             editor.update(cx, |e, cx| {
                 let block = e
-                    .document
+                    .markdown()
                     .sections()
                     .into_iter()
                     .find(|s| s.kind == SectionKind::Mermaid);
                 e.activate(block.unwrap(), false, cx);
                 let layout = e.shape(window, cx);
-                assert_eq!(e.cursor, "```mermaid\n".len());
-                let caret = layout.bounds_at(e.cursor, e.upstream).unwrap().center();
+                assert_eq!(e.cursor(), "```mermaid\n".len());
+                let caret = layout.bounds_at(e.cursor(), e.upstream).unwrap().center();
                 assert!(layout.source_frame_contains(caret));
-                assert_eq!(layout.index_at(caret), e.cursor);
+                assert_eq!(layout.index_at(caret), e.cursor());
                 assert_eq!(e.source(), source);
             });
         });
@@ -1598,8 +1646,8 @@ mod tests {
         cx.update(|window, cx| {
             editor.update(cx, |e, cx| {
                 let formulas: Vec<_> = (0..129).map(|n| format!("x^{n}")).collect();
-                let source = formulas.iter().map(|body| format!("${body}$\n")).collect();
-                e.document = Document::new(source);
+                let source: String = formulas.iter().map(|body| format!("${body}$\n")).collect();
+                e.history = History::new(EditorState::new(source));
                 for body in formulas.into_iter().take(128) {
                     e.graphics.insert(
                         (
@@ -1717,7 +1765,9 @@ mod tests {
         cx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string("```".into())));
         cx.simulate_keystrokes("cmd-v");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "```"));
-        cx.simulate_keystrokes("backspace");
+        cx.simulate_keystrokes("cmd-z");
+        cx.update(|_, cx| assert!(editor.read(cx).source().is_empty()));
+        cx.simulate_keystrokes("cmd-shift-z backspace");
         cx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string("`".into())));
         cx.simulate_keystrokes("cmd-v");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "```"));
@@ -1882,7 +1932,7 @@ mod tests {
                     assert_eq!(e.active.as_ref().map(|s| s.kind), Some(kind));
                     e.command(Command::RemoveItem, window, cx);
                     assert!(
-                        e.document
+                        e.markdown()
                             .sections()
                             .iter()
                             .all(|section| section.kind != kind)
@@ -1899,15 +1949,16 @@ mod tests {
         cx.update(|_, cx| bind_keys(cx));
         cx.update(|window, cx| {
             editor.update(cx, |e, cx| {
-                e.anchor = 0;
-                e.cursor = e.source().len();
+                e.set_selection(0, e.source().len());
                 e.command(Command::Bold, window, cx);
                 assert_eq!(e.source(), "**選取**\n\n**也選取**");
                 e.command(Command::Heading, window, cx);
                 assert_eq!(e.source(), "**選取**\n\n# **也選取**");
             })
         });
-        cx.simulate_keystrokes("cmd-z cmd-z");
+        cx.simulate_input("字");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "**選取**\n\n# 字**也選取**"));
+        cx.simulate_keystrokes("cmd-z cmd-z cmd-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "選取\n\n也選取"));
         cx.simulate_keystrokes("cmd-shift-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "**選取**\n\n**也選取**"));
@@ -1920,8 +1971,7 @@ mod tests {
         });
         cx.update(|window, cx| {
             editor.update(cx, |e, cx| {
-                e.anchor = "# ".len();
-                e.cursor = "# First\n\n# Second".len();
+                e.set_selection("# ".len(), "# First\n\n# Second".len());
                 e.command(Command::Bold, window, cx);
                 assert_eq!(e.source(), "# **First**\n\n# **Second** ###\n");
                 e.command(Command::Bullet, window, cx);
@@ -1969,7 +2019,7 @@ mod tests {
         cx.update(|_, cx| {
             editor.update(cx, |e, cx| {
                 let section = e.active.clone().unwrap();
-                assert_eq!(e.cursor, section.content.start);
+                assert_eq!(e.cursor(), section.content.start);
                 e.replace(section.content, "flowchart LR\nA[Start] --> B[End]", cx);
             })
         });
