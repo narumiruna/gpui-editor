@@ -150,7 +150,8 @@ fn projects_code_as_literal_text_without_fences_or_structural_indent() {
             "let x = 1;\n    next();\n",
         ),
         ("```\n```", ""),
-        ("```text\nstill code", "still code"),
+        ("```text\nstill code\n```", "still code\n"),
+        ("```\r\nbody\r\n  ```  \r\n", "body\n"),
     ] {
         let mut doc = Document::new(raw.into());
         let sections = doc.sections();
@@ -239,7 +240,25 @@ fn editing_a_fenced_body_preserves_its_closing_line_and_crlf() {
 }
 
 #[test]
-fn mermaid_body_includes_a_final_line_that_is_not_a_closing_fence() {
+fn unclosed_code_keeps_its_fence_and_body_editable() {
+    for raw in [
+        "```",
+        "```text\nstill code",
+        "~~~~text\r\n$literal{$\r\n~~~",
+    ] {
+        let mut doc = Document::new(raw.into());
+        let sections = doc.sections();
+        assert_eq!(sections.len(), 1, "{raw:?}");
+        assert_eq!(sections[0].kind, SectionKind::DraftCode);
+        assert_eq!(sections[0].source, 0..raw.len());
+        assert!(sections[0].preview.is_none());
+        doc.replace(raw.len() - 1..raw.len(), "").unwrap();
+        assert_eq!(doc.source(), &raw[..raw.len() - 1]);
+    }
+}
+
+#[test]
+fn a_fence_like_line_stays_editable_until_the_mermaid_fence_closes() {
     for (opening, line) in [
         ("````", "```"),
         ("~~~~", "~~~"),
@@ -251,10 +270,19 @@ fn mermaid_body_includes_a_final_line_that_is_not_a_closing_fence() {
             let body = format!("{line}{ending}");
             let source = format!("{opening}mermaid\n{body}");
             let mut doc = Document::new(source);
+            let draft = find_section(&doc, SectionKind::DraftCode);
+            let start = format!("{opening}mermaid\n").len();
+            assert_eq!(&doc.source()[start..draft.source.end], body);
+            doc.replace(start..draft.source.end, "flowchart LR\nA --> B")
+                .unwrap();
+            assert_eq!(
+                doc.source(),
+                format!("{opening}mermaid\nflowchart LR\nA --> B")
+            );
+            let end = doc.source().len();
+            doc.replace(end..end, &format!("\n{opening}")).unwrap();
             let section = find_section(&doc, SectionKind::Mermaid);
-            assert_eq!(&doc.source()[section.content.clone()], body);
-            doc.replace(section.content, "flowchart LR").unwrap();
-            assert_eq!(doc.source(), format!("{opening}mermaid\nflowchart LR"));
+            assert_eq!(&doc.source()[section.content], "flowchart LR\nA --> B");
         }
     }
 }

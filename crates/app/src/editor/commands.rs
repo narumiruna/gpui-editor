@@ -27,6 +27,47 @@ fn can_edit_as_item(kind: SectionKind) -> bool {
 }
 
 impl Editor {
+    pub(super) fn complete_code_fence(&mut self, offset: usize, cx: &mut Context<Self>) -> bool {
+        if !self.input_enabled || self.active.is_some() {
+            return false;
+        }
+        let source = self.source();
+        let line_start = source[..offset].rfind('\n').map_or(0, |index| index + 1);
+        let Some(indent) = source[line_start..offset].strip_suffix("``") else {
+            return false;
+        };
+        let suffix = &source[offset..];
+        if indent.len() > 3 || !indent.bytes().all(|byte| byte == b' ') {
+            return false;
+        }
+        let ending = if suffix.starts_with("\r\n")
+            || (suffix.is_empty() && source[..line_start].ends_with("\r\n"))
+        {
+            "\r\n"
+        } else if suffix.is_empty() || suffix.starts_with('\n') {
+            "\n"
+        } else {
+            return false;
+        };
+        let start = offset - 2;
+        let mut candidate = self.document.clone();
+        if candidate.replace(offset..offset, "`").is_err()
+            || !candidate.sections().iter().any(|section| {
+                section.kind == SectionKind::DraftCode && section.source.start == start
+            })
+        {
+            return false;
+        }
+        if !self.replace(offset..offset, &format!("`{ending}{ending}{indent}```"), cx) {
+            return false;
+        }
+        let draft = start..self.cursor;
+        self.active = Some(Section::new(SectionKind::DraftCode, draft.clone(), draft));
+        self.cursor = offset + 1 + ending.len();
+        self.anchor = self.cursor;
+        true
+    }
+
     pub(super) fn activate(&mut self, mut section: Section, select: bool, cx: &mut Context<Self>) {
         if matches!(section.kind, SectionKind::Image | SectionKind::Link) {
             section.content = section.source.clone();
@@ -38,6 +79,8 @@ impl Editor {
             self.cursor
         };
         self.active = Some(section);
+        self.upstream = false;
+        self.reveal_caret = true;
         self.preferred_x = None;
         self.marked = None;
         self.message = None;
@@ -76,7 +119,9 @@ impl Editor {
                     .clone()
                     .or_else(|| self.section_at_cursor(can_edit_as_item))
                 {
-                    self.active = None;
+                    if section.kind != K::DraftCode {
+                        self.active = None;
+                    }
                     self.replace(section.source, "", cx);
                 } else {
                     self.message = Some(
@@ -297,6 +342,33 @@ mod tests {
     use super::*;
 
     #[gpui::test]
+    fn fence_completion_preserves_crlf_and_does_not_duplicate_a_closer(cx: &mut TestAppContext) {
+        for (at_caret, expected) in [
+            (
+                "Before\r\n  ``|\r\nAfter",
+                Some("Before\r\n  ```\r\n\r\n  ```\r\nAfter"),
+            ),
+            ("``|\nbody\n```", None),
+            ("```\nbody\n``|", None),
+        ] {
+            let (before, after) = at_caret.split_once('|').unwrap();
+            let offset = before.len();
+            let source = format!("{before}{after}");
+            let (editor, cx) =
+                cx.add_window_view(|window, cx| Editor::new(source.clone(), window, cx));
+            cx.update(|_, cx| {
+                editor.update(cx, |editor, cx| {
+                    assert_eq!(editor.complete_code_fence(offset, cx), expected.is_some());
+                    assert_eq!(editor.source(), expected.unwrap_or(&source));
+                    if expected.is_some() {
+                        assert_eq!(editor.selection(), offset + 3..offset + 3);
+                    }
+                });
+            });
+        }
+    }
+
+    #[gpui::test]
     fn activation_starts_vertical_movement_from_the_new_caret_column(cx: &mut TestAppContext) {
         let source = "---\ntitle: Document\nwidth: 120\n---";
         let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source.into(), window, cx));
@@ -305,10 +377,13 @@ mod tests {
                 editor.preferred_x = Some(gpui::px(1_000.));
                 editor.command(Command::Add(SectionKind::FrontMatter), window, cx);
                 assert_eq!(editor.cursor, source.find("title").unwrap());
-                editor.layout = Some(editor.shape(window, cx));
+                let layout = editor.shape(window, cx);
+                let caret = layout.bounds_at(editor.cursor, false).unwrap();
+                let column = caret.left() - layout.origin.x;
+                editor.layout = Some(layout);
                 editor.move_vertical(true, false, cx);
                 assert_eq!(editor.cursor, source.find("width").unwrap());
-                assert_eq!(editor.preferred_x, Some(gpui::px(0.)));
+                assert_eq!(editor.preferred_x, Some(column));
             });
         });
     }

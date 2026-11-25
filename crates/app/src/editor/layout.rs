@@ -5,8 +5,8 @@ use std::{
 };
 
 use gpui::{
-    Bounds, Context, FontStyle, FontWeight, Pixels, Point, RenderImage, ShapedLine, SharedString,
-    TextRun, UnderlineStyle, Window, point, px, size,
+    App, Bounds, Context, Edges, FontStyle, FontWeight, Pixels, Point, RenderImage, ShapedLine,
+    SharedString, TextRun, UnderlineStyle, Window, point, px, quad, size,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -53,9 +53,49 @@ impl Graphic {
     }
 }
 
+const SOURCE_PADDING: Pixels = px(8.);
+const SOURCE_HEADER: Pixels = px(24.);
+const SOURCE_MARGIN: Pixels = px(4.);
+
 pub(super) struct Layout {
     pub(super) origin: Point<Pixels>,
     pub(super) rows: Vec<Row>,
+    pub(super) source_frame: Option<SourceFrame>,
+}
+
+pub(super) struct SourceFrame {
+    pub(super) bounds: Bounds<Pixels>,
+    content: Range<usize>,
+    label: ShapedLine,
+}
+
+impl SourceFrame {
+    pub(super) fn paint(
+        &self,
+        origin: Point<Pixels>,
+        theme: Theme,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let bounds = Bounds::new(origin + self.bounds.origin, self.bounds.size);
+        if !window.content_mask().bounds.intersects(&bounds) {
+            return;
+        }
+        window.paint_quad(quad(
+            bounds,
+            px(6.),
+            theme.preview,
+            Edges::all(px(1.)),
+            theme.border,
+            Default::default(),
+        ));
+        let _ = self.label.paint(
+            bounds.origin + point(SOURCE_PADDING, SOURCE_MARGIN),
+            SOURCE_HEADER - SOURCE_MARGIN,
+            window,
+            cx,
+        );
+    }
 }
 
 pub(super) struct Row {
@@ -174,11 +214,10 @@ impl Layout {
         &self.rows[index.min(self.rows.len() - 1)]
     }
 
-    pub(super) fn contains_row(&self, position: Point<Pixels>) -> bool {
-        let y = position.y - self.origin.y;
-        self.rows
-            .last()
-            .is_some_and(|row| y >= px(0.) && y < row.y + row.height)
+    pub(super) fn source_frame_contains(&self, position: Point<Pixels>) -> bool {
+        self.source_frame
+            .as_ref()
+            .is_some_and(|frame| frame.bounds.contains(&(position - self.origin)))
     }
 
     pub(super) fn item_at(&self, position: Point<Pixels>) -> Option<&Item> {
@@ -198,8 +237,26 @@ impl Layout {
     }
 
     pub(super) fn position_at(&self, position: Point<Pixels>) -> (usize, bool) {
-        self.row_at(position)
-            .position_at(position.x - self.origin.x)
+        let local = position - self.origin;
+        let frame = self
+            .source_frame
+            .as_ref()
+            .filter(|frame| frame.bounds.contains(&local));
+        if let Some(frame) = frame {
+            if local.y < frame.bounds.top() + SOURCE_HEADER {
+                return (frame.content.start, false);
+            }
+            if local.y >= frame.bounds.bottom() - SOURCE_PADDING {
+                return (frame.content.end, false);
+            }
+        }
+        let (offset, upstream) = self.row_at(position).position_at(local.x);
+        (
+            frame.map_or(offset, |frame| {
+                offset.clamp(frame.content.start, frame.content.end)
+            }),
+            upstream,
+        )
     }
 
     pub(super) fn bounds_at(&self, offset: usize, upstream: bool) -> Option<Bounds<Pixels>> {
@@ -247,6 +304,11 @@ impl Layout {
     }
 
     fn row_index(&self, offset: usize, upstream: bool) -> Option<usize> {
+        let upstream = upstream
+            && self
+                .source_frame
+                .as_ref()
+                .is_none_or(|frame| offset != frame.content.start);
         let index = self.rows.partition_point(|row| {
             row.end < offset || (!upstream && row.soft_end && row.end == offset)
         });
@@ -289,6 +351,8 @@ struct LayoutBuilder<'a> {
     window: &'a Window,
     theme: Theme,
     wrap_width: Pixels,
+    inset: Pixels,
+    source_frame: Option<SourceFrame>,
     marked: Option<Range<usize>>,
 }
 
@@ -300,6 +364,8 @@ impl<'a> LayoutBuilder<'a> {
             window,
             theme: Theme::for_window(window),
             wrap_width,
+            inset: px(0.),
+            source_frame: None,
             marked,
         }
     }
@@ -318,8 +384,23 @@ impl<'a> LayoutBuilder<'a> {
     }
 
     fn next_row(&mut self, start: usize) {
-        let next = Self::row(start, self.row.y + self.row.height);
+        let mut y = self.row.y + self.row.height;
+        if let Some(frame) = &self.source_frame {
+            y = y.max(frame.bounds.bottom() + SOURCE_MARGIN);
+        }
+        let mut next = Self::row(start, y);
+        next.width = self.inset;
         self.rows.push(std::mem::replace(&mut self.row, next));
+    }
+
+    fn resume_after_source_frame(&mut self, start: usize) {
+        if self
+            .source_frame
+            .as_ref()
+            .is_some_and(|frame| self.row.y < frame.bounds.bottom())
+        {
+            self.next_row(start);
+        }
     }
 
     fn wrap_row(&mut self, start: usize) {
@@ -348,6 +429,60 @@ impl<'a> LayoutBuilder<'a> {
         }
     }
 
+    fn add_source(&mut self, source: &str, section: &Section) {
+        let content = section.content.clone();
+        if !self.row.items.is_empty() {
+            self.wrap_row(content.start);
+        }
+        let first = self.rows.len();
+        let top = self.row.y + SOURCE_MARGIN;
+        self.row = Self::row(content.start, top + SOURCE_HEADER);
+        self.row.width = SOURCE_PADDING;
+        self.inset = SOURCE_PADDING;
+        let width = self.wrap_width;
+        self.wrap_width = (width - SOURCE_PADDING).max(SOURCE_PADDING + px(1.));
+        self.add_text(source, content.clone(), Face::default());
+        self.wrap_width = width;
+        self.inset = px(0.);
+
+        let text = match section.kind {
+            SectionKind::FrontMatter => "<front-matter>",
+            SectionKind::Mermaid => "<mermaid>",
+            SectionKind::InlineMath => "<inline-math>",
+            SectionKind::DisplayMath => "<display-math>",
+            SectionKind::Image => "<image>",
+            SectionKind::Link => "<link>",
+            SectionKind::DraftCode => "<code>",
+            _ => unreachable!("only editable items enter source mode"),
+        };
+        let mut font = self.window.text_style().font();
+        font.weight = FontWeight::SEMIBOLD;
+        let label = self.window.text_system().shape_line(
+            text.into(),
+            px(12.),
+            &[TextRun {
+                len: text.len(),
+                font,
+                color: self.theme.muted.into(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            }],
+            None,
+        );
+        let right = self.rows[first..]
+            .iter()
+            .chain([&self.row])
+            .map(|row| row.width + SOURCE_PADDING)
+            .fold(width.max(label.width + SOURCE_PADDING * 2.), Pixels::max);
+        let bottom = self.row.y + self.row.height + SOURCE_PADDING;
+        self.source_frame = Some(SourceFrame {
+            bounds: Bounds::new(point(px(0.), top), size(right, bottom - top)),
+            content,
+            label,
+        });
+    }
+
     fn text(
         &mut self,
         text: &str,
@@ -356,6 +491,7 @@ impl<'a> LayoutBuilder<'a> {
         target: Option<Section>,
         atomic: bool,
     ) {
+        self.resume_after_source_frame(source.start);
         let style = self.window.text_style();
         let mut font = style.font();
         if face.heading || face.bold {
@@ -553,6 +689,7 @@ impl<'a> LayoutBuilder<'a> {
         height: Pixels,
         paint: ItemPaint,
     ) {
+        self.resume_after_source_frame(source.start);
         if atomic && !self.row.items.is_empty() && self.row.width + width > self.wrap_width {
             self.wrap_row(source.start);
         }
@@ -574,6 +711,7 @@ impl<'a> LayoutBuilder<'a> {
         Layout {
             origin: point(px(0.), px(0.)),
             rows: self.rows,
+            source_frame: self.source_frame,
         }
     }
 }
@@ -893,14 +1031,7 @@ impl Projection<'_> {
                 ..face
             };
             if let Some(active) = self.active.filter(|active| active.source == section.source) {
-                if active.content.is_empty() {
-                    if builder.row.items.is_empty() {
-                        builder.row.start = active.content.start;
-                    }
-                    builder.row.end = active.content.end;
-                } else {
-                    builder.add_text(self.source, active.content.clone(), face);
-                }
+                builder.add_source(self.source, active);
                 self.finish_line(builder, active.content.end, section);
             } else {
                 match section.kind {
@@ -945,6 +1076,7 @@ impl Projection<'_> {
                         }
                         self.finish_line(builder, section.content.end, section);
                     }
+                    K::DraftCode => builder.add_text(self.source, section.source.clone(), face),
                     K::ReadOnly => {
                         if let Some(preview) = &section.preview {
                             let block = BlockLayout::new(preview, builder.window);
@@ -1109,6 +1241,87 @@ mod tests {
             assert_eq!(layout.rows[1].start, prefix.len());
             assert_eq!(layout.step(prefix.len(), false), prefix.len() - 1);
         });
+    }
+
+    #[gpui::test]
+    fn editable_items_have_a_label_and_frame_only_in_source_mode(cx: &mut TestAppContext) {
+        use SectionKind as K;
+        for (kind, label, source) in [
+            (
+                K::FrontMatter,
+                "<front-matter>",
+                "---\ntitle: Test\n---\nAfter",
+            ),
+            (
+                K::Mermaid,
+                "<mermaid>",
+                "```mermaid\nflowchart LR\nA --> B\n```\nAfter",
+            ),
+            (K::InlineMath, "<inline-math>", "Before $x^2$ after"),
+            (K::DisplayMath, "<display-math>", "$$\nx^2\n$$\nAfter"),
+            (K::Image, "<image>", "Before ![Alt](picture.png) after"),
+            (
+                K::Link,
+                "<link>",
+                "Before [test](https://example.com/long-path) after",
+            ),
+        ] {
+            let (editor, cx) =
+                cx.add_window_view(|window, cx| Editor::new(source.into(), window, cx));
+            cx.update(|window, cx| {
+                editor.update(cx, |editor, cx| {
+                    let width = px(112.);
+                    assert!(
+                        editor
+                            .shape_for_width(window, cx, width)
+                            .source_frame
+                            .is_none()
+                    );
+                    let section = editor
+                        .document
+                        .sections()
+                        .into_iter()
+                        .find(|section| section.kind == kind)
+                        .unwrap();
+                    editor.activate(section, true, cx);
+                    let layout = editor.shape_for_width(window, cx, width);
+                    let frame = layout.source_frame.as_ref().expect(label);
+                    let content = &editor.active.as_ref().unwrap().content;
+                    assert_eq!(frame.label.text.as_ref(), label);
+                    assert_eq!(&frame.content, content);
+                    assert_eq!(editor.selection(), *content);
+                    for offset in [content.start, content.end] {
+                        let caret = layout.bounds_at(offset, false).unwrap();
+                        assert!(
+                            frame.bounds.contains(&caret.center()),
+                            "{label} at {offset}"
+                        );
+                        assert_eq!(layout.index_at(caret.origin), offset);
+                    }
+                    let inside = layout
+                        .rows
+                        .iter()
+                        .filter(|row| row.y > frame.bounds.top() && row.y < frame.bounds.bottom());
+                    for item in inside.flat_map(|row| &row.items) {
+                        assert!(item.left >= SOURCE_PADDING);
+                        assert!(item.left + item.width <= frame.bounds.right() - SOURCE_PADDING);
+                        assert!(
+                            content.start <= item.source.start && item.source.end <= content.end
+                        );
+                    }
+                    let suffix = source.rfind("fter").unwrap();
+                    assert!(layout.bounds_at(suffix, false).unwrap().top() > frame.bounds.bottom());
+                    assert_eq!(editor.source(), source);
+                    editor.finish_active();
+                    assert!(
+                        editor
+                            .shape_for_width(window, cx, width)
+                            .source_frame
+                            .is_none()
+                    );
+                });
+            });
+        }
     }
 
     #[gpui::test]

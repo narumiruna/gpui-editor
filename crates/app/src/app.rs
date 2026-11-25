@@ -45,20 +45,24 @@ actions!(
     ]
 );
 
+fn bind_shortcuts(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("cmd-o", ChooseFolder, None),
+        KeyBinding::new("cmd-n", NewDocument, None),
+        KeyBinding::new("cmd-s", SaveDocument, None),
+        KeyBinding::new("cmd-w", Close, None),
+        KeyBinding::new("cmd-q", Quit, None),
+        KeyBinding::new("cmd-,", Preferences, None),
+        KeyBinding::new("cmd-/", ToggleSidebar, None),
+        KeyBinding::new("cmd-p", OpenPalette, None),
+    ]);
+}
+
 pub fn run() {
     let app = Application::new().with_assets(editor::ToolbarAssets);
     app.run(|cx| {
         editor::bind_keys(cx);
-        cx.bind_keys([
-            KeyBinding::new("cmd-o", ChooseFolder, None),
-            KeyBinding::new("cmd-n", NewDocument, None),
-            KeyBinding::new("cmd-s", SaveDocument, None),
-            KeyBinding::new("cmd-w", Close, None),
-            KeyBinding::new("cmd-q", Quit, None),
-            KeyBinding::new("cmd-,", Preferences, None),
-            KeyBinding::new("cmd-alt-s", ToggleSidebar, None),
-            KeyBinding::new("cmd-p", OpenPalette, None),
-        ]);
+        bind_shortcuts(cx);
         let window = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(

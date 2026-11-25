@@ -496,7 +496,7 @@ fn nested_tree_preserves_selection_and_expansion_when_sidebar_is_hidden(cx: &mut
     let note = fixture.document("guides/install/quickstart.md", "Original");
     let (shell, cx) = cx.add_window_view(Shell::new);
     cx.simulate_resize(size(px(780.), px(540.)));
-    cx.update(|_, cx| cx.bind_keys([KeyBinding::new("cmd-alt-s", ToggleSidebar, None)]));
+    cx.update(|_, cx| bind_shortcuts(cx));
     fixture.open(cx, &shell);
     assert!(cx.debug_bounds("workspace-file-0").is_none());
     click_tool(cx, "workspace-folder-1");
@@ -509,11 +509,12 @@ fn nested_tree_preserves_selection_and_expansion_when_sidebar_is_hidden(cx: &mut
         cx.debug_bounds("document-body").unwrap().left(),
         sidebar.right()
     );
-    click_tool(cx, "Hide Sidebar");
+    cx.simulate_keystrokes("cmd-/");
+    cx.run_until_parked();
     cx.update(|_, cx| assert!(!shell.read(cx).sidebar.visible));
     assert_eq!(cx.debug_bounds("document-body").unwrap().left(), px(0.));
     assert!(cx.debug_bounds("Show Sidebar").is_some());
-    cx.simulate_keystrokes("cmd-alt-s");
+    cx.simulate_keystrokes("cmd-/");
     cx.run_until_parked();
     cx.update(|_, cx| assert!(shell.read(cx).sidebar.visible));
     assert_eq!(

@@ -15,6 +15,7 @@ pub enum SectionKind {
     DisplayMath,
     Image,
     Link,
+    DraftCode,
     ReadOnly,
 }
 
@@ -172,11 +173,24 @@ impl Document {
         let mut open_links: Vec<usize> = Vec::new();
         let mut heading: Option<Section> = None;
         let mut fenced_body = None;
-        let mut block_preview: Option<Section> = None;
+        let mut block_preview: Option<(Section, Option<usize>)> = None;
         for (event, source) in self.parser().into_offset_iter() {
-            if let Some(section) = &mut block_preview {
+            if let Some((section, body_end)) = &mut block_preview {
+                if let Some(end) = body_end
+                    && matches!(&event, Event::Text(_))
+                {
+                    *end = (*end).max(source.end);
+                }
                 if section.preview.as_mut().unwrap().consume(event) {
-                    sections.push(block_preview.take().unwrap());
+                    let (section, body_end) = block_preview.take().unwrap();
+                    let range = &section.source;
+                    if body_end.is_some_and(|end| {
+                        !has_closing_code_fence(&self.source[range.clone()], end - range.start)
+                    }) {
+                        sections.push(Section::new(K::DraftCode, range.clone(), range.clone()));
+                    } else {
+                        sections.push(section);
+                    }
                 }
                 continue;
             }
@@ -231,22 +245,29 @@ impl Document {
                     fenced_body = Some((K::Mermaid, source.start));
                     None
                 }
-                Event::Start(Tag::CodeBlock(_)) => {
-                    block_preview = Some(Section::with_preview(
-                        source,
-                        BlockPreview::Code {
-                            body: String::new(),
-                        },
+                Event::Start(Tag::CodeBlock(kind)) => {
+                    let body_end = matches!(kind, CodeBlockKind::Fenced(_)).then_some(source.start);
+                    block_preview = Some((
+                        Section::with_preview(
+                            source,
+                            BlockPreview::Code {
+                                body: String::new(),
+                            },
+                        ),
+                        body_end,
                     ));
                     None
                 }
                 Event::Start(Tag::Table(alignments)) => {
-                    block_preview = Some(Section::with_preview(
-                        source,
-                        BlockPreview::Table {
-                            alignments,
-                            rows: Vec::new(),
-                        },
+                    block_preview = Some((
+                        Section::with_preview(
+                            source,
+                            BlockPreview::Table {
+                                alignments,
+                                rows: Vec::new(),
+                            },
+                        ),
+                        None,
                     ));
                     None
                 }
@@ -256,9 +277,17 @@ impl Document {
                     }
                     None
                 }
-                Event::End(TagEnd::CodeBlock | TagEnd::MetadataBlock(_)) => fenced_body
-                    .take()
-                    .map(|(kind, body_end)| block(kind, source, text, body_end)),
+                Event::End(TagEnd::CodeBlock | TagEnd::MetadataBlock(_)) => {
+                    fenced_body.take().map(|(kind, body_end)| {
+                        if kind == K::Mermaid
+                            && !has_closing_code_fence(text, body_end - source.start)
+                        {
+                            Section::new(K::DraftCode, source.clone(), source)
+                        } else {
+                            block(kind, source, text, body_end)
+                        }
+                    })
+                }
                 Event::Start(Tag::Link {
                     link_type: LinkType::Inline,
                     dest_url,
@@ -319,16 +348,17 @@ impl Document {
     }
 
     pub fn replace(&mut self, range: Range<usize>, text: &str) -> Result<(), EditError> {
-        self.replacement(range, text, true).map(|_| ())
+        self.replacement(range, text, None).map(|_| ())
     }
 
     /// Apply the edit and return the actual old range and inserted byte count.
     /// Place the caret after `text`, before any added fence separator.
+    /// An active code draft permits edits to its own code preview, not other read-only sections.
     pub fn replacement(
         &mut self,
         mut range: Range<usize>,
         text: &str,
-        expand_hidden_delimiters: bool,
+        active: Option<&Section>,
     ) -> Result<(Range<usize>, usize), EditError> {
         use SectionKind as K;
 
@@ -336,7 +366,7 @@ impl Document {
             return Err(EditError::InvalidRange);
         }
         let sections = self.sections();
-        if expand_hidden_delimiters && text.is_empty() && !range.is_empty() {
+        if active.is_none() && text.is_empty() && !range.is_empty() {
             // Sections are sorted outermost first. Remove inner spans first so
             // an enclosing span also goes away if it becomes empty.
             for section in sections.iter().rev() {
@@ -349,10 +379,17 @@ impl Document {
                 }
             }
         }
+        let draft = active.filter(|section| {
+            section.kind == K::DraftCode
+                && section.source.start <= range.start
+                && range.end <= section.source.end
+        });
         if sections.iter().any(|section| {
             section.kind == K::ReadOnly
                 && range.start < section.source.end
                 && section.source.start < range.end
+                && !(matches!(section.preview, Some(BlockPreview::Code { .. }))
+                    && draft.is_some_and(|draft| draft.source == section.source))
         }) {
             return Err(EditError::ReadOnly);
         }
@@ -388,8 +425,21 @@ fn delimited(kind: SectionKind, source: Range<usize>, delimiter_len: usize) -> S
     Section::new(kind, source, content)
 }
 
+fn fence_body_start(text: &str) -> usize {
+    text.find('\n').map_or(text.len(), |index| index + 1)
+}
+
+fn has_closing_code_fence(text: &str, body_end: usize) -> bool {
+    let bytes = text.as_bytes();
+    let len = bytes.iter().take_while(|&&byte| byte == bytes[0]).count();
+    // The parser also ends an unclosed block at EOF. A closing fence is outside its text events.
+    bytes[body_end.max(fence_body_start(text))..]
+        .trim_ascii_end()
+        .ends_with(&bytes[..len])
+}
+
 fn block(kind: SectionKind, source: Range<usize>, text: &str, body_end: usize) -> Section {
-    let start = text.find('\n').map_or(text.len(), |index| index + 1);
+    let start = fence_body_start(text);
     // Parser text events cover the body but not a valid closing fence.
     // A fence-like line included in the text stays part of the body.
     let end = text
