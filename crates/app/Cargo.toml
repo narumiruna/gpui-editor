@@ -14,7 +14,7 @@ gpui-editor-preview = { path = "../preview" }
 gpui-editor-workspace = { path = "../workspace" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-base64 = "0.22"
+base64 = "0.23"
 gpui.workspace = true
 image = { workspace = true, features = ["jpeg", "png", "tiff"] }
 libc = "0.2"
