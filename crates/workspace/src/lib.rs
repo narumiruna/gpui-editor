@@ -1,3 +1,3 @@
 mod workspace;
 
-pub use workspace::{DocumentFile, Workspace};
+pub use workspace::{DirectoryEntry, DocumentFile, EntryKind, Workspace};

@@ -82,17 +82,21 @@ fn developer_mode_requires_approval_and_can_be_disabled(cx: &mut TestAppContext)
     cx.update(|window, cx| shell.update(cx, |shell, cx| shell.developer_preferences(window, cx)));
     click(cx, "Developer Mode: On");
     click(cx, "Done");
-    cx.update(|_, cx| {
+    cx.update(|window, cx| {
         shell.update(cx, |shell, cx| {
             assert!(shell.developer.bridge.is_none());
             assert!(!shell.developer.connected());
-            assert!(shell.developer_icon(true, cx).is_none());
+            assert!(
+                shell
+                    .developer_icon(true, Theme::for_window(window), cx)
+                    .is_none()
+            );
         })
     });
 }
 
 #[gpui::test]
-fn picker_selects_wrapped_controls_and_scrolled_rows_without_activating_them(
+fn picker_selects_toolbar_controls_and_scrolled_rows_without_activating_them(
     cx: &mut TestAppContext,
 ) {
     let directory = tempfile::tempdir().unwrap();
@@ -110,7 +114,10 @@ fn picker_selects_wrapped_controls_and_scrolled_rows_without_activating_them(
     let (shell, cx) = cx.add_window_view(Shell::new);
     cx.update(|window, cx| {
         shell.update(cx, |shell, cx| {
-            shell.files = workspace.markdown_files().unwrap();
+            shell.sidebar.reset(
+                workspace.root(),
+                crate::app::sidebar::snapshot(&workspace, Vec::new()).unwrap(),
+            );
             shell.workspace = Some(workspace.clone());
             shell.open_editor(Some(file), window, cx);
             let editor = &shell.current().unwrap().editor;
@@ -124,9 +131,9 @@ fn picker_selects_wrapped_controls_and_scrolled_rows_without_activating_them(
     cx.simulate_resize(size(px(560.), px(360.)));
     enable(cx, &shell);
     paired(cx, &shell);
-    let open = cx.debug_bounds("Open Folder…").unwrap();
+    let save = cx.debug_bounds("Save").unwrap();
     let picker = cx.debug_bounds("developer-picker").unwrap();
-    assert_eq!(picker.top(), open.top());
+    assert_eq!(picker.top(), save.top());
     assert!(picker.size.width >= px(100.));
     assert!(picker.right() <= px(560.));
     let file = workspace.root().join("file-00.md");

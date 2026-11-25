@@ -4,24 +4,29 @@ use std::path::{Path, PathBuf};
 
 use gpui::{
     App, Application, Bounds, Context, Entity, FocusHandle, KeyBinding, Menu, MenuItem, OsAction,
-    Pixels, ScrollHandle, SharedString, Subscription, TitlebarOptions, Window, WindowBounds,
-    WindowHandle, WindowOptions, actions, div, prelude::*, px, rgb, rgba, size,
+    Pixels, ScrollHandle, Subscription, TitlebarOptions, Window, WindowBounds, WindowHandle,
+    WindowOptions, actions, div, point, prelude::*, px, size,
 };
 
 use crate::{
     editor::{self, Editor, OpenLocalDocument, toolbar},
+    theme::Theme,
     workspace::{DocumentFile, Workspace},
 };
 
 pub(crate) mod developer;
+mod editor_pane;
 mod operation;
 mod quit;
 mod session;
+mod sidebar;
 mod tabs;
 #[cfg(test)]
 mod tests;
+mod window_chrome;
 
-use developer::{Developer, Picker};
+use developer::Developer;
+use sidebar::Sidebar;
 
 actions!(
     shell,
@@ -31,6 +36,7 @@ actions!(
         SaveDocument,
         Close,
         CloseWindow,
+        ToggleSidebar,
         Quit,
         Preferences
     ]
@@ -47,6 +53,7 @@ pub fn run() {
             KeyBinding::new("cmd-w", Close, None),
             KeyBinding::new("cmd-q", Quit, None),
             KeyBinding::new("cmd-,", Preferences, None),
+            KeyBinding::new("cmd-alt-s", ToggleSidebar, None),
         ]);
         let window = cx.open_window(
             WindowOptions {
@@ -57,8 +64,9 @@ pub fn run() {
                 ))),
                 window_min_size: Some(size(px(560.), px(360.))),
                 titlebar: Some(TitlebarOptions {
-                    title: Some("GPUI Editor".into()),
-                    ..Default::default()
+                    title: None,
+                    appears_transparent: true,
+                    traffic_light_position: Some(point(px(10.), px(12.))),
                 }),
                 ..Default::default()
             },
@@ -111,6 +119,10 @@ pub fn run() {
                     MenuItem::os_action("Select All", editor::SelectAll, OsAction::SelectAll),
                 ],
             },
+            Menu {
+                name: "View".into(),
+                items: vec![MenuItem::action("Toggle Sidebar", ToggleSidebar)],
+            },
         ]);
         cx.activate(true);
     });
@@ -152,12 +164,13 @@ impl DocumentTab {
 struct Shell {
     focus: FocusHandle,
     workspace: Option<Workspace>,
-    files: Vec<PathBuf>,
+    sidebar: Sidebar,
     tabs: Vec<DocumentTab>,
     selected: Option<TabId>,
     next_tab: TabId,
     tab_scroll: ScrollHandle,
-    tab_window_width: Option<Pixels>,
+    tab_strip_width: Option<Pixels>,
+    _appearance: Subscription,
     session_path: Option<PathBuf>,
     restoring: bool,
     active: Option<ActiveOperation>,
@@ -174,6 +187,7 @@ enum ActiveOperation {
 enum Intent {
     ChooseFolder,
     OpenFolder(PathBuf),
+    ExpandFolder(PathBuf),
     New,
     Open(PathBuf),
     Save,
@@ -191,15 +205,17 @@ impl Shell {
                 .update(cx, |shell, cx| shell.start(Intent::Exit, window, cx))
                 .is_err()
         });
+        let appearance = cx.observe_window_appearance(window, |_, _, cx| cx.notify());
         Self {
             focus,
             workspace: None,
-            files: Vec::new(),
+            sidebar: Sidebar::default(),
             tabs: Vec::new(),
             selected: None,
             next_tab: 0,
             tab_scroll: ScrollHandle::new(),
-            tab_window_width: None,
+            tab_strip_width: None,
+            _appearance: appearance,
             session_path: None,
             restoring: false,
             active: None,
@@ -366,8 +382,8 @@ impl Shell {
                 }
                 match restored {
                     Ok(Some(restored)) => {
+                        shell.sidebar.reset(restored.workspace.root(), restored.tree);
                         shell.workspace = Some(restored.workspace);
-                        shell.files = restored.files;
                         let mut selected = None;
                         for (index, file) in restored.documents.into_iter().enumerate() {
                             let id = shell.add_tab(Some(file), window, cx);
@@ -402,275 +418,15 @@ fn filename(path: &Path) -> String {
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let width = window.viewport_size().width;
-        if self.tab_window_width.replace(width) != Some(width)
-            && let Some(index) = self
-                .tabs
-                .iter()
-                .position(|tab| Some(tab.id) == self.selected)
-        {
-            self.tab_scroll.scroll_to_item(index);
+        let controls = window_chrome::controls_width(window);
+        let sidebar_width = self.sidebar.width(width);
+        let strip_width = tabs::strip_width(width, sidebar_width, self.sidebar.visible, controls);
+        if self.tab_strip_width.replace(strip_width) != Some(strip_width) {
+            self.reveal_tab_at_width(strip_width, window, cx);
         }
         let busy = self.active.is_some();
-        let current = self.current();
+        let theme = Theme::for_window(window);
         let picker = self.developer.picker();
-        let can_save = current.is_some() && !busy;
-        let workspace_name = self
-            .workspace
-            .as_ref()
-            .map(|workspace| filename(workspace.root()));
-        let sidebar = div()
-            .w(px(172.))
-            .flex_none()
-            .flex()
-            .flex_col()
-            .min_h_0()
-            .border_r_1()
-            .border_color(rgb(0xd3dce9))
-            .bg(rgb(0xf2f5fa))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .px_3()
-                    .py_3()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child(toolbar::icon("Workspace", 15.).text_color(rgb(0x2859ad)))
-                    .child(
-                        div().min_w_0().truncate().child(
-                            workspace_name
-                                .clone()
-                                .unwrap_or_else(|| "No workspace".into()),
-                        ),
-                    ),
-            )
-            .when(self.workspace.is_some(), |sidebar| {
-                sidebar.child(
-                    div()
-                        .px_3()
-                        .pb_1()
-                        .text_xs()
-                        .text_color(rgb(0x475569))
-                        .child("Workspace files"),
-                )
-            });
-        let mut files = div()
-            .id("workspace-files")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .px_2()
-            .pb_2();
-        for (index, path) in self.files.iter().enumerate() {
-            let active = current.and_then(DocumentTab::path) == Some(path);
-            let path = path.clone();
-            files = files.child(Picker::mark(
-                picker.as_ref(),
-                div()
-                    .id(("file", index))
-                    .debug_selector(move || format!("workspace-file-{index}"))
-                    .px_2()
-                    .py_1()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .rounded_md()
-                    .cursor_pointer()
-                    .hover(|style| style.bg(rgb(0xe2e8f0)))
-                    .when(active, |el| {
-                        el.bg(rgb(0xe4eeff))
-                            .text_color(rgb(0x234e9a))
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                    })
-                    .child(toolbar::icon("File", 14.).text_color(rgb(0x2859ad)))
-                    .child(div().min_w_0().truncate().child(filename(&path)))
-                    .on_click(cx.listener(move |shell, _, window, cx| {
-                        shell.start(Intent::Open(path.clone()), window, cx)
-                    })),
-                "sidebar.file",
-                "Workspace file row",
-            ));
-        }
-        if self.files.is_empty() {
-            files = files.child(div().px_2().pb_2().text_color(rgb(0x64748b)).child(
-                if self.workspace.is_some() {
-                    "No Markdown files in this folder."
-                } else {
-                    "Choose a folder to browse its Markdown files."
-                },
-            ));
-        }
-        let sidebar = Picker::mark(
-            picker.as_ref(),
-            sidebar.child(files),
-            "sidebar",
-            "Workspace sidebar",
-        );
-        let file_tools = toolbar::group()
-            .child(
-                toolbar::marked_button("Open Folder…", !busy, picker.as_ref()).when(
-                    !busy,
-                    |button| {
-                        button.on_click(cx.listener(|shell, _, window, cx| {
-                            shell.start(Intent::ChooseFolder, window, cx)
-                        }))
-                    },
-                ),
-            )
-            .child(
-                toolbar::marked_button("New note", !busy, picker.as_ref()).when(!busy, |button| {
-                    button.on_click(
-                        cx.listener(|shell, _, window, cx| shell.start(Intent::New, window, cx)),
-                    )
-                }),
-            )
-            .child(
-                toolbar::marked_button("Save", can_save, picker.as_ref()).when(
-                    can_save,
-                    |button| {
-                        button.on_click(
-                            cx.listener(|shell, _, window, cx| {
-                                shell.start(Intent::Save, window, cx)
-                            }),
-                        )
-                    },
-                ),
-            );
-        let mut tools = div()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap_2()
-            .px_2()
-            .py_1()
-            .child(file_tools);
-        let mut more_tools = None;
-        if let Some(current) = current {
-            let edit_enabled = !busy && !current.editor.read(cx).is_composing();
-            let label = if self.show_more_tools {
-                "Fewer tools"
-            } else {
-                "More tools"
-            };
-            tools = tools
-                .children(toolbar::primary_groups(
-                    &current.editor,
-                    edit_enabled,
-                    picker.as_ref(),
-                ))
-                .child(toolbar::marked_button(label, !busy, picker.as_ref()).when(
-                    !busy,
-                    |button| {
-                        button.on_click(cx.listener(|shell, _, _, cx| {
-                            shell.show_more_tools = !shell.show_more_tools;
-                            cx.notify();
-                        }))
-                    },
-                ));
-            if self.show_more_tools {
-                more_tools = Some(
-                    toolbar::more_group(&current.editor, edit_enabled, picker.as_ref())
-                        .px_2()
-                        .py_1()
-                        .border_t_1()
-                        .border_color(rgb(0xd3dce9)),
-                );
-            }
-        }
-        let toolbar = div()
-            .flex_none()
-            .bg(rgb(0xf9fbff))
-            .border_b_1()
-            .border_color(rgb(0xd3dce9))
-            .child(
-                div()
-                    .flex()
-                    .items_start()
-                    .child(tools.flex_1().min_w_0())
-                    .when_some(self.developer_status(), |el, text| {
-                        el.child(
-                            div()
-                                .py_2()
-                                .text_xs()
-                                .text_color(rgb(0x475569))
-                                .child(text.to_owned()),
-                        )
-                    })
-                    .children(self.developer_icon(!busy, cx)),
-            )
-            .children(more_tools);
-        let (status, saved) = if busy {
-            ("Working…", false)
-        } else if let Some(current) = current {
-            if current.dirty(cx) {
-                ("Unsaved changes", false)
-            } else if current.file.is_some() {
-                ("Saved locally", true)
-            } else {
-                ("Not saved", false)
-            }
-        } else {
-            ("", false)
-        };
-        let document_bar = div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .gap_2()
-            .px_3()
-            .py_1()
-            .bg(rgb(0xf2f5fa))
-            .border_b_1()
-            .border_color(rgb(0xd3dce9))
-            .when_some(workspace_name, |bar, name| {
-                bar.child(
-                    div()
-                        .max_w(px(125.))
-                        .truncate()
-                        .text_color(rgb(0x475569))
-                        .child(name),
-                )
-            })
-            .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .text_xs()
-                    .text_color(rgb(if saved { 0x234e9a } else { 0x475569 }))
-                    .when(saved, |el| {
-                        el.child(toolbar::icon("Saved", 13.).text_color(rgb(0x234e9a)))
-                    })
-                    .child(status),
-            );
-        let document_bar = Picker::mark(
-            picker.as_ref(),
-            document_bar,
-            "document.status",
-            "Document status bar",
-        );
-        let content = div().flex_1().min_w_0().min_h_0().overflow_hidden();
-        let content = match current {
-            Some(current) => content.child(current.editor.clone()),
-            None => content
-                .flex()
-                .items_center()
-                .justify_center()
-                .p_4()
-                .text_color(rgb(0x64748b))
-                .child(if self.workspace.is_some() {
-                    "Select a Markdown file or create a new one."
-                } else {
-                    "Open a workspace folder or create a new document."
-                }),
-        };
-        let content = Picker::mark(
-            picker.as_ref(),
-            content,
-            "editor.surface",
-            "Markdown editing surface",
-        );
         div()
             .relative()
             .track_focus(&self.focus)
@@ -683,19 +439,23 @@ impl Render for Shell {
             }))
             .size_full()
             .flex()
-            .flex_col()
-            .bg(rgb(0xffffff))
-            .text_color(rgb(0x0f172a))
+            .bg(theme.surface)
+            .text_color(theme.text)
             .text_sm()
             .on_action(cx.listener(|shell, _: &Preferences, window, cx| {
                 shell.developer_preferences(window, cx);
             }))
             .capture_key_down(
                 cx.listener(|shell, event: &gpui::KeyDownEvent, window, cx| {
-                    if shell.developer.blocks_document_actions() && event.keystroke.key == "escape"
-                    {
-                        cx.stop_propagation();
-                        shell.cancel_developer(window, cx);
+                    if event.keystroke.key == "escape" {
+                        if shell.developer.blocks_document_actions() {
+                            cx.stop_propagation();
+                            shell.cancel_developer(window, cx);
+                        } else if shell.show_more_tools && !shell.is_composing(cx) {
+                            cx.stop_propagation();
+                            shell.show_more_tools = false;
+                            cx.notify();
+                        }
                     }
                 }),
             )
@@ -712,37 +472,20 @@ impl Render for Shell {
             .on_action(cx.listener(|shell, _: &CloseWindow, window, cx| {
                 shell.start(Intent::Exit, window, cx)
             }))
-            .when(
-                busy || current.is_some() || self.workspace.is_some(),
-                |el| el.child(document_bar),
-            )
-            .child(toolbar)
-            .when_some(self.error.clone(), |el, error| {
-                el.child(
-                    div()
-                        .flex_none()
-                        .px_3()
-                        .py_2()
-                        .bg(rgb(0xfef2f2))
-                        .text_color(rgb(0x991b1b))
-                        .child(SharedString::from(error)),
-                )
+            .on_action(cx.listener(|shell, _: &ToggleSidebar, _, cx| shell.toggle_sidebar(cx)))
+            .when(self.sidebar.visible, |el| {
+                el.child(self.sidebar(sidebar_width, controls, theme, picker.as_ref(), cx))
             })
-            .child(
-                div().flex().flex_1().min_h_0().child(sidebar).child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .flex_1()
-                        .min_w_0()
-                        .min_h_0()
-                        .children(self.tab_strip(cx))
-                        .child(content),
-                ),
-            )
+            .child(self.editor_pane(controls, theme, picker.as_ref(), cx))
             .children(self.developer_layer(picker, cx))
             .when(busy, |el| {
-                el.child(div().absolute().inset_0().occlude().bg(rgba(0xffffff18)))
+                el.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .occlude()
+                        .bg(gpui::Hsla::from(theme.surface).opacity(0.1)),
+                )
             })
     }
 }

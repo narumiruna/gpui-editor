@@ -5,6 +5,7 @@ use gpui::{
 };
 
 use super::{Shell, toolbar};
+use crate::theme::Theme;
 use bridge::{Attachment, Bridge, Event, Target};
 pub(crate) use picker::Picker;
 use text_field::TextField;
@@ -467,12 +468,13 @@ impl Shell {
     pub(super) fn developer_icon(
         &self,
         enabled: bool,
+        theme: Theme,
         cx: &Context<Self>,
     ) -> Option<Stateful<Div>> {
         self.developer.bridge.as_ref()?;
         let connected = self.developer.connected();
         let ready = connected && enabled;
-        let color = rgb(if ready { 0x21478e } else { 0x475569 });
+        let color = if ready { theme.accent } else { theme.muted };
         let reason = if connected {
             "Select an element for Pi"
         } else {
@@ -482,7 +484,7 @@ impl Shell {
             div()
                 .id("developer-picker")
                 .debug_selector(|| "developer-picker".into())
-                .m_1()
+                .ml_1()
                 .flex_none()
                 .flex()
                 .items_center()
@@ -490,7 +492,7 @@ impl Shell {
                 .min_h(px(30.))
                 .rounded_md()
                 .px_2()
-                .bg(rgb(if ready { 0xe4eeff } else { 0xf2f5fa }))
+                .bg(if ready { theme.selected } else { theme.panel })
                 .text_color(color)
                 .text_xs()
                 .font_weight(gpui::FontWeight::SEMIBOLD)
@@ -499,7 +501,7 @@ impl Shell {
                 .tooltip(move |_, cx| cx.new(|_| toolbar::Tooltip(reason)).into())
                 .when(ready, |el| {
                     el.cursor_pointer()
-                        .hover(|style| style.bg(rgb(0xd3e3ff)))
+                        .hover(move |style| style.bg(theme.border))
                         .on_click(
                             cx.listener(|shell, _, window, cx| shell.start_picker(window, cx)),
                         )

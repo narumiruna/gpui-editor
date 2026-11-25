@@ -17,6 +17,19 @@ pub struct Workspace {
     identity: (u64, u64),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DirectoryEntry {
+    pub path: PathBuf,
+    pub kind: EntryKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EntryKind {
+    Folder,
+    Markdown,
+    File,
+}
+
 impl Workspace {
     pub fn open(path: &Path) -> io::Result<Self> {
         let root = path.canonicalize()?;
@@ -55,6 +68,50 @@ impl Workspace {
         self.check_root()?;
         files.sort_unstable();
         Ok(files)
+    }
+
+    /// List one folder, with folders first. Do not follow symbolic links.
+    pub fn directory_entries(&self, path: &Path) -> io::Result<Vec<DirectoryEntry>> {
+        let path = self.root.join(path);
+        let check = || {
+            if self.resolve(&path)? != path {
+                return Err(io::Error::other(
+                    "the folder is not a direct workspace path",
+                ));
+            }
+            Ok(())
+        };
+        check()?;
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(&path)? {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+            // Private recovery folders are not workspaces to browse.
+            if file_type.is_dir()
+                && entry
+                    .file_name()
+                    .as_encoded_bytes()
+                    .starts_with(b".gpui-save-")
+            {
+                continue;
+            }
+            let path = entry.path();
+            let kind = if file_type.is_dir() {
+                EntryKind::Folder
+            } else if file_type.is_file() && is_markdown(&path) {
+                EntryKind::Markdown
+            } else if file_type.is_file() {
+                EntryKind::File
+            } else {
+                continue;
+            };
+            entries.push(DirectoryEntry { path, kind });
+        }
+        check()?;
+        entries.sort_unstable_by(|a, b| {
+            (a.kind != EntryKind::Folder, &a.path).cmp(&(b.kind != EntryKind::Folder, &b.path))
+        });
+        Ok(entries)
     }
 
     /// Resolve an absolute or workspace-relative Markdown file path without reading the file.
