@@ -96,12 +96,6 @@ impl Shell {
         cx.notify();
     }
 
-    fn is_composing(&self, cx: &Context<Self>) -> bool {
-        self.current
-            .as_ref()
-            .is_some_and(|doc| doc.editor.read(cx).is_composing())
-    }
-
     fn toggle_developer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let dev = &mut self.developer;
         dev.generation += 1;
@@ -316,7 +310,13 @@ impl Shell {
         } else if let Some(draft) = &self.developer.draft {
             draft.text.read(cx).focus(window);
         } else if let Some(focus) = self.developer.return_focus.take() {
-            window.focus(&focus);
+            if focus == self.focus
+                && let Some(tab) = self.current()
+            {
+                cx.focus_view(&tab.editor, window);
+            } else {
+                window.focus(&focus);
+            }
         }
     }
 
