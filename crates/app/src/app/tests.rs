@@ -1,8 +1,8 @@
 use std::{fs, ops::Range};
 
 use gpui::{
-    EntityInputHandler as _, Focusable as _, Modifiers, MouseButton, ScrollDelta, ScrollWheelEvent,
-    TestAppContext, TouchPhase, VisualTestContext, point,
+    EntityInputHandler as _, Focusable as _, KeyBinding, Modifiers, MouseButton, ScrollDelta,
+    ScrollWheelEvent, TestAppContext, TouchPhase, VisualTestContext, point,
 };
 
 use super::*;
@@ -496,7 +496,7 @@ fn nested_tree_preserves_selection_and_expansion_when_sidebar_is_hidden(cx: &mut
     let note = fixture.document("guides/install/quickstart.md", "Original");
     let (shell, cx) = cx.add_window_view(Shell::new);
     cx.simulate_resize(size(px(780.), px(540.)));
-    cx.update(|_, cx| bind_shortcuts(cx));
+    cx.update(|_, cx| hotkeys::Bindings::default().bind(cx));
     fixture.open(cx, &shell);
     assert!(cx.debug_bounds("workspace-file-0").is_none());
     click_tool(cx, "workspace-folder-1");

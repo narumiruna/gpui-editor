@@ -16,11 +16,17 @@ This builds and starts the app. It uses `/Applications/Xcode.app` by default. If
 
 The command takes no path. If there is no workspace to restore, choose **Open Folder…** in the sidebar. Expand folders in the file tree to browse their contents. The tree shows ordinary files and folders without following symlinks. Click a Markdown file or follow a Markdown link within the workspace to open a tab or select its existing tab. **New note** opens a separate blank tab.
 
-Drag the divider to resize the sidebar. Use the sidebar chevron, **View → Toggle Sidebar**, or `Cmd-/` to hide or show it without changing its state or the active document tab. When the sidebar is hidden, **Open Folder…** and **New note** move to the editor toolbar. The macOS window controls share the top row; drag an empty part of that row to move the window.
+Drag the divider to resize the sidebar. Use the sidebar chevron, **View → Toggle Sidebar**, or the default `Cmd-/` shortcut to hide or show it without changing its state or the active document tab. When the sidebar is hidden, **Open Folder…** and **New note** move to the editor toolbar. The macOS window controls share the top row; drag an empty part of that row to move the window.
+
+### Change keyboard shortcuts
+
+Open **Preferences… → Hotkeys**. Select a shortcut, then press **Cmd** with a letter, number, or punctuation key. You can also hold **Option**, **Control**, or **Shift**. Press `Esc` to cancel recording. A shortcut cannot use a reserved combination or one assigned to another command.
+
+Changes take effect after the editor saves them. The editor keeps them across restarts in `~/Library/Application Support/GPUI Editor/hotkeys.json`. Use **Reset Defaults** to restore all six command shortcuts. The shortcuts for opening Preferences and quitting the editor, and the standard text-editing shortcuts, do not change.
 
 ### Run commands from the keyboard
 
-Press `Cmd-P` to open the Command Palette. Type part of a command name to find **Open Folder…**, **New note**, **Save**, or **Toggle Sidebar**, regardless of letter case. Use the up and down arrow keys to select a command and `Enter` to run it. If you use an input method, finish composing before running the command. Press `Esc` to close the palette without running a command and return to your previous focus.
+By default, press `Cmd-P` to open the Command Palette. Type part of a command name to find **Open Folder…**, **New note**, **Save**, or **Toggle Sidebar**, regardless of letter case. Use the up and down arrow keys to select a command and `Enter` to run it. If you use an input method, finish composing before running the command. Press `Esc` to close the palette without running a command and return to your previous focus.
 
 The palette uses the same rules as the toolbar and menus. For example, you cannot run **Save** without a document, and opening a different folder still checks for unsaved changes. To find files or text in the workspace, use **Search** in the sidebar instead.
 

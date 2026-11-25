@@ -3,27 +3,20 @@
 use std::{
     collections::HashMap,
     ffi::OsStr,
-    fs::{self, File, OpenOptions, Permissions},
     io::{self, Write as _},
-    os::unix::{
-        ffi::OsStrExt as _,
-        fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _},
-    },
-    path::{Component, Path, PathBuf},
+    os::unix::ffi::OsStrExt as _,
+    path::{Component, Path},
 };
 
 use serde::{Deserialize, Serialize};
 
-use super::sidebar::{Snapshot, snapshot};
+use super::{
+    sidebar::{Snapshot, snapshot},
+    state_file::{self, write_atomically},
+};
 use crate::workspace::{DocumentFile, Workspace};
 
 const VERSION: u32 = 1;
-
-pub(super) fn production_path() -> Option<PathBuf> {
-    std::env::home_dir()
-        .filter(|home| home.is_absolute())
-        .map(|home| home.join("Library/Application Support/GPUI Editor/session.json"))
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct Session {
@@ -87,19 +80,9 @@ impl Session {
 }
 
 pub(super) fn restore(path: &Path) -> io::Result<Option<Restored>> {
-    // Do not follow a symlink or block on a pipe in place of the snapshot.
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path);
-    let file = match file {
-        Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
+    let Some(file) = state_file::open(path)? else {
+        return Ok(None);
     };
-    if !file.metadata()?.is_file() {
-        return Err(invalid_data("the session is not a regular file"));
-    }
     let session: Session = serde_json::from_reader(io::BufReader::new(file))
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     if session.version != VERSION {
@@ -165,46 +148,13 @@ fn invalid_data(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
-fn write_atomically(
-    path: &Path,
-    write: impl FnOnce(&mut File) -> io::Result<()>,
-) -> io::Result<()> {
-    let directory = path
-        .parent()
-        .filter(|directory| !directory.as_os_str().is_empty())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing session directory"))?;
-    if let Some(parent) = directory
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        fs::create_dir_all(parent)?;
-    }
-    match fs::DirBuilder::new().mode(0o700).create(directory) {
-        Ok(()) => (),
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => (),
-        Err(error) => return Err(error),
-    }
-    let directory_file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
-        .open(directory)?;
-    if directory_file.metadata()?.permissions().mode() & 0o7777 != 0o700 {
-        directory_file.set_permissions(Permissions::from_mode(0o700))?;
-    }
-
-    let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
-    temporary
-        .as_file()
-        .set_permissions(Permissions::from_mode(0o600))?;
-    write(temporary.as_file_mut())?;
-    temporary.as_file().sync_all()?;
-    temporary.persist(path).map_err(|error| error.error)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::symlink;
+    use std::{
+        fs,
+        os::unix::fs::{PermissionsExt as _, symlink},
+        path::PathBuf,
+    };
 
     use serde_json::json;
 

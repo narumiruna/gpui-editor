@@ -43,4 +43,9 @@ flowchart TD
 - Filter **Open Folder…**, **New note**, **Save**, and **Toggle Sidebar** by command name without matching case. Show a clear empty state. Let the arrow keys move between commands and `Enter` run the selected available command. While an input method is composing text, do not use its keys to navigate or run commands.
 - Use the same actions and availability rules as the toolbar and menus. Keep unavailable actions from running, including **Save** when there is no document. Opening the palette must not change the document. `Esc` dismisses it without running a command and restores the previous focus.
 
+## Preferences
+
+- Keep the existing Developer controls in the **Developer** tab. In **Hotkeys**, show each command next to its assigned shortcut and provide **Reset Defaults**.
+- Record one shortcut at a time without running it. Let `Esc` stop recording without closing Preferences. Keep the current shortcut if the new one conflicts or cannot be saved. Apply a saved shortcut without restarting the editor.
+
 Design check: Before adding a control that is always visible, identify the common task that needs it. If it is useful only in a specific situation, show it only in that situation or put it in a menu.

@@ -18,16 +18,38 @@ mod text_field;
 #[cfg(test)]
 mod tests;
 
+const PREFERENCES_TAB_GROUP: isize = 1;
+
 #[derive(Default)]
 pub(super) struct Developer {
     bridge: Option<Bridge>,
     generation: u64,
     partner: Option<Partner>,
-    preferences: bool,
+    preferences: Option<PreferencesPanel>,
     picking: bool,
     return_focus: Option<FocusHandle>,
     draft: Option<Draft>,
     notice: Option<String>,
+}
+
+struct PreferencesPanel {
+    tab: PreferencesTab,
+    focus: FocusHandle,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PreferencesTab {
+    Developer,
+    Hotkeys,
+}
+
+impl PreferencesTab {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Developer => "Developer",
+            Self::Hotkeys => "Hotkeys",
+        }
+    }
 }
 
 struct Partner {
@@ -57,13 +79,23 @@ struct Draft {
 
 impl Developer {
     pub(super) fn blocks_document_actions(&self) -> bool {
-        self.preferences
+        self.preferences.is_some()
             || self.picking
             || self.draft.is_some()
             || self
                 .partner
                 .as_ref()
                 .is_some_and(|p| p.state == PairState::Requested)
+    }
+
+    pub(super) fn hotkeys_open(&self) -> bool {
+        self.preferences
+            .as_ref()
+            .is_some_and(|panel| panel.tab == PreferencesTab::Hotkeys)
+            && self
+                .partner
+                .as_ref()
+                .is_none_or(|partner| partner.state != PairState::Requested)
     }
 
     pub(super) fn record(&self, event: &'static str) {
@@ -94,8 +126,12 @@ impl Shell {
         }
         self.cancel_document_drag(window, cx);
         self.developer.return_focus = window.focused(cx);
-        self.developer.preferences = true;
-        window.focus(&self.focus);
+        let focus = cx.focus_handle().tab_index(PREFERENCES_TAB_GROUP);
+        window.focus(&focus);
+        self.developer.preferences = Some(PreferencesPanel {
+            tab: PreferencesTab::Developer,
+            focus,
+        });
         cx.notify();
     }
 
@@ -172,6 +208,7 @@ impl Shell {
                 if !self.developer.blocks_document_actions() {
                     self.developer.return_focus = window.focused(cx);
                 }
+                self.hotkeys.cancel_recording();
                 self.developer.record("Pi pairing requested");
                 self.developer.partner = Some(Partner {
                     id,
@@ -304,8 +341,7 @@ impl Shell {
         if self.active.is_some() || self.palette.is_some() {
             return;
         }
-        if self.developer.preferences
-            || self.developer.picking
+        if self.developer.picking
             || self
                 .developer
                 .partner
@@ -313,6 +349,8 @@ impl Shell {
                 .is_some_and(|p| p.state == PairState::Requested)
         {
             window.focus(&self.focus);
+        } else if let Some(panel) = &self.developer.preferences {
+            window.focus(&panel.focus);
         } else if let Some(draft) = &self.developer.draft {
             draft.text.read(cx).focus(window);
         } else if let Some(focus) = self.developer.return_focus.take() {
@@ -344,7 +382,8 @@ impl Shell {
         {
             return;
         }
-        self.developer.preferences = false;
+        self.developer.preferences = None;
+        self.hotkeys.cancel_recording();
         self.developer.picking = false;
         self.developer.draft = None;
         self.resume_developer_focus(window, cx);
@@ -525,6 +564,7 @@ impl Shell {
     pub(super) fn developer_layer(
         &self,
         picker: Option<Picker>,
+        theme: Theme,
         cx: &Context<Self>,
     ) -> Option<Div> {
         let dev = &self.developer;
@@ -560,43 +600,8 @@ impl Shell {
                     .child(button("Decline", true).on_click(cx.listener(|shell, _, window, cx| shell.decide_pair(false, window, cx))))
                     .child(button("Pair", true).on_click(cx.listener(|shell, _, window, cx| shell.decide_pair(true, window, cx)))))));
         }
-        if dev.preferences {
-            let enabled = dev.bridge.is_some();
-            return Some(sheet(
-                panel("Preferences")
-                    .child(
-                        button(
-                            if enabled {
-                                "Developer Mode: On"
-                            } else {
-                                "Developer Mode: Off"
-                            },
-                            true,
-                        )
-                        .on_click(
-                            cx.listener(|shell, _, window, cx| shell.toggle_developer(window, cx)),
-                        ),
-                    )
-                    .when(enabled, |el| {
-                        el.child(if dev.connected() {
-                            "Pi is paired."
-                        } else {
-                            "Run /gpui-pair in Pi to connect to this window."
-                        })
-                    })
-                    .when_some(dev.notice.clone(), |el, notice| el.child(notice))
-                    .child(
-                        row()
-                            .when(dev.connected(), |el| {
-                                el.child(button("Unpair Pi", true).on_click(
-                                    cx.listener(|shell, _, window, cx| shell.unpair(window, cx)),
-                                ))
-                            })
-                            .child(button("Done", true).on_click(cx.listener(
-                                |shell, _, window, cx| shell.cancel_developer(window, cx),
-                            ))),
-                    ),
-            ));
+        if let Some(preferences) = &dev.preferences {
+            return Some(self.preferences_panel(preferences, theme, cx));
         }
         let draft = dev.draft.as_ref()?;
         if draft.capturing {
@@ -624,6 +629,126 @@ impl Shell {
                 .child(button("Cancel", !busy).on_click(cx.listener(|shell, _, window, cx| shell.cancel_developer(window, cx))))
                 .child(button("Send to Pi", dev.connected() && !busy && !draft.loading)
                     .on_click(cx.listener(|shell, _, _, cx| shell.send_feedback(cx)))))))
+    }
+
+    fn preferences_panel(
+        &self,
+        preferences: &PreferencesPanel,
+        theme: Theme,
+        cx: &Context<Self>,
+    ) -> Div {
+        let content = match preferences.tab {
+            PreferencesTab::Hotkeys => self.hotkeys_panel(theme, cx),
+            PreferencesTab::Developer => self.developer_controls(cx),
+        };
+        let focus = preferences.focus.clone();
+        sheet(
+            panel("Preferences")
+                .track_focus(&preferences.focus)
+                .tab_index(PREFERENCES_TAB_GROUP)
+                .tab_stop(false)
+                .tab_group()
+                .bg(theme.surface)
+                .text_color(theme.text)
+                .on_key_down(move |event: &gpui::KeyDownEvent, window, cx| {
+                    let key = &event.keystroke;
+                    if key.key == "tab"
+                        && !key.modifiers.platform
+                        && !key.modifiers.alt
+                        && !key.modifiers.control
+                        && !key.modifiers.function
+                    {
+                        if key.modifiers.shift {
+                            window.focus_prev();
+                        } else {
+                            window.focus_next();
+                        }
+                        if !focus.contains_focused(window, cx) {
+                            window.focus(&focus);
+                        }
+                        window.prevent_default();
+                        cx.stop_propagation();
+                    }
+                })
+                .child(
+                    row().children([PreferencesTab::Developer, PreferencesTab::Hotkeys].map(
+                        |tab| {
+                            let selected = tab == preferences.tab;
+                            let label = tab.label();
+                            div()
+                                .id(label)
+                                .debug_selector(move || label.into())
+                                .tab_index(0)
+                                .px_2()
+                                .py_1()
+                                .rounded_md()
+                                .border_1()
+                                .cursor_pointer()
+                                .child(label)
+                                .border_color(if selected { theme.accent } else { theme.border })
+                                .focus(move |el| el.border_color(theme.accent))
+                                .bg(if selected {
+                                    theme.selected
+                                } else {
+                                    theme.surface
+                                })
+                                .text_color(if selected { theme.accent } else { theme.text })
+                                .hover(move |el| el.bg(theme.selected))
+                                .on_click(cx.listener(move |shell, _, window, cx| {
+                                    if let Some(panel) = &mut shell.developer.preferences
+                                        && tab != panel.tab
+                                    {
+                                        panel.tab = tab;
+                                        shell.hotkeys.cancel_recording();
+                                        window.focus(&panel.focus);
+                                        cx.notify();
+                                    }
+                                }))
+                        },
+                    )),
+                )
+                .child(content)
+                .child(row().child(button("Done", true).tab_index(0).on_click(
+                    cx.listener(|shell, _, window, cx| shell.cancel_developer(window, cx)),
+                ))),
+        )
+    }
+
+    fn developer_controls(&self, cx: &Context<Self>) -> Div {
+        let dev = &self.developer;
+        let enabled = dev.bridge.is_some();
+        div()
+            .flex()
+            .flex_col()
+            .items_start()
+            .gap_2()
+            .child(
+                button(
+                    if enabled {
+                        "Developer Mode: On"
+                    } else {
+                        "Developer Mode: Off"
+                    },
+                    true,
+                )
+                .tab_index(0)
+                .on_click(cx.listener(|shell, _, window, cx| shell.toggle_developer(window, cx))),
+            )
+            .when(enabled, |el| {
+                el.child(if dev.connected() {
+                    "Pi is paired."
+                } else {
+                    "Run /gpui-pair in Pi to connect to this window."
+                })
+            })
+            .when_some(dev.notice.clone(), |el, notice| el.child(notice))
+            .when(dev.connected(), |el| {
+                el.child(
+                    button("Unpair Pi", true)
+                        .tab_index(0)
+                        .on_click(cx.listener(|shell, _, window, cx| shell.unpair(window, cx))),
+                )
+            })
     }
 }
 

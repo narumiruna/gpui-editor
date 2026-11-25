@@ -92,43 +92,47 @@ impl TextField {
         Self::with_mode(Mode::Palette, cx)
     }
 
+    pub(in crate::app) fn bind_keys(cx: &mut App) {
+        cx.set_global(KeysInstalled);
+        for context in [FEEDBACK_CONTEXT, SEARCH_CONTEXT, PALETTE_CONTEXT].map(Some) {
+            cx.bind_keys([
+                KeyBinding::new("left", Left, context),
+                KeyBinding::new("right", Right, context),
+                KeyBinding::new("shift-left", SelectLeft, context),
+                KeyBinding::new("shift-right", SelectRight, context),
+                KeyBinding::new("cmd-left", LineStart, context),
+                KeyBinding::new("cmd-right", LineEnd, context),
+                KeyBinding::new("cmd-shift-left", SelectLineStart, context),
+                KeyBinding::new("cmd-shift-right", SelectLineEnd, context),
+                KeyBinding::new("cmd-a", SelectAll, context),
+                KeyBinding::new("backspace", Backspace, context),
+                KeyBinding::new("delete", Delete, context),
+                KeyBinding::new("cmd-c", Copy, context),
+                KeyBinding::new("cmd-x", Cut, context),
+                KeyBinding::new("cmd-v", Paste, context),
+            ]);
+        }
+        let feedback = Some(FEEDBACK_CONTEXT);
+        cx.bind_keys([
+            KeyBinding::new("up", Up, feedback),
+            KeyBinding::new("down", Down, feedback),
+            KeyBinding::new("shift-up", SelectUp, feedback),
+            KeyBinding::new("shift-down", SelectDown, feedback),
+            KeyBinding::new("enter", Newline, feedback),
+            KeyBinding::new("shift-enter", Newline, feedback),
+            KeyBinding::new("enter", SubmitSearch, Some(SEARCH_CONTEXT)),
+            KeyBinding::new("shift-enter", Newline, Some(SEARCH_CONTEXT)),
+            KeyBinding::new("up", Up, Some(PALETTE_CONTEXT)),
+            KeyBinding::new("down", Down, Some(PALETTE_CONTEXT)),
+            KeyBinding::new("enter", RunPalette, Some(PALETTE_CONTEXT)),
+            KeyBinding::new("tab", KeepPaletteFocus, Some(PALETTE_CONTEXT)),
+            KeyBinding::new("shift-tab", KeepPaletteFocus, Some(PALETTE_CONTEXT)),
+        ]);
+    }
+
     fn with_mode(mode: Mode, cx: &mut Context<Self>) -> Self {
         if !cx.has_global::<KeysInstalled>() {
-            cx.set_global(KeysInstalled);
-            for context in [FEEDBACK_CONTEXT, SEARCH_CONTEXT, PALETTE_CONTEXT].map(Some) {
-                cx.bind_keys([
-                    KeyBinding::new("left", Left, context),
-                    KeyBinding::new("right", Right, context),
-                    KeyBinding::new("shift-left", SelectLeft, context),
-                    KeyBinding::new("shift-right", SelectRight, context),
-                    KeyBinding::new("cmd-left", LineStart, context),
-                    KeyBinding::new("cmd-right", LineEnd, context),
-                    KeyBinding::new("cmd-shift-left", SelectLineStart, context),
-                    KeyBinding::new("cmd-shift-right", SelectLineEnd, context),
-                    KeyBinding::new("cmd-a", SelectAll, context),
-                    KeyBinding::new("backspace", Backspace, context),
-                    KeyBinding::new("delete", Delete, context),
-                    KeyBinding::new("cmd-c", Copy, context),
-                    KeyBinding::new("cmd-x", Cut, context),
-                    KeyBinding::new("cmd-v", Paste, context),
-                ]);
-            }
-            let feedback = Some(FEEDBACK_CONTEXT);
-            cx.bind_keys([
-                KeyBinding::new("up", Up, feedback),
-                KeyBinding::new("down", Down, feedback),
-                KeyBinding::new("shift-up", SelectUp, feedback),
-                KeyBinding::new("shift-down", SelectDown, feedback),
-                KeyBinding::new("enter", Newline, feedback),
-                KeyBinding::new("shift-enter", Newline, feedback),
-                KeyBinding::new("enter", SubmitSearch, Some(SEARCH_CONTEXT)),
-                KeyBinding::new("shift-enter", Newline, Some(SEARCH_CONTEXT)),
-                KeyBinding::new("up", Up, Some(PALETTE_CONTEXT)),
-                KeyBinding::new("down", Down, Some(PALETTE_CONTEXT)),
-                KeyBinding::new("enter", RunPalette, Some(PALETTE_CONTEXT)),
-                KeyBinding::new("tab", KeepPaletteFocus, Some(PALETTE_CONTEXT)),
-                KeyBinding::new("shift-tab", KeepPaletteFocus, Some(PALETTE_CONTEXT)),
-            ]);
+            Self::bind_keys(cx);
         }
         Self {
             mode,

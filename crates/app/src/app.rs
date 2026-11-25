@@ -3,9 +3,9 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    App, Application, Bounds, Context, Entity, FocusHandle, KeyBinding, Menu, MenuItem, OsAction,
-    Pixels, ScrollHandle, Subscription, TitlebarOptions, WeakEntity, Window, WindowBounds,
-    WindowHandle, WindowOptions, actions, div, point, prelude::*, px, size,
+    App, Application, Bounds, Context, Entity, FocusHandle, Menu, MenuItem, OsAction, Pixels,
+    ScrollHandle, Subscription, TitlebarOptions, WeakEntity, Window, WindowBounds, WindowHandle,
+    WindowOptions, actions, div, point, prelude::*, px, size,
 };
 
 use crate::{
@@ -16,17 +16,20 @@ use crate::{
 
 pub(crate) mod developer;
 mod editor_pane;
+mod hotkeys;
 mod operation;
 mod palette;
 mod quit;
 mod session;
 mod sidebar;
+mod state_file;
 mod tabs;
 #[cfg(test)]
 mod tests;
 mod window_chrome;
 
-use developer::Developer;
+use developer::{Developer, TextField};
+use hotkeys::Hotkeys;
 use palette::Palette;
 use sidebar::Sidebar;
 
@@ -45,24 +48,12 @@ actions!(
     ]
 );
 
-fn bind_shortcuts(cx: &mut App) {
-    cx.bind_keys([
-        KeyBinding::new("cmd-o", ChooseFolder, None),
-        KeyBinding::new("cmd-n", NewDocument, None),
-        KeyBinding::new("cmd-s", SaveDocument, None),
-        KeyBinding::new("cmd-w", Close, None),
-        KeyBinding::new("cmd-q", Quit, None),
-        KeyBinding::new("cmd-,", Preferences, None),
-        KeyBinding::new("cmd-/", ToggleSidebar, None),
-        KeyBinding::new("cmd-p", OpenPalette, None),
-    ]);
-}
-
 pub fn run() {
+    let hotkeys = Hotkeys::load(state_file::path("hotkeys.json"));
     let app = Application::new().with_assets(editor::ToolbarAssets);
-    app.run(|cx| {
+    app.run(move |cx| {
         editor::bind_keys(cx);
-        bind_shortcuts(cx);
+        hotkeys.bindings.bind(cx);
         let window = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
@@ -78,7 +69,13 @@ pub fn run() {
                 }),
                 ..Default::default()
             },
-            |window, cx| cx.new(|cx| Shell::new(window, cx)),
+            |window, cx| {
+                cx.new(|cx| {
+                    let mut shell = Shell::new(window, cx);
+                    shell.hotkeys = hotkeys;
+                    shell
+                })
+            },
         );
         let Ok(window) = window else {
             eprintln!("Could not open the editor window: {}", window.unwrap_err());
@@ -91,52 +88,56 @@ pub fn run() {
             return;
         }
         bind_quit(window, cx);
-        if let Some(path) = session::production_path() {
+        if let Some(path) = state_file::path("session.json") {
             let _ = window.update(cx, |shell, window, cx| {
                 shell.restore_session(path, window, cx)
             });
         }
-        cx.set_menus(vec![
-            Menu {
-                name: "GPUI Editor".into(),
-                items: vec![
-                    MenuItem::action("Preferences…", Preferences),
-                    MenuItem::separator(),
-                    MenuItem::action("Quit GPUI Editor", Quit),
-                ],
-            },
-            Menu {
-                name: "File".into(),
-                items: vec![
-                    MenuItem::action("New Document", NewDocument),
-                    MenuItem::action("Open Folder…", ChooseFolder),
-                    MenuItem::action("Save", SaveDocument),
-                    MenuItem::separator(),
-                    MenuItem::action("Close Window", CloseWindow),
-                ],
-            },
-            Menu {
-                name: "Edit".into(),
-                items: vec![
-                    MenuItem::os_action("Undo", editor::Undo, OsAction::Undo),
-                    MenuItem::os_action("Redo", editor::Redo, OsAction::Redo),
-                    MenuItem::separator(),
-                    MenuItem::os_action("Cut", editor::Cut, OsAction::Cut),
-                    MenuItem::os_action("Copy", editor::Copy, OsAction::Copy),
-                    MenuItem::os_action("Paste", editor::Paste, OsAction::Paste),
-                    MenuItem::os_action("Select All", editor::SelectAll, OsAction::SelectAll),
-                ],
-            },
-            Menu {
-                name: "View".into(),
-                items: vec![
-                    MenuItem::action("Command Palette…", OpenPalette),
-                    MenuItem::action("Toggle Sidebar", ToggleSidebar),
-                ],
-            },
-        ]);
+        set_menus(cx);
         cx.activate(true);
     });
+}
+
+fn set_menus(cx: &App) {
+    cx.set_menus(vec![
+        Menu {
+            name: "GPUI Editor".into(),
+            items: vec![
+                MenuItem::action("Preferences…", Preferences),
+                MenuItem::separator(),
+                MenuItem::action("Quit GPUI Editor", Quit),
+            ],
+        },
+        Menu {
+            name: "File".into(),
+            items: vec![
+                MenuItem::action("New Document", NewDocument),
+                MenuItem::action("Open Folder…", ChooseFolder),
+                MenuItem::action("Save", SaveDocument),
+                MenuItem::separator(),
+                MenuItem::action("Close Window", CloseWindow),
+            ],
+        },
+        Menu {
+            name: "Edit".into(),
+            items: vec![
+                MenuItem::os_action("Undo", editor::Undo, OsAction::Undo),
+                MenuItem::os_action("Redo", editor::Redo, OsAction::Redo),
+                MenuItem::separator(),
+                MenuItem::os_action("Cut", editor::Cut, OsAction::Cut),
+                MenuItem::os_action("Copy", editor::Copy, OsAction::Copy),
+                MenuItem::os_action("Paste", editor::Paste, OsAction::Paste),
+                MenuItem::os_action("Select All", editor::SelectAll, OsAction::SelectAll),
+            ],
+        },
+        Menu {
+            name: "View".into(),
+            items: vec![
+                MenuItem::action("Command Palette…", OpenPalette),
+                MenuItem::action("Toggle Sidebar", ToggleSidebar),
+            ],
+        },
+    ]);
 }
 
 fn bind_quit(window: WindowHandle<Shell>, cx: &mut App) {
@@ -184,6 +185,8 @@ struct Shell {
     document_drag: Option<WeakEntity<tabs::DragPreview>>,
     _appearance: Subscription,
     _activation: Subscription,
+    _hotkey_capture: Subscription,
+    hotkeys: Hotkeys,
     session_path: Option<PathBuf>,
     restoring: bool,
     active: Option<ActiveOperation>,
@@ -227,6 +230,7 @@ impl Shell {
             }
         });
         let sidebar = Sidebar::new(window, cx);
+        let hotkey_capture = Self::intercept_hotkeys(window, cx);
         Self {
             focus,
             workspace: None,
@@ -239,6 +243,8 @@ impl Shell {
             document_drag: None,
             _appearance: appearance,
             _activation: activation,
+            _hotkey_capture: hotkey_capture,
+            hotkeys: Hotkeys::default(),
             session_path: None,
             restoring: false,
             active: None,
@@ -479,7 +485,7 @@ impl Render for Shell {
             }))
             .capture_key_down(
                 cx.listener(|shell, event: &gpui::KeyDownEvent, window, cx| {
-                    if event.keystroke.key == "escape" {
+                    if event.keystroke.key == "escape" && !window.default_prevented() {
                         if shell.cancel_document_drag(window, cx) {
                             cx.stop_propagation();
                             window.prevent_default();
@@ -525,7 +531,7 @@ impl Render for Shell {
                 el.child(self.sidebar(sidebar_width, controls, theme, picker.as_ref(), cx))
             })
             .child(self.editor_pane(controls, theme, picker.as_ref(), cx))
-            .children(self.developer_layer(picker, cx))
+            .children(self.developer_layer(picker, theme, cx))
             .children(self.palette_layer(theme, window, cx))
             .when(busy, |el| {
                 el.child(
