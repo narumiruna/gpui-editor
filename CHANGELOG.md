@@ -1,3 +1,23 @@
+## 0.2.0
+
+### Minor Changes
+
+- Add a Hotkeys tab in Preferences to change app shortcuts, keep them across restarts, and restore defaults.
+
+### Patch Changes
+
+- Use Cmd-/ to hide or show the sidebar instead of Cmd-Option-S.
+
+- Complete a new backtick fence and place the caret on the editable blank line inside it.
+
+- Show a type label and border while editing the source of diagrams, formulas, front matter, images, and links.
+
+- Show the pin and unpin icons in the Tree and Pins sidebar views.
+
+- Restore the icons for all five sidebar tabs.
+
+- Keep code and Mermaid source editable until a matching closing fence is entered.
+
 ## 0.1.0
 
 ### Minor Changes
