@@ -77,9 +77,8 @@ impl Shell {
                 .opacity(0.)
                 .group_hover("sidebar-document", |button| button.opacity(1.))
                 .focus(move |button| button.opacity(1.).bg(theme.selected))
-                .text_color(theme.accent)
                 .tooltip(move |_, cx| cx.new(|_| toolbar::Tooltip(name)).into())
-                .child(toolbar::icon(name, 14.))
+                .child(toolbar::icon(name, 14.).text_color(theme.accent))
                 .on_click(cx.listener(move |shell, _, _, cx| {
                     cx.stop_propagation();
                     shell.toggle_pin(&click_path, cx);

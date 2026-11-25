@@ -240,9 +240,7 @@ impl Editor {
             return false;
         }
         let previous = self.marked.is_none().then(|| self.snapshot());
-        let Ok((range, inserted)) = self
-            .document
-            .replacement(range, text, self.active.is_none())
+        let Ok((range, inserted)) = self.document.replacement(range, text, self.active.as_ref())
         else {
             self.message = Some("Cannot edit this Markdown range".into());
             cx.notify();
@@ -258,6 +256,9 @@ impl Editor {
                 let removed = range.len();
                 active.content.end = active.content.end - removed + text.len();
                 active.source.end = active.source.end - removed + inserted;
+                if active.kind == SectionKind::DraftCode && active.source.is_empty() {
+                    self.active = None;
+                }
             } else {
                 self.active = None;
             }
@@ -382,7 +383,7 @@ impl Editor {
         let in_source = self.active.as_ref().is_some_and(|active| {
             active.content.start <= position
                 && position <= active.content.end
-                && layout.contains_row(event.position)
+                && layout.source_frame_contains(event.position)
                 && hit.is_none()
                 && block.is_none()
         });
@@ -558,6 +559,14 @@ impl EntityInputHandler for Editor {
             .map(|range| from_utf16(self.source(), range))
             .or_else(|| self.marked.clone())
             .unwrap_or_else(|| self.selection());
+        if text == "`"
+            && range.is_empty()
+            && range.start == self.cursor
+            && self.marked.is_none()
+            && self.complete_code_fence(range.start, cx)
+        {
+            return;
+        }
         self.replace(range, text, cx);
     }
 
@@ -657,17 +666,19 @@ impl Editor {
         }
         let wrap_width = wrap_width(viewport.width);
         let layout = self.shape_for_width(window, cx, wrap_width);
+        let frame = layout.source_frame.as_ref().map(|frame| frame.bounds);
         let width = layout
             .rows
             .iter()
             .map(|row| row.width)
             .max()
             .unwrap_or(px(0.))
-            .max(wrap_width);
+            .max(frame.map_or(wrap_width, |bounds| bounds.right()));
         let height = layout
             .rows
             .last()
             .map_or(px(26.), |row| row.y + row.height)
+            .max(frame.map_or(px(0.), |bounds| bounds.bottom()))
             .max(viewport.height - px(2. * VERTICAL_PADDING));
         let editor = cx.entity();
         let overlay_editor = editor.clone();
@@ -738,9 +749,10 @@ impl Editor {
                     }
                 }
             }))
-            .on_action(cx.listener(|e, _: &Paste, window, cx| {
+            .on_action(cx.listener(|e, _: &Paste, _, cx| {
                 if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                    e.replace_text_in_range(None, &text, window, cx);
+                    let range = e.marked.clone().unwrap_or_else(|| e.selection());
+                    e.replace(range, &text, cx);
                 }
             }))
             .on_action(cx.listener(|e, _: &Undo, _, cx| {
@@ -786,6 +798,9 @@ impl Editor {
                                 ElementInputHandler::new(bounds, editor.clone()),
                                 cx,
                             );
+                        }
+                        if let Some(frame) = &layout.source_frame {
+                            frame.paint(layout.origin, theme, window, cx);
                         }
                         let clip = window.content_mask().bounds;
                         let top = clip.top() - layout.origin.y;
@@ -1569,8 +1584,9 @@ mod tests {
                 e.activate(block.unwrap(), false, cx);
                 let layout = e.shape(window, cx);
                 assert_eq!(e.cursor, "```mermaid\n".len());
-                assert!(layout.bounds_at(e.cursor, e.upstream).is_some());
-                assert_eq!(layout.index_at(point(px(40.), px(0.))), e.cursor);
+                let caret = layout.bounds_at(e.cursor, e.upstream).unwrap().center();
+                assert!(layout.source_frame_contains(caret));
+                assert_eq!(layout.index_at(caret), e.cursor);
                 assert_eq!(e.source(), source);
             });
         });
@@ -1641,6 +1657,83 @@ mod tests {
             assert!(matches!(e.images.get("same.png"), Some(ImageEntry::Ready(Err(message))) if message == "new"));
             assert_eq!(e.image_requests, 0);
         }));
+    }
+
+    #[gpui::test]
+    fn typing_an_opening_code_fence_leaves_the_caret_on_an_editable_blank_line(
+        cx: &mut TestAppContext,
+    ) {
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(String::new(), window, cx));
+        cx.update(|window, cx| {
+            bind_keys(cx);
+            window.focus(&editor.read(cx).focus);
+        });
+        cx.run_until_parked();
+        for _ in 0..3 {
+            cx.simulate_input("`");
+        }
+        cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            assert_eq!(editor.source(), "```\n\n```");
+            assert_eq!(editor.selection(), 4..4);
+        });
+        cx.simulate_keystrokes("cmd-z");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "``"));
+        cx.simulate_keystrokes("cmd-shift-z");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).selection(), 4..4));
+        cx.simulate_input("let x = 1;");
+        cx.simulate_keystrokes("backspace");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "```\nlet x = 1\n```"));
+        cx.simulate_input(";");
+        let outside = cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            assert_eq!(editor.source(), "```\nlet x = 1;\n```");
+            assert_eq!(editor.active.as_ref().unwrap().kind, SectionKind::DraftCode);
+            assert!(editor.message.is_none());
+            let layout = editor.layout.as_ref().unwrap();
+            let frame = layout.source_frame.as_ref().unwrap();
+            layout.origin + point(px(12.), frame.bounds.bottom() + px(5.))
+        });
+        cx.simulate_click(outside, Modifiers::none());
+        cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            assert!(editor.active.is_none());
+            assert!(editor.layout.as_ref().unwrap().rows.iter().any(|row| {
+                row.items
+                    .iter()
+                    .any(|item| matches!(item.paint, ItemPaint::Block(_)))
+            }));
+        });
+    }
+
+    #[gpui::test]
+    fn pasted_opening_code_fence_stays_editable_without_autocompletion(cx: &mut TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(String::new(), window, cx));
+        cx.update(|window, cx| {
+            bind_keys(cx);
+            window.focus(&editor.read(cx).focus);
+        });
+        cx.run_until_parked();
+        cx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string("```".into())));
+        cx.simulate_keystrokes("cmd-v");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "```"));
+        cx.simulate_keystrokes("backspace");
+        cx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string("`".into())));
+        cx.simulate_keystrokes("cmd-v");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "```"));
+        for text in ["rust", "\n", "let x = 1;", "\n", "`", "`", "`"] {
+            cx.simulate_input(text);
+        }
+        cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            assert_eq!(editor.source(), "```rust\nlet x = 1;\n```");
+            assert!(editor.message.is_none());
+            assert!(editor.layout.as_ref().unwrap().rows.iter().any(|row| {
+                row.items
+                    .iter()
+                    .any(|item| matches!(item.paint, ItemPaint::Block(_)))
+            }));
+        });
     }
 
     #[gpui::test]
@@ -1867,9 +1960,16 @@ mod tests {
         let (painted, center) = cx.update(|_, cx| click_item(editor.read(cx)));
         assert!(!painted);
         cx.simulate_click(center, Modifiers::none());
+        let header = cx.update(|_, cx| {
+            let layout = editor.read(cx).layout.as_ref().unwrap();
+            let frame = layout.source_frame.as_ref().unwrap();
+            layout.origin + frame.bounds.origin + point(px(16.), px(10.))
+        });
+        cx.simulate_click(header, Modifiers::none());
         cx.update(|_, cx| {
             editor.update(cx, |e, cx| {
                 let section = e.active.clone().unwrap();
+                assert_eq!(e.cursor, section.content.start);
                 e.replace(section.content, "flowchart LR\nA[Start] --> B[End]", cx);
             })
         });
