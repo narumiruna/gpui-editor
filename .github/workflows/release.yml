@@ -25,6 +25,7 @@ jobs:
           persist-credentials: false
       - uses: changenote/action@b5a808ce21642ccc01587dc66fd34ce522b74da9 # v0.4.0
         with:
+          github-token: ${{ secrets.PAT_TOKEN || github.token }}
           version: v0.15.0
           push-git-tags: 'true'
           create-github-releases: 'true'
