@@ -1,9 +1,12 @@
 use gpui::{
     App, Bounds, FontWeight, Pixels, Point, ShapedLine, TextRun, Window, fill, point, px, quad,
-    rgb, size,
+    size,
 };
 
-use crate::document::{Alignment, BlockPreview};
+use crate::{
+    document::{Alignment, BlockPreview},
+    theme::Theme,
+};
 
 const PADDING: f32 = 12.;
 const MARGIN: f32 = 4.;
@@ -117,7 +120,12 @@ impl BlockLayout {
         }
     }
 
-    pub(in crate::editor) fn paint_frame(&self, origin: Point<Pixels>, window: &mut Window) {
+    pub(in crate::editor) fn paint_frame(
+        &self,
+        origin: Point<Pixels>,
+        theme: Theme,
+        window: &mut Window,
+    ) {
         let top = origin + point(px(0.), px(MARGIN));
         let height = self.height - px(2. * MARGIN);
         let bounds = Bounds::new(top, size(self.width, height));
@@ -125,11 +133,11 @@ impl BlockLayout {
         if !clip.intersects(&bounds) {
             return;
         }
-        let border = rgb(0xd3dce9);
+        let border = theme.border;
         window.paint_quad(quad(
             bounds,
             px(if self.grid.is_some() { 0. } else { 6. }),
-            rgb(0xf6f8fc),
+            theme.preview,
             gpui::Edges::all(px(1.)),
             border,
             Default::default(),
@@ -140,7 +148,7 @@ impl BlockLayout {
                     top + point(px(1.), px(1.)),
                     size(self.width - px(2.), px(CELL_HEIGHT - 1.)),
                 ),
-                rgb(0xeaf0f8),
+                theme.preview_header,
             ));
             for &x in &grid.columns[1..grid.columns.len() - 1] {
                 window.paint_quad(fill(
@@ -180,7 +188,7 @@ fn shape(text: String, font: &gpui::Font, size: Pixels, window: &Window) -> Shap
     let run = TextRun {
         len: text.len(),
         font: font.clone(),
-        color: window.text_style().color,
+        color: Theme::for_window(window).text.into(),
         background_color: None,
         underline: None,
         strikethrough: None,

@@ -6,7 +6,7 @@ use std::{
 
 use gpui::{
     Bounds, Context, FontStyle, FontWeight, Pixels, Point, RenderImage, ShapedLine, SharedString,
-    TextRun, UnderlineStyle, Window, point, px, rgb, size,
+    TextRun, UnderlineStyle, Window, point, px, size,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -15,6 +15,7 @@ use crate::{
     document::{Section, SectionKind},
     media::{Target, image_target, load_image},
     rendering::{Raster, render_math, render_mermaid},
+    theme::Theme,
     workspace::Workspace,
 };
 
@@ -61,12 +62,22 @@ pub(super) struct Row {
     pub(super) items: Vec<Item>,
     start: usize,
     end: usize,
+    soft_end: bool,
     pub(super) y: Pixels,
     pub(super) height: Pixels,
     pub(super) width: Pixels,
 }
 
 impl Row {
+    fn position_at(&self, x: Pixels) -> (usize, bool) {
+        let offset = self
+            .items
+            .iter()
+            .find(|item| x < item.left + item.width)
+            .map_or(self.end, |item| item.offset(x));
+        (offset, self.soft_end && offset == self.end)
+    }
+
     fn x_at(&self, offset: usize) -> Pixels {
         self.items
             .iter()
@@ -99,9 +110,22 @@ impl Item {
 
     pub(super) fn offset(&self, x: Pixels) -> usize {
         let x = x - self.left;
+        if x <= px(0.) {
+            return self.source.start;
+        }
         match &self.paint {
             ItemPaint::Text(line) if !self.atomic => {
-                self.source.start + line.closest_index_for_x(x)
+                let index = line.closest_index_for_x(x);
+                self.source.start
+                    + if index == line.text.len() {
+                        index
+                    } else {
+                        line.text
+                            .grapheme_indices(true)
+                            .take_while(|(start, _)| *start <= index)
+                            .last()
+                            .map_or(0, |(start, _)| start)
+                    }
             }
             _ => {
                 if x < self.width / 2. {
@@ -145,10 +169,8 @@ impl Item {
 impl Layout {
     pub(super) fn row_at(&self, position: Point<Pixels>) -> &Row {
         let y = position.y - self.origin.y;
-        self.rows
-            .iter()
-            .find(|row| y < row.y + row.height)
-            .unwrap_or_else(|| self.rows.last().unwrap())
+        let index = self.rows.partition_point(|row| row.y + row.height <= y);
+        &self.rows[index.min(self.rows.len() - 1)]
     }
 
     pub(super) fn contains_row(&self, position: Point<Pixels>) -> bool {
@@ -171,16 +193,16 @@ impl Layout {
     }
 
     pub(super) fn index_at(&self, position: Point<Pixels>) -> usize {
-        let row = self.row_at(position);
-        let x = position.x - self.origin.x;
-        row.items
-            .iter()
-            .find(|item| x < item.left + item.width)
-            .map_or(row.end, |item| item.offset(x))
+        self.position_at(position).0
     }
 
-    pub(super) fn bounds_at(&self, offset: usize) -> Option<Bounds<Pixels>> {
-        let row = &self.rows[self.row_index(offset)?];
+    pub(super) fn position_at(&self, position: Point<Pixels>) -> (usize, bool) {
+        self.row_at(position)
+            .position_at(position.x - self.origin.x)
+    }
+
+    pub(super) fn bounds_at(&self, offset: usize, upstream: bool) -> Option<Bounds<Pixels>> {
+        let row = &self.rows[self.row_index(offset, upstream)?];
         if let Some(item) = row.items.iter().find(|item| {
             matches!(item.paint, ItemPaint::Block(_))
                 && (offset == item.source.start || offset == item.source.end)
@@ -202,26 +224,25 @@ impl Layout {
         ))
     }
 
-    fn row_index(&self, offset: usize) -> Option<usize> {
-        self.rows.iter().position(|row| offset <= row.end)
+    fn row_index(&self, offset: usize, upstream: bool) -> Option<usize> {
+        let index = self.rows.partition_point(|row| {
+            row.end < offset || (!upstream && row.soft_end && row.end == offset)
+        });
+        (index < self.rows.len()).then_some(index)
     }
 
     pub(super) fn vertical(
         &self,
         offset: usize,
+        upstream: bool,
         preferred_x: Option<Pixels>,
         down: bool,
-    ) -> Option<(usize, Pixels)> {
-        let row = self.row_index(offset)?;
+    ) -> Option<((usize, bool), Pixels)> {
+        let row = self.row_index(offset, upstream)?;
         let next = if down { row + 1 } else { row.checked_sub(1)? };
         let next = self.rows.get(next)?;
         let x = preferred_x.unwrap_or_else(|| self.rows[row].x_at(offset));
-        let position = next
-            .items
-            .iter()
-            .find(|item| x < item.left + item.width)
-            .map_or(next.end, |item| item.offset(x));
-        Some((position, x))
+        Some((next.position_at(x), x))
     }
 
     pub(super) fn step(&self, offset: usize, right: bool) -> usize {
@@ -244,15 +265,19 @@ struct LayoutBuilder<'a> {
     pub(super) rows: Vec<Row>,
     row: Row,
     window: &'a Window,
+    theme: Theme,
+    wrap_width: Pixels,
     marked: Option<Range<usize>>,
 }
 
 impl<'a> LayoutBuilder<'a> {
-    fn new(window: &'a Window, marked: Option<Range<usize>>) -> Self {
+    fn new(window: &'a Window, marked: Option<Range<usize>>, wrap_width: Pixels) -> Self {
         Self {
             rows: Vec::new(),
             row: Self::row(0, px(0.)),
             window,
+            theme: Theme::for_window(window),
+            wrap_width,
             marked,
         }
     }
@@ -262,6 +287,7 @@ impl<'a> LayoutBuilder<'a> {
             items: Vec::new(),
             start,
             end: start,
+            soft_end: false,
             y,
             height: px(26.),
             width: px(0.),
@@ -271,6 +297,11 @@ impl<'a> LayoutBuilder<'a> {
     fn next_row(&mut self, start: usize) {
         let next = Self::row(start, self.row.y + self.row.height);
         self.rows.push(std::mem::replace(&mut self.row, next));
+    }
+
+    fn wrap_row(&mut self, start: usize) {
+        self.row.soft_end = self.row.end == start;
+        self.next_row(start);
     }
 
     fn add_text(&mut self, source: &str, range: Range<usize>, face: Face) {
@@ -314,11 +345,11 @@ impl<'a> LayoutBuilder<'a> {
             .as_ref()
             .is_some_and(|section| section.kind == SectionKind::Link);
         let color = if link {
-            rgb(0x145aac).into()
+            self.theme.accent.into()
         } else if face.muted {
-            rgb(0x656b77).into()
+            self.theme.muted.into()
         } else {
-            style.color
+            self.theme.text.into()
         };
         let template = TextRun {
             len: text.len(),
@@ -332,10 +363,131 @@ impl<'a> LayoutBuilder<'a> {
             }),
             strikethrough: None,
         };
-        let runs = if let Some(marked) = self
-            .marked
-            .as_ref()
-            .filter(|m| m.start < source.end && m.end > source.start && !atomic)
+        let font_size = px(if face.heading { 28. } else { 16. });
+        let height = px(if face.heading { 42. } else { 26. });
+        let window = self.window;
+        let marked = self.marked.clone();
+        let shape = |text: &str, source: Range<usize>| {
+            Self::shape_text(
+                window,
+                font_size,
+                &template,
+                marked.as_ref(),
+                text,
+                source,
+                atomic,
+            )
+        };
+        let line = shape(text, source.clone());
+        if atomic || line.width <= self.wrap_width - self.row.width {
+            self.item(
+                source,
+                target,
+                atomic,
+                line.width,
+                height,
+                ItemPaint::Text(Box::new(line)),
+            );
+            return;
+        }
+
+        // Measure the whole span once. Shape each wrapped piece separately so
+        // its source offsets and IME underline are local to that visual row.
+        let mut glyphs: Vec<_> = line.runs.iter().flat_map(|run| &run.glyphs).collect();
+        glyphs.sort_by_key(|glyph| glyph.index);
+        let left_to_right = glyphs
+            .windows(2)
+            .all(|pair| pair[0].position.x <= pair[1].position.x);
+        let mut glyphs = glyphs.into_iter().peekable();
+        let mut words = text.split_word_bound_indices().map(|(ix, _)| ix).peekable();
+        let mut x = px(0.);
+        let mut boundaries: Vec<_> = text
+            .grapheme_indices(true)
+            .map(|(ix, grapheme)| {
+                while glyphs.peek().is_some_and(|glyph| glyph.index < ix) {
+                    glyphs.next();
+                }
+                while words.peek().is_some_and(|word| *word < ix) {
+                    words.next();
+                }
+                let word_break =
+                    words.peek() == Some(&ix) && !grapheme.starts_with(char::is_whitespace);
+                let position = if left_to_right {
+                    glyphs.peek().map_or(line.width, |glyph| glyph.position.x)
+                } else {
+                    let position = x;
+                    let start = source.start + ix;
+                    x += shape(grapheme, start..start + grapheme.len()).width;
+                    position
+                };
+                (ix, position, word_break)
+            })
+            .collect();
+        boundaries.push((text.len(), if left_to_right { line.width } else { x }, true));
+
+        let last = boundaries.len() - 1;
+        let mut start = 0;
+        while start < last {
+            let available = self.wrap_width - self.row.width;
+            let (start_byte, x, _) = boundaries[start];
+            let mut fit = start;
+            let mut word_break = None;
+            for (i, &(_, next_x, word)) in boundaries.iter().enumerate().skip(start + 1) {
+                if next_x - x > available {
+                    break;
+                }
+                fit = i;
+                if word {
+                    word_break = Some(i);
+                }
+            }
+            if word_break.is_none() && !self.row.items.is_empty() {
+                self.wrap_row(source.start + start_byte);
+                continue;
+            }
+            let mut end = word_break.unwrap_or(fit).max(start + 1);
+            let (range, line) = loop {
+                let end_byte = boundaries[end].0;
+                let range = source.start + start_byte..source.start + end_byte;
+                let line = shape(&text[start_byte..end_byte], range.clone());
+                if line.width <= available || end == start + 1 {
+                    break (range, line);
+                }
+                end -= 1;
+            };
+            if line.width > available && !self.row.items.is_empty() {
+                self.wrap_row(range.start);
+                continue;
+            }
+            self.item(
+                range,
+                None,
+                false,
+                line.width,
+                height,
+                ItemPaint::Text(Box::new(line)),
+            );
+            start = end;
+            if start < last {
+                self.wrap_row(source.start + boundaries[start].0);
+            }
+        }
+    }
+
+    fn shape_text(
+        window: &Window,
+        font_size: Pixels,
+        template: &TextRun,
+        marked: Option<&Range<usize>>,
+        text: &str,
+        source: Range<usize>,
+        atomic: bool,
+    ) -> ShapedLine {
+        let mut template = template.clone();
+        template.len = text.len();
+        let color = template.color;
+        let runs = if let Some(marked) =
+            marked.filter(|m| m.start < source.end && m.end > source.start && !atomic)
         {
             let left = marked.start.saturating_sub(source.start);
             let right = marked.end.min(source.end) - source.start;
@@ -364,21 +516,9 @@ impl<'a> LayoutBuilder<'a> {
         } else {
             vec![template]
         };
-        let line = self.window.text_system().shape_line(
-            SharedString::from(text.to_owned()),
-            px(if face.heading { 28. } else { 16. }),
-            &runs,
-            None,
-        );
-        let width = line.width;
-        self.item(
-            source,
-            target,
-            atomic,
-            width,
-            px(if face.heading { 42. } else { 26. }),
-            ItemPaint::Text(Box::new(line)),
-        );
+        window
+            .text_system()
+            .shape_line(SharedString::from(text.to_owned()), font_size, &runs, None)
     }
 
     fn item(
@@ -390,6 +530,9 @@ impl<'a> LayoutBuilder<'a> {
         height: Pixels,
         paint: ItemPaint,
     ) {
+        if atomic && !self.row.items.is_empty() && self.row.width + width > self.wrap_width {
+            self.wrap_row(source.start);
+        }
         self.row.end = source.end;
         self.row.items.push(Item {
             source,
@@ -413,10 +556,24 @@ impl<'a> LayoutBuilder<'a> {
 }
 
 impl Editor {
-    pub(super) fn shape(&mut self, window: &Window, cx: &mut Context<Self>) -> Layout {
-        let scale = window.scale_factor();
-        let source = self.document.source();
-        let mut builder = LayoutBuilder::new(window, self.marked.clone());
+    pub(crate) fn has_blocked_images(&self) -> bool {
+        !self.allow_remote_images
+            && self
+                .preview_sections(&self.projected_sections())
+                .any(|section| {
+                    section.kind == SectionKind::Image
+                        && matches!(
+                            image_target(
+                                section.destination.as_deref().unwrap_or_default(),
+                                None,
+                                None
+                            ),
+                            Ok(Target::Web(_))
+                        )
+                })
+    }
+
+    fn projected_sections(&self) -> Vec<Section> {
         let mut sections = self.document.sections();
         if let Some(active) = &self.active {
             sections.retain(|section| section.source != active.source);
@@ -426,6 +583,62 @@ impl Editor {
             });
         }
 
+        sections
+    }
+
+    fn preview_sections<'a>(
+        &self,
+        sections: &'a [Section],
+    ) -> impl Iterator<Item = &'a Section> + use<'a> {
+        let active = self.active.as_ref().map(|section| section.source.clone());
+        let mut skip_to = 0;
+        sections.iter().filter(move |section| {
+            if section.source.start < skip_to {
+                return false;
+            }
+            let is_active = active.as_ref() == Some(&section.source);
+            if is_active
+                || !matches!(
+                    section.kind,
+                    SectionKind::Heading
+                        | SectionKind::Bullet
+                        | SectionKind::Strong
+                        | SectionKind::Emphasis
+                )
+            {
+                skip_to = section.source.end;
+            }
+            !is_active
+                && matches!(
+                    section.kind,
+                    SectionKind::Image
+                        | SectionKind::InlineMath
+                        | SectionKind::DisplayMath
+                        | SectionKind::Mermaid
+                )
+        })
+    }
+
+    #[cfg(test)]
+    pub(super) fn shape(&mut self, window: &Window, cx: &mut Context<Self>) -> Layout {
+        self.shape_for_width(
+            window,
+            cx,
+            super::wrap_width(self.scroll.bounds().size.width),
+        )
+    }
+
+    pub(super) fn shape_for_width(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+        width: Pixels,
+    ) -> Layout {
+        let scale = window.scale_factor();
+        let source = self.document.source();
+        let mut builder = LayoutBuilder::new(window, self.marked.clone(), width);
+        let sections = self.projected_sections();
+        let visible_previews = self.preview_sections(&sections);
         let mut previews = std::collections::HashMap::new();
         let present = sections
             .iter()
@@ -452,21 +665,7 @@ impl Editor {
             .filter_map(|section| section.destination.as_deref())
             .collect();
         retain_images(&mut self.images, &image_destinations);
-        self.has_blocked_images = false;
-        let mut skip_to = 0;
-        for section in &sections {
-            if section.source.start < skip_to {
-                continue;
-            }
-            if section.kind == SectionKind::ReadOnly
-                || self
-                    .active
-                    .as_ref()
-                    .is_some_and(|active| active.source == section.source)
-            {
-                skip_to = section.source.end;
-                continue;
-            }
+        for section in visible_previews {
             let body = &source[section.content.clone()];
             let kind = section.kind;
             let preview = match kind {
@@ -504,25 +703,22 @@ impl Editor {
                     let destination = section.destination.clone().unwrap_or_default();
                     if let Some(image) = self.images.get(&destination) {
                         image_preview(image)
-                    } else if self.images.len() >= 32 {
-                        Err("Image limit reached")
-                    } else if self.image_requests >= 3 {
-                        Err("Waiting for image")
                     } else {
                         match image_target(
                             &destination,
                             self.path.as_deref(),
                             self.workspace.as_ref().map(Workspace::root),
                         ) {
+                            Ok(Target::Web(_)) if !self.allow_remote_images => {
+                                Err("Remote image blocked")
+                            }
+                            _ if self.images.len() >= 32 => Err("Image limit reached"),
+                            _ if self.image_requests >= 3 => Err("Waiting for image"),
                             Err(error) => {
                                 cx.emit(PreviewDiagnostic("Image destination rejected"));
                                 self.images
                                     .insert(destination, ImageEntry::Ready(Err(error)));
                                 Err("Image not loaded")
-                            }
-                            Ok(Target::Web(_)) if !self.allow_remote_images => {
-                                self.has_blocked_images = true;
-                                Err("Remote image blocked")
                             }
                             Ok(target) => {
                                 self.image_requests += 1;
@@ -867,6 +1063,24 @@ mod tests {
         std::fs::create_dir(&root).unwrap();
         let error = load_preview_image(&target, Some(&workspace)).unwrap_err();
         assert!(error.contains("workspace folder has moved"));
+    }
+
+    #[gpui::test]
+    fn prose_prefers_a_word_boundary_to_a_grapheme_boundary(cx: &mut TestAppContext) {
+        let (_editor, cx) = cx.add_window_view(|window, cx| Editor::new(String::new(), window, cx));
+        cx.update(|window, _| {
+            let prefix = "First word ";
+            let text = "First word continuation";
+            let mut probe = LayoutBuilder::new(window, None, px(300.));
+            probe.add_text(text, 0..prefix.len(), Face::default());
+            let width = probe.row.width + px(14.);
+            let mut builder = LayoutBuilder::new(window, None, width);
+            builder.add_text(text, 0..text.len(), Face::default());
+            let layout = builder.build();
+            assert_eq!(layout.rows[0].end, prefix.len());
+            assert_eq!(layout.rows[1].start, prefix.len());
+            assert_eq!(layout.step(prefix.len(), false), prefix.len() - 1);
+        });
     }
 
     #[gpui::test]

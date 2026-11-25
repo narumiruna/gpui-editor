@@ -9,11 +9,14 @@ use gpui::{
 
 use super::{
     ActiveOperation, DocumentFile, DocumentTab, Intent, Shell, TabId, Workspace, quit, session,
+    sidebar::{Snapshot, snapshot},
 };
+use crate::workspace::DirectoryEntry;
 
 enum Change {
-    Folder(Workspace, Vec<PathBuf>),
-    RefreshFiles(Vec<PathBuf>),
+    Folder(Workspace, Snapshot),
+    RefreshTree(Snapshot),
+    ExpandFolder(PathBuf, Vec<DirectoryEntry>),
     Open(DocumentFile),
     Select(TabId),
     Remove(TabId),
@@ -24,13 +27,14 @@ enum Change {
 struct Operation {
     workspace: Option<Workspace>,
     selected: Option<TabId>,
+    loaded_folders: Vec<PathBuf>,
     open: Vec<(PathBuf, TabId)>,
     session_path: Option<PathBuf>,
 }
 
 struct SaveResult {
     file: DocumentFile,
-    sidebar: Option<Result<Vec<PathBuf>, String>>,
+    sidebar: Option<Result<Snapshot, String>>,
 }
 
 impl Shell {
@@ -63,6 +67,9 @@ impl Shell {
                 ("Choose workspace", "Choose workspace failed")
             }
             Intent::New => unreachable!(),
+            Intent::ExpandFolder(_) => {
+                ("Expand workspace folder", "Expand workspace folder failed")
+            }
             Intent::Open(_) => ("Open document", "Open document failed"),
             Intent::Save => ("Save document", "Save document failed"),
             Intent::CloseTab(_) => ("Close tab", "Close tab failed"),
@@ -71,6 +78,7 @@ impl Shell {
         let operation = Operation {
             workspace: self.workspace.clone(),
             selected: self.selected,
+            loaded_folders: self.sidebar.loaded(),
             open: self
                 .tabs
                 .iter()
@@ -128,15 +136,16 @@ impl Shell {
                     "Document operation canceled"
                 });
                 match change {
-                    Some(Change::Folder(workspace, files)) => {
+                    Some(Change::Folder(workspace, entries)) => {
                         self.tabs.clear();
                         self.selected = None;
                         self.show_more_tools = false;
                         self.tab_scroll = ScrollHandle::new();
+                        self.sidebar.reset(workspace.root(), entries);
                         self.workspace = Some(workspace);
-                        self.files = files;
                     }
-                    Some(Change::RefreshFiles(files)) => self.files = files,
+                    Some(Change::RefreshTree(entries)) => self.sidebar.refresh(entries),
+                    Some(Change::ExpandFolder(path, entries)) => self.sidebar.expand(path, entries),
                     Some(Change::Open(file)) => {
                         self.open_editor(Some(file), window, cx);
                     }
@@ -175,7 +184,7 @@ impl Shell {
         }
         if let Some(sidebar) = saved.sidebar {
             match sidebar {
-                Ok(files) => self.files = files,
+                Ok(entries) => self.sidebar.refresh(entries),
                 Err(error) => self.error = Some(error),
             }
         }
@@ -241,24 +250,42 @@ impl Operation {
                     .await?;
                 return Ok(Some(change));
             }
+            Intent::ExpandFolder(path) => {
+                let workspace = self.workspace.ok_or("Open a workspace folder first.")?;
+                return cx
+                    .background_executor()
+                    .spawn(async move {
+                        let entries = workspace.directory_entries(&path).map_err(|error| {
+                            format!("Could not expand {}: {error}", path.display())
+                        })?;
+                        Ok(Some(Change::ExpandFolder(path, entries)))
+                    })
+                    .await;
+            }
             Intent::OpenFolder(path) => {
-                let (workspace, files) = cx
+                let current = self.workspace.clone();
+                let loaded = self.loaded_folders.clone();
+                let (workspace, entries, same_workspace) = cx
                     .background_executor()
                     .spawn(async move {
                         let result = (|| {
                             let workspace = Workspace::open(&path)?;
-                            let files = workspace.markdown_files()?;
-                            Ok((workspace, files))
+                            let same_workspace = current.as_ref() == Some(&workspace);
+                            let entries = snapshot(
+                                &workspace,
+                                if same_workspace { loaded } else { Vec::new() },
+                            )?;
+                            Ok((workspace, entries, same_workspace))
                         })();
                         result.map_err(|error: std::io::Error| {
                             format!("Could not open folder {}: {error}", path.display())
                         })
                     })
                     .await?;
-                if self.workspace.as_ref() == Some(&workspace) {
-                    return Ok(Some(Change::RefreshFiles(files)));
+                if same_workspace {
+                    return Ok(Some(Change::RefreshTree(entries)));
                 }
-                Change::Folder(workspace, files)
+                Change::Folder(workspace, entries)
             }
             Intent::CloseTab(id) => Change::Remove(id),
             Intent::Exit => Change::Exit,
@@ -269,13 +296,13 @@ impl Operation {
             return Ok(None);
         }
         match &mut change {
-            Change::Folder(workspace, files) => {
+            Change::Folder(workspace, entries) => {
                 // The destination might have changed while the user answered prompts.
                 let workspace = workspace.clone();
-                *files = cx
+                *entries = cx
                     .background_executor()
                     .spawn(async move {
-                        workspace.markdown_files().map_err(|error| {
+                        snapshot(&workspace, Vec::new()).map_err(|error| {
                             format!(
                                 "Could not open folder {}: {error}",
                                 workspace.root().display()
@@ -375,6 +402,7 @@ impl Operation {
             };
             let workspace = self.workspace.clone();
             let open = self.open.clone();
+            let loaded = self.loaded_folders.clone();
             cx.background_executor()
                 .spawn(async move {
                     // An open file may have been deleted externally. Do not claim its path for a second tab.
@@ -401,7 +429,7 @@ impl Operation {
                     let file = DocumentFile::create(workspace.as_ref(), &path, source)
                         .map_err(|error| format!("Could not save {}: {error}", path.display()))?;
                     let sidebar = workspace.map(|workspace| {
-                        workspace.markdown_files().map_err(|error| {
+                        snapshot(&workspace, loaded).map_err(|error| {
                             format!("File saved, but could not refresh the sidebar: {error}")
                         })
                     });

@@ -1,7 +1,7 @@
 use std::{fs, ops::Range};
 
 use gpui::{
-    EntityInputHandler as _, Focusable as _, Modifiers, ScrollDelta, ScrollWheelEvent,
+    EntityInputHandler as _, Focusable as _, Modifiers, MouseButton, ScrollDelta, ScrollWheelEvent,
     TestAppContext, TouchPhase, VisualTestContext, point,
 };
 
@@ -153,17 +153,23 @@ fn compact_toolbar_fits_on_one_row_at_minimum_window_width(cx: &mut TestAppConte
     cx.update(|_, cx| assert!(shell.read(cx).current().is_some()));
     cx.simulate_resize(size(px(1040.), px(720.)));
     cx.run_until_parked();
-    let open = cx.debug_bounds("Open Folder…").unwrap();
+    let tab_row = cx.debug_bounds("document-tabs").unwrap();
+    let toolbar = cx.debug_bounds("editor-toolbar").unwrap();
+    let body = cx.debug_bounds("document-body").unwrap();
     let more = cx.debug_bounds("More tools").unwrap();
-    assert_eq!(open.top(), more.top());
+    assert_eq!(tab_row.top(), px(0.));
+    assert_eq!(tab_row.bottom() + px(1.), toolbar.top());
+    assert_eq!(toolbar.bottom(), body.top());
+    assert_eq!(body.bottom(), px(720.));
     assert!(more.right() <= px(1040.));
     cx.simulate_resize(size(px(560.), px(360.)));
     cx.run_until_parked();
     cx.update(|window, _| assert_eq!(window.viewport_size().width, px(560.)));
-    let open = cx.debug_bounds("Open Folder…").unwrap();
+    let save = cx.debug_bounds("Save").unwrap();
     let more = cx.debug_bounds("More tools").unwrap();
-    assert_eq!(more.top(), open.top());
+    assert_eq!(more.top(), save.top());
     assert!(more.right() <= px(560.));
+    assert_eq!(cx.debug_bounds("document-body").unwrap().bottom(), px(360.));
     click_tool(cx, "More tools");
     assert_eq!(cx.debug_bounds("Fewer tools").unwrap(), more);
     let remove_item = cx.debug_bounds("Remove item").unwrap();
@@ -175,6 +181,7 @@ fn compact_toolbar_fits_on_one_row_at_minimum_window_width(cx: &mut TestAppConte
 #[gpui::test]
 fn main_toolbar_buttons_show_labels_on_hover(cx: &mut TestAppContext) {
     let (_, cx) = cx.add_window_view(Shell::new);
+    cx.simulate_resize(size(px(1040.), px(720.)));
     click_tool(cx, "New note");
     for name in [
         "Open Folder…",
@@ -477,6 +484,115 @@ fn switching_tabs_preserves_drafts_selection_and_undo_and_save_uses_current_tab(
 }
 
 #[gpui::test]
+fn nested_tree_preserves_selection_and_expansion_when_sidebar_is_hidden(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let note = fixture.document("guides/install/quickstart.md", "Original");
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    cx.simulate_resize(size(px(780.), px(540.)));
+    cx.update(|_, cx| cx.bind_keys([KeyBinding::new("cmd-alt-s", ToggleSidebar, None)]));
+    fixture.open(cx, &shell);
+    assert!(cx.debug_bounds("workspace-file-0").is_none());
+    click_tool(cx, "workspace-folder-1");
+    click_tool(cx, "workspace-folder-2");
+    click_tool(cx, "workspace-file-0");
+    let (id, editor) = replace_current(cx, &shell, "Changed");
+    let sidebar = cx.debug_bounds("sidebar").unwrap();
+    assert_eq!(sidebar.bottom(), px(540.));
+    assert_eq!(
+        cx.debug_bounds("document-body").unwrap().left(),
+        sidebar.right()
+    );
+    click_tool(cx, "Hide Sidebar");
+    cx.update(|_, cx| assert!(!shell.read(cx).sidebar.visible));
+    assert_eq!(cx.debug_bounds("document-body").unwrap().left(), px(0.));
+    assert!(cx.debug_bounds("Show Sidebar").is_some());
+    cx.simulate_keystrokes("cmd-alt-s");
+    cx.run_until_parked();
+    cx.update(|_, cx| assert!(shell.read(cx).sidebar.visible));
+    assert_eq!(
+        cx.debug_bounds("document-body").unwrap().left(),
+        sidebar.right()
+    );
+
+    // Folder refresh preserves the expanded path and the selected draft.
+    let fresh = fixture.document("guides/install/reference.md", "Also on disk");
+    fixture.open(cx, &shell);
+    assert!(cx.debug_bounds("workspace-file-1").is_some());
+    click_tool(cx, "workspace-folder-1");
+    cx.update(|_, cx| {
+        let sidebar = &shell.read(cx).sidebar;
+        assert!(
+            !sidebar
+                .visible_rows(fixture.workspace.root())
+                .iter()
+                .any(|(path, _, _)| *path == note)
+        );
+    });
+    click_tool(cx, "workspace-folder-1");
+    click_tool(cx, "workspace-file-0");
+    cx.update(|_, cx| {
+        let shell = shell.read(cx);
+        assert!(shell.sidebar.contains(&fresh));
+        assert_eq!(shell.current().unwrap().path(), Some(note.as_path()));
+        assert_eq!(shell.selected, Some(id));
+        assert_eq!(editor.read(cx).source(), "Changed");
+    });
+}
+
+#[gpui::test]
+fn first_save_refreshes_an_expanded_nested_folder(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let folder = fixture.workspace.root().join("notes");
+    fs::create_dir(&folder).unwrap();
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    fixture.open(cx, &shell);
+    click_tool(cx, "workspace-folder-1");
+    click_tool(cx, "New note");
+    let (id, _) = replace_current(cx, &shell, "# A nested note");
+    let target = folder.join("saved.md");
+    click_tool(cx, "Save");
+    cx.simulate_new_path_selection(|_| Some(target.clone()));
+    cx.run_until_parked();
+    click_tool(cx, "workspace-file-0");
+    cx.update(|_, cx| {
+        let shell = shell.read(cx);
+        assert_eq!(shell.selected, Some(id));
+        assert!(shell.sidebar.contains(&target));
+        assert!(!shell.current().unwrap().dirty(cx));
+    });
+    assert_eq!(fs::read_to_string(&target).unwrap(), "# A nested note");
+}
+
+#[gpui::test]
+fn dragging_the_sidebar_divider_resizes_only_the_editor_width(cx: &mut TestAppContext) {
+    let (_, cx) = cx.add_window_view(Shell::new);
+    cx.simulate_resize(size(px(900.), px(540.)));
+    let grip = cx.debug_bounds("resize-sidebar").unwrap().center();
+    let original = cx.debug_bounds("document-body").unwrap();
+    let button = MouseButton::Left;
+    cx.simulate_mouse_down(grip, button, Modifiers::none());
+    cx.simulate_mouse_move(
+        grip + point(px(10.), px(0.)),
+        Some(button),
+        Modifiers::none(),
+    );
+    cx.simulate_mouse_move(
+        grip + point(px(70.), px(0.)),
+        Some(button),
+        Modifiers::none(),
+    );
+    cx.simulate_mouse_up(grip + point(px(70.), px(0.)), button, Modifiers::none());
+    cx.run_until_parked();
+    let resized = cx.debug_bounds("document-body").unwrap();
+    assert!(resized.left() > original.left() + px(60.));
+    assert_eq!(resized.right(), original.right());
+    assert_eq!(resized.bottom(), original.bottom());
+    click_tool(cx, "Hide Sidebar");
+    click_tool(cx, "Show Sidebar");
+    assert_eq!(cx.debug_bounds("document-body").unwrap(), resized);
+}
+
+#[gpui::test]
 fn switching_tabs_keeps_the_editor_in_inline_source_mode(cx: &mut TestAppContext) {
     let (shell, cx) = cx.add_window_view(Shell::new);
     cx.update(|_, cx| editor::bind_keys(cx));
@@ -530,7 +646,7 @@ fn two_untitled_tabs_are_independent_and_first_save_reuses_the_sidebar_document(
         assert_eq!(tab.editor, second_editor);
         assert_eq!(tab.path(), Some(saved.as_path()));
         assert!(!tab.dirty(cx));
-        assert_eq!(shell.files, std::slice::from_ref(&saved));
+        assert!(shell.sidebar.contains(&saved));
     });
     assert_eq!(fs::read_to_string(saved).unwrap(), "second untitled draft");
 }
@@ -590,7 +706,7 @@ fn overflowing_tabs_scroll_and_keep_the_editor_usable_at_minimum_window_size(
 ) {
     let fixture = Fixture::new();
     let (shell, cx) = cx.add_window_view(Shell::new);
-    cx.simulate_resize(size(px(560.), px(360.)));
+    cx.simulate_resize(size(px(1040.), px(720.)));
     fixture.open(cx, &shell);
     let mut selectors = Vec::new();
     for index in 0..12 {
@@ -599,6 +715,8 @@ fn overflowing_tabs_scroll_and_keep_the_editor_usable_at_minimum_window_size(
         let id = cx.update(|_, cx| shell.read(cx).current().unwrap().id);
         selectors.push(tab_selector("tab", id));
     }
+    cx.simulate_resize(size(px(560.), px(360.)));
+    cx.run_until_parked();
     let row = cx.debug_bounds("document-tabs").unwrap();
     assert!(row.right() <= px(560.));
     assert!(row.bottom() < px(360.));
@@ -670,7 +788,7 @@ fn aborted_workspace_switch_keeps_drafts_but_not_already_saved_changes(cx: &mut 
     assert!(!cx.has_pending_prompt());
     cx.update(|_, cx| {
         let shell = shell.read(cx);
-        assert!(shell.files.contains(&new_file));
+        assert!(shell.sidebar.contains(&new_file));
         for ((id, editor), draft) in drafts.iter().zip(["draft a", "draft b", "draft c"]) {
             assert_eq!(&shell.tab(*id).unwrap().editor, editor);
             assert_eq!(editor.read(cx).source(), draft);

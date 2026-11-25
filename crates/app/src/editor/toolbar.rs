@@ -2,11 +2,11 @@ use std::borrow::Cow;
 
 use gpui::{
     AssetSource, Context, Div, Entity, FontWeight, SharedString, Stateful, Window, div, prelude::*,
-    px, rgb, svg,
+    px, svg,
 };
 
 use super::{Editor, commands::Command};
-use crate::{app::developer::Picker, document::SectionKind};
+use crate::{app::developer::Picker, document::SectionKind, theme::Theme};
 
 struct Tool {
     name: &'static str,
@@ -54,7 +54,14 @@ const SHELL_ICONS: &[(&str, &str)] = &[
     ("More tools", glyph!("M5 12h.01M12 12h.01M19 12h.01")),
     ("Workspace", glyph!("M3 6h7l2 2h9v11H3z")),
     ("File", glyph!("M6 3h8l4 4v14H6zM14 3v5h5M9 12h6m-6 4h6")),
-    ("Saved", glyph!("m5 12 5 5L19 8")),
+    ("Hide Sidebar", glyph!("m14 6-6 6 6 6")),
+    ("Show Sidebar", glyph!("m10 6 6 6-6 6")),
+    ("Expanded tree", glyph!("m6 9 6 6 6-6")),
+    ("Collapsed tree", glyph!("m9 6 6 6-6 6")),
+    (
+        "Load remote images for this document",
+        glyph!("M5 13H4a2 2 0 0 1-2-2V5h20v6a2 2 0 0 1-2 2h-1M5 5l4 4 3-3m0 4v11m-4-4 4 4 4-4"),
+    ),
     (
         "Developer target",
         glyph!(
@@ -161,22 +168,23 @@ pub(crate) fn icon(name: &'static str, size: f32) -> gpui::Svg {
 pub(crate) fn marked_button(
     name: &'static str,
     enabled: bool,
+    theme: Theme,
     picker: Option<&Picker>,
 ) -> Stateful<Div> {
-    Picker::mark(picker, button(name, enabled, true), name, name)
+    Picker::mark(picker, button(name, enabled, true, theme), name, name)
 }
 
-fn button(name: &'static str, enabled: bool, icon_only: bool) -> Stateful<Div> {
-    let primary = name == "Save" && enabled;
+fn button(name: &'static str, enabled: bool, icon_only: bool, theme: Theme) -> Stateful<Div> {
+    let primary = matches!(name, "Save" | "Open Folder…") && enabled;
     let expanded = name == "Fewer tools";
     let icon_name = if expanded { "More tools" } else { name };
-    let color = rgb(if primary {
-        0xffffff
+    let color = if primary {
+        theme.on_accent
     } else if enabled {
-        0x172336
+        theme.text
     } else {
-        0x64748b
-    });
+        theme.muted
+    };
     div()
         .id(name)
         .debug_selector(|| name.to_owned())
@@ -190,12 +198,30 @@ fn button(name: &'static str, enabled: bool, icon_only: bool) -> Stateful<Div> {
         .font_weight(FontWeight::SEMIBOLD)
         .text_size(px(13.))
         .text_color(color)
-        .when(primary, |el| el.bg(rgb(0x2859ad)))
-        .when(expanded, |el| el.bg(rgb(0xe4eeff)))
+        .when(primary, |el| el.bg(theme.accent))
+        .when(expanded, |el| el.bg(theme.selected))
         .when(enabled, |el| {
             el.cursor_pointer()
-                .hover(move |s| s.bg(rgb(if primary { 0x21478e } else { 0xe4eeff })))
-                .active(move |s| s.bg(rgb(if primary { 0x18376f } else { 0xd3e3ff })))
+                .hover(move |s| {
+                    s.bg(if primary {
+                        theme.surface.blend(gpui::Rgba {
+                            a: 0.85,
+                            ..theme.accent
+                        })
+                    } else {
+                        theme.selected
+                    })
+                })
+                .active(move |s| {
+                    s.bg(if primary {
+                        theme.surface.blend(gpui::Rgba {
+                            a: 0.75,
+                            ..theme.accent
+                        })
+                    } else {
+                        theme.border
+                    })
+                })
         })
         .child(icon(icon_name, 17.).text_color(color))
         .when(icon_only, |el| {
@@ -209,56 +235,81 @@ fn button(name: &'static str, enabled: bool, icon_only: bool) -> Stateful<Div> {
 pub(crate) struct Tooltip(pub(crate) &'static str);
 
 impl gpui::Render for Tooltip {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .debug_selector(|| format!("toolbar-tooltip: {}", self.0))
-            .px_2()
-            .py_1()
-            .rounded_md()
-            .bg(rgb(0x1e293b))
-            .text_color(rgb(0xffffff))
-            .child(self.0)
+    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        tooltip(self.0.into(), window).debug_selector(|| format!("toolbar-tooltip: {}", self.0))
     }
 }
 
+pub(crate) struct TextTooltip(pub(crate) SharedString);
+
+impl gpui::Render for TextTooltip {
+    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        tooltip(self.0.clone(), window)
+    }
+}
+
+fn tooltip(label: SharedString, window: &Window) -> Div {
+    let theme = Theme::for_window(window);
+    div()
+        .px_2()
+        .py_1()
+        .rounded_md()
+        .bg(theme.tooltip)
+        .text_color(theme.on_tooltip)
+        .child(label)
+}
+
 pub(crate) fn group() -> Div {
-    div().flex().flex_wrap().items_center().gap_1()
+    div().flex().flex_none().items_center().gap_1()
 }
 
 pub(crate) fn primary_groups(
     editor: &Entity<Editor>,
     enabled: bool,
+    theme: Theme,
     picker: Option<&Picker>,
 ) -> [Div; 2] {
     [FORMAT, INSERT].map(|tools| {
-        tool_group(tools, editor, enabled, picker, true)
+        tool_group(tools, editor, enabled, theme, picker, true)
             .pl_2()
             .border_l_1()
-            .border_color(rgb(0xd3dce9))
+            .border_color(theme.border)
     })
 }
 
-pub(crate) fn more_group(editor: &Entity<Editor>, enabled: bool, picker: Option<&Picker>) -> Div {
-    tool_group(MORE, editor, enabled, picker, false)
+pub(crate) fn more_group(
+    editor: &Entity<Editor>,
+    enabled: bool,
+    theme: Theme,
+    picker: Option<&Picker>,
+) -> Div {
+    tool_group(MORE, editor, enabled, theme, picker, false)
 }
 
 fn tool_group(
     tools: &[Tool],
     editor: &Entity<Editor>,
     enabled: bool,
+    theme: Theme,
     picker: Option<&Picker>,
     icon_only: bool,
 ) -> Div {
-    group().children(tools.iter().map(|tool| {
-        let command = tool.command;
-        let editor = editor.clone();
-        let button = button(tool.name, enabled, icon_only);
-        Picker::mark(picker, button, tool.name, tool.name).when(enabled, |button| {
-            button.on_click(move |_, window, cx| {
-                editor.update(cx, |editor, cx| editor.command(command, window, cx));
+    div()
+        .flex()
+        .flex_none()
+        .gap_1()
+        .when(icon_only, |group| group.items_center())
+        .when(!icon_only, |group| group.flex_col())
+        .children(tools.iter().map(|tool| {
+            let command = tool.command;
+            let editor = editor.clone();
+            let button = button(tool.name, enabled, icon_only, theme);
+            Picker::mark(picker, button, tool.name, tool.name).when(enabled, |button| {
+                button.on_click(move |_, window, cx| {
+                    editor.update(cx, |editor, cx| editor.command(command, window, cx));
+                })
             })
-        })
-    }))
+        }))
 }
 
 #[cfg(test)]

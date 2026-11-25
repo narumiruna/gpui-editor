@@ -1,10 +1,10 @@
 use std::{fs, io::ErrorKind, path::Path};
 
-use gpui_editor_workspace::{DocumentFile, Workspace};
+use gpui_editor_workspace::{DocumentFile, EntryKind, Workspace};
 use tempfile::tempdir;
 
 #[test]
-fn sidebar_lists_only_top_level_markdown_and_can_open_nested_documents() {
+fn lists_only_top_level_markdown_and_can_open_nested_documents() {
     let folder = tempdir().unwrap();
     let root = folder.path();
     fs::write(root.join("z.md"), "# Last\n").unwrap();
@@ -22,6 +22,45 @@ fn sidebar_lists_only_top_level_markdown_and_can_open_nested_documents() {
         .unwrap();
     assert_eq!(nested.path(), workspace.root().join("folder.md/nested.md"));
     assert_eq!(nested.source(), "# 中文\n");
+    let entries = workspace.directory_entries(workspace.root()).unwrap();
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| (
+                entry.path.file_name().unwrap().to_str().unwrap(),
+                entry.kind
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("folder.md", EntryKind::Folder),
+            ("a.md", EntryKind::Markdown),
+            ("plain.txt", EntryKind::File),
+            ("z.md", EntryKind::Markdown),
+        ]
+    );
+    assert_eq!(
+        workspace.directory_entries(Path::new("folder.md")).unwrap()[0].path,
+        nested.path()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn workspace_tree_omits_symlinks_and_does_not_list_paths_through_them() {
+    let folder = tempdir().unwrap();
+    let outside = tempdir().unwrap();
+    let workspace = Workspace::open(folder.path()).unwrap();
+    fs::create_dir(workspace.root().join("real")).unwrap();
+    for (name, destination) in [
+        ("outside", outside.path()),
+        ("inside", &workspace.root().join("real")),
+    ] {
+        std::os::unix::fs::symlink(destination, workspace.root().join(name)).unwrap();
+        assert!(workspace.directory_entries(Path::new(name)).is_err());
+    }
+    let entries = workspace.directory_entries(workspace.root()).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].path, workspace.root().join("real"));
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -39,6 +78,7 @@ fn a_replaced_workspace_requires_reopening_before_listing_or_opening_documents()
     fs::write(root.join(path), "replacement").unwrap();
     for error in [
         workspace.markdown_files().unwrap_err(),
+        workspace.directory_entries(workspace.root()).unwrap_err(),
         workspace.read_document(path).unwrap_err(),
     ] {
         assert!(error.to_string().contains("workspace folder has moved"));

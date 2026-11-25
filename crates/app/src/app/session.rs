@@ -14,6 +14,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+use super::sidebar::{Snapshot, snapshot};
 use crate::workspace::{DocumentFile, Workspace};
 
 const VERSION: u32 = 1;
@@ -42,7 +43,7 @@ struct SavedWorkspace {
 #[derive(Debug)]
 pub(super) struct Restored {
     pub(super) workspace: Workspace,
-    pub(super) files: Vec<PathBuf>,
+    pub(super) tree: Snapshot,
     pub(super) documents: Vec<DocumentFile>,
     pub(super) selected: Option<usize>,
 }
@@ -117,7 +118,7 @@ pub(super) fn restore(path: &Path) -> io::Result<Option<Restored>> {
             "the saved workspace folder has moved or changed",
         ));
     }
-    let files = workspace.markdown_files()?;
+    let tree = snapshot(&workspace, Vec::new())?;
     let mut documents = Vec::new();
     let mut indices = HashMap::new();
     let mut selected = None;
@@ -143,7 +144,7 @@ pub(super) fn restore(path: &Path) -> io::Result<Option<Restored>> {
     let selected = selected.or_else(|| (!documents.is_empty()).then_some(0));
     Ok(Some(Restored {
         workspace,
-        files,
+        tree,
         documents,
         selected,
     }))
@@ -285,7 +286,13 @@ mod tests {
         fs::write(&second, "updated on disk").unwrap();
         let restored = restore(&fixture.session_path).unwrap().unwrap();
         assert_eq!(restored.workspace, fixture.workspace);
-        assert_eq!(restored.files, [&second, &first].map(PathBuf::from));
+        assert_eq!(
+            restored.tree[restored.workspace.root()]
+                .iter()
+                .map(|entry| &entry.path)
+                .collect::<Vec<_>>(),
+            [&second, &first]
+        );
         assert_eq!(restored.documents[0].path(), first);
         assert_eq!(restored.documents[1].path(), second);
         assert_eq!(restored.documents[1].source(), "updated on disk");
@@ -302,7 +309,13 @@ mod tests {
             .unwrap();
         let restored = restore(&fixture.session_path).unwrap().unwrap();
         assert_eq!(restored.workspace, fixture.workspace);
-        assert_eq!(restored.files.as_slice(), std::slice::from_ref(&file));
+        assert_eq!(
+            restored.tree[restored.workspace.root()]
+                .iter()
+                .map(|entry| &entry.path)
+                .collect::<Vec<_>>(),
+            [&file]
+        );
         assert!(restored.documents.is_empty());
         assert_eq!(restored.selected, None);
 

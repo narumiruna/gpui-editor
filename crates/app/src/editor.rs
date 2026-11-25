@@ -1,16 +1,18 @@
 //! One GPUI input surface backed by offsets in the Markdown source.
 
-use std::{collections::HashMap, ops::Range, path::PathBuf};
+use std::{collections::HashMap, ops::Range, path::PathBuf, time::Duration};
 
 use crate::{
     document::{Document, Section, SectionKind},
+    theme::Theme,
     workspace::Workspace,
 };
 use gpui::{
-    App, Bounds, ClipboardItem, Context, CursorStyle, ElementInputHandler, EntityInputHandler,
-    EventEmitter, FocusHandle, Focusable, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
-    Pixels, Point, ScrollHandle, UTF16Selection, Window, actions, canvas, div, fill, point,
-    prelude::*, px, quad, rgb, rgba, size,
+    AnyElement, App, AvailableSpace, Bounds, ClipboardItem, Context, CursorStyle,
+    ElementInputHandler, EntityInputHandler, EventEmitter, FocusHandle, Focusable, KeyBinding,
+    MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Point, ScrollHandle, Size, Task,
+    UTF16Selection, Window, WindowAppearance, actions, canvas, div, fill, point, prelude::*, px,
+    quad, rgb, size,
 };
 
 mod commands;
@@ -71,6 +73,8 @@ pub struct Editor {
     document: Document,
     anchor: usize,
     cursor: usize,
+    // A soft break shares a byte offset between the end of one row and the start of the next.
+    upstream: bool,
     marked: Option<Range<usize>>,
     active: Option<Section>,
     selecting: bool,
@@ -84,11 +88,11 @@ pub struct Editor {
     next_image_request: u64,
     image_requests: usize,
     allow_remote_images: bool,
-    has_blocked_images: bool,
     path: Option<PathBuf>,
     workspace: Option<Workspace>,
-    hover: Option<String>,
+    hover: Option<Range<usize>>,
     message: Option<String>,
+    message_timeout: Option<(String, Task<()>)>,
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
 }
@@ -121,6 +125,7 @@ impl Editor {
             document: Document::new(source),
             anchor: 0,
             cursor: 0,
+            upstream: false,
             marked: None,
             active: None,
             selecting: false,
@@ -134,11 +139,11 @@ impl Editor {
             next_image_request: 0,
             image_requests: 0,
             allow_remote_images: false,
-            has_blocked_images: false,
             path: None,
             workspace: None,
             hover: None,
             message: None,
+            message_timeout: None,
             undo: Vec::new(),
             redo: Vec::new(),
         }
@@ -153,6 +158,11 @@ impl Editor {
         self.workspace = workspace;
         self.images.clear();
         self.allow_remote_images = false;
+    }
+
+    pub(crate) fn allow_remote_images(&mut self, cx: &mut Context<Self>) {
+        self.allow_remote_images = true;
+        cx.notify();
     }
 
     pub(crate) fn is_composing(&self) -> bool {
@@ -194,6 +204,7 @@ impl Editor {
     fn restore(&mut self, state: Snapshot, cx: &mut Context<Self>) {
         self.document = Document::new(state.source);
         self.cursor = state.cursor;
+        self.upstream = false;
         self.anchor = state.anchor;
         self.active = state.active;
         self.marked = None;
@@ -238,6 +249,7 @@ impl Editor {
         }
         self.marked = None;
         self.cursor = range.start + text.len();
+        self.upstream = false;
         self.anchor = self.cursor;
         cx.notify();
         true
@@ -257,16 +269,18 @@ impl Editor {
             self.cursor
         };
         self.move_to(position, extend, cx);
+        self.upstream = !right;
         self.reveal_caret = true;
     }
 
     fn move_vertical(&mut self, down: bool, extend: bool, cx: &mut Context<Self>) {
-        if let Some((position, x)) = self
+        if let Some(((position, upstream), x)) = self
             .layout
             .as_ref()
-            .and_then(|layout| layout.vertical(self.cursor, self.preferred_x, down))
+            .and_then(|layout| layout.vertical(self.cursor, self.upstream, self.preferred_x, down))
         {
             self.move_to(position, extend, cx);
+            self.upstream = upstream && self.cursor == position;
             self.preferred_x = Some(x);
             self.reveal_caret = true;
         }
@@ -278,6 +292,7 @@ impl Editor {
         }
         self.preferred_x = None;
         self.cursor = position;
+        self.upstream = false;
         if !extend {
             self.anchor = position;
         }
@@ -336,7 +351,7 @@ impl Editor {
             return;
         }
         let Some(layout) = &self.layout else { return };
-        let position = layout.index_at(event.position);
+        let (position, upstream) = layout.position_at(event.position);
         let item = layout.item_at(event.position);
         let hit = item.and_then(|item| item.target.clone());
         let block = item
@@ -381,6 +396,7 @@ impl Editor {
             }
         } else {
             self.move_to(position, event.modifiers.shift, cx);
+            self.upstream = upstream && self.cursor == position;
         }
     }
 
@@ -392,26 +408,48 @@ impl Editor {
         )
     }
 
+    fn hovered_link(layout: &Layout, position: Point<Pixels>) -> Option<&layout::Item> {
+        layout.item_at(position).filter(|item| {
+            item.target
+                .as_ref()
+                .is_some_and(|section| section.kind == SectionKind::Link)
+        })
+    }
+
     fn mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
         let Some(layout) = &self.layout else { return };
         if self.selecting {
-            self.move_to(layout.index_at(event.position), true, cx);
-        }
-        let next = self
-            .layout
-            .as_ref()
-            .and_then(|layout| layout.item_at(event.position))
-            .and_then(|item| item.target.as_ref())
-            .filter(|section| section.kind == SectionKind::Link)
-            .map(|section| match self.link_target(section) {
-                Ok(crate::media::Target::Web(url)) => url.to_string(),
-                Ok(crate::media::Target::Local(path)) => path.display().to_string(),
-                Err(_) => section.destination.clone().unwrap_or_default(),
-            });
-        if self.hover != next {
-            self.hover = next;
+            let (position, upstream) = layout.position_at(event.position);
+            self.move_to(position, true, cx);
+            self.upstream = upstream && self.cursor == position;
+        } else if self.hover.as_ref()
+            != Self::hovered_link(layout, event.position).map(|item| &item.source)
+        {
             cx.notify();
         }
+    }
+
+    fn expire_message(&mut self, cx: &mut Context<Self>) {
+        let Some(message) = self.message.as_ref() else {
+            self.message_timeout = None;
+            return;
+        };
+        if self
+            .message_timeout
+            .as_ref()
+            .is_some_and(|(shown, _)| shown == message)
+        {
+            return;
+        }
+        let timer = cx.background_executor().timer(Duration::from_secs(5));
+        let task = cx.spawn(async move |editor, cx| {
+            timer.await;
+            let _ = editor.update(cx, |editor, cx| {
+                editor.message = None;
+                cx.notify();
+            });
+        });
+        self.message_timeout = Some((message.clone(), task));
     }
 }
 
@@ -531,9 +569,10 @@ impl EntityInputHandler for Editor {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
+        let offset = from_utf16(self.source(), range).start;
         self.layout
             .as_ref()?
-            .bounds_at(from_utf16(self.source(), range).start)
+            .bounds_at(offset, offset == self.cursor && self.upstream)
     }
 
     fn character_index_for_point(
@@ -547,260 +586,410 @@ impl EntityInputHandler for Editor {
     }
 }
 
+const HORIZONTAL_PADDING: f32 = 28.;
+const VERTICAL_PADDING: f32 = 24.;
+
+fn wrap_width(viewport_width: Pixels) -> Pixels {
+    (viewport_width - px(2. * HORIZONTAL_PADDING + 2.)).max(px(1.))
+}
+
 impl Render for Editor {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let layout = self.shape(window, cx);
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let editor = cx.entity();
+        // The Shell can change the body width without resizing the window. Use
+        // the space GPUI assigned us before laying out the scrollable document.
+        canvas(
+            move |bounds, window, cx| {
+                let mut body = editor.update(cx, |editor, cx| editor.body(bounds.size, window, cx));
+                body.prepaint_as_root(bounds.origin, bounds.size.into(), window, cx);
+                body
+            },
+            |_, mut body, window, cx| body.paint(window, cx),
+        )
+        .size_full()
+    }
+}
+
+impl Editor {
+    fn body(
+        &mut self,
+        viewport: Size<Pixels>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::for_window(window);
+        let dark = matches!(
+            window.appearance(),
+            WindowAppearance::Dark | WindowAppearance::VibrantDark
+        );
+        self.expire_message(cx);
+        let previous = self.scroll.bounds();
+        if viewport.width != previous.size.width
+            && self
+                .layout
+                .as_ref()
+                .and_then(|layout| layout.bounds_at(self.cursor, self.upstream))
+                .is_some_and(|caret| previous.intersects(&caret))
+        {
+            self.reveal_caret = true;
+        }
+        let wrap_width = wrap_width(viewport.width);
+        let layout = self.shape_for_width(window, cx, wrap_width);
         let width = layout
             .rows
             .iter()
             .map(|row| row.width)
             .max()
-            .unwrap_or(px(0.));
-        let height = layout.rows.last().map_or(px(26.), |row| row.y + row.height);
+            .unwrap_or(px(0.))
+            .max(wrap_width);
+        let height = layout
+            .rows
+            .last()
+            .map_or(px(26.), |row| row.y + row.height)
+            .max(viewport.height - px(2. * VERTICAL_PADDING));
         let editor = cx.entity();
-        let status = self
-            .message
-            .clone()
-            .or_else(|| self.hover.clone())
-            .unwrap_or_default();
+        let overlay_editor = editor.clone();
         div()
+            .id("editor")
             .size_full()
-            .flex()
-            .flex_col()
-            .bg(rgb(0xffffff))
-            .text_color(rgb(0x172336))
+            .bg(theme.surface)
+            .text_color(theme.text)
+            .overflow_scroll()
+            .track_scroll(&self.scroll)
+            .px(px(HORIZONTAL_PADDING))
+            .py(px(VERTICAL_PADDING))
+            .cursor(CursorStyle::IBeam)
+            .key_context("Editor")
+            .track_focus(&self.focus)
+            .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
+            .on_mouse_move(cx.listener(Self::mouse_move))
+            .on_hover(cx.listener(|editor, hovered, _, cx| {
+                if !hovered && editor.hover.take().is_some() {
+                    cx.notify();
+                }
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|editor, _, _, _| editor.selecting = false),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|editor, _, _, _| editor.selecting = false),
+            )
+            .on_action(cx.listener(|e, _: &Left, _, cx| e.move_horizontal(false, false, cx)))
+            .on_action(cx.listener(|e, _: &Right, _, cx| e.move_horizontal(true, false, cx)))
+            .on_action(cx.listener(|e, _: &SelectLeft, _, cx| e.move_horizontal(false, true, cx)))
+            .on_action(cx.listener(|e, _: &SelectRight, _, cx| e.move_horizontal(true, true, cx)))
+            .on_action(cx.listener(|e, _: &Up, _, cx| e.move_vertical(false, false, cx)))
+            .on_action(cx.listener(|e, _: &Down, _, cx| e.move_vertical(true, false, cx)))
+            .on_action(cx.listener(|e, _: &SelectUp, _, cx| e.move_vertical(false, true, cx)))
+            .on_action(cx.listener(|e, _: &SelectDown, _, cx| e.move_vertical(true, true, cx)))
+            .on_action(cx.listener(|e, _: &SelectAll, _, cx| {
+                let range = e
+                    .active
+                    .as_ref()
+                    .map_or(0..e.source().len(), |section| section.content.clone());
+                e.anchor = range.start;
+                e.cursor = range.end;
+                e.upstream = false;
+                e.reveal_caret = true;
+                e.preferred_x = None;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|e, _: &Backspace, _, cx| e.remove(false, cx)))
+            .on_action(cx.listener(|e, _: &Delete, _, cx| e.remove(true, cx)))
+            .on_action(cx.listener(|e, _: &Newline, window, cx| {
+                e.replace_text_in_range(None, "\n", window, cx)
+            }))
+            .on_action(cx.listener(|e, _: &Copy, _, cx| {
+                if !e.selection().is_empty() {
+                    cx.write_to_clipboard(ClipboardItem::new_string(
+                        e.source()[e.selection()].to_owned(),
+                    ));
+                }
+            }))
+            .on_action(cx.listener(|e, _: &Cut, _, cx| {
+                if !e.selection().is_empty() {
+                    let text = e.source()[e.selection()].to_owned();
+                    if e.replace(e.selection(), "", cx) {
+                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                    }
+                }
+            }))
+            .on_action(cx.listener(|e, _: &Paste, window, cx| {
+                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                    e.replace_text_in_range(None, &text, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|e, _: &Undo, _, cx| {
+                if e.input_enabled
+                    && let Some(previous) = e.undo.pop()
+                {
+                    e.redo.push(e.snapshot());
+                    e.restore(previous, cx);
+                }
+            }))
+            .on_action(cx.listener(|e, _: &Redo, _, cx| {
+                if e.input_enabled
+                    && let Some(next) = e.redo.pop()
+                {
+                    e.undo.push(e.snapshot());
+                    e.restore(next, cx);
+                }
+            }))
             .child(
-                div()
-                    .id("editor")
-                    .w_full()
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_scroll()
-                    .track_scroll(&self.scroll)
-                    .p_4()
-                    .cursor(CursorStyle::IBeam)
-                    .key_context("Editor")
-                    .track_focus(&self.focus)
-                    .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
-                    .on_mouse_move(cx.listener(Self::mouse_move))
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(|editor, _, _, _| editor.selecting = false),
-                    )
-                    .on_mouse_up_out(
-                        MouseButton::Left,
-                        cx.listener(|editor, _, _, _| editor.selecting = false),
-                    )
-                    .on_action(
-                        cx.listener(|e, _: &Left, _, cx| e.move_horizontal(false, false, cx)),
-                    )
-                    .on_action(
-                        cx.listener(|e, _: &Right, _, cx| e.move_horizontal(true, false, cx)),
-                    )
-                    .on_action(
-                        cx.listener(|e, _: &SelectLeft, _, cx| e.move_horizontal(false, true, cx)),
-                    )
-                    .on_action(
-                        cx.listener(|e, _: &SelectRight, _, cx| e.move_horizontal(true, true, cx)),
-                    )
-                    .on_action(cx.listener(|e, _: &Up, _, cx| e.move_vertical(false, false, cx)))
-                    .on_action(cx.listener(|e, _: &Down, _, cx| e.move_vertical(true, false, cx)))
-                    .on_action(
-                        cx.listener(|e, _: &SelectUp, _, cx| e.move_vertical(false, true, cx)),
-                    )
-                    .on_action(
-                        cx.listener(|e, _: &SelectDown, _, cx| e.move_vertical(true, true, cx)),
-                    )
-                    .on_action(cx.listener(|e, _: &SelectAll, _, cx| {
-                        let range = e
-                            .active
-                            .as_ref()
-                            .map_or(0..e.source().len(), |section| section.content.clone());
-                        e.anchor = range.start;
-                        e.cursor = range.end;
-                        e.reveal_caret = true;
-                        e.preferred_x = None;
-                        cx.notify();
-                    }))
-                    .on_action(cx.listener(|e, _: &Backspace, _, cx| e.remove(false, cx)))
-                    .on_action(cx.listener(|e, _: &Delete, _, cx| e.remove(true, cx)))
-                    .on_action(cx.listener(|e, _: &Newline, window, cx| {
-                        e.replace_text_in_range(None, "\n", window, cx)
-                    }))
-                    .on_action(cx.listener(|e, _: &Copy, _, cx| {
-                        if !e.selection().is_empty() {
-                            cx.write_to_clipboard(ClipboardItem::new_string(
-                                e.source()[e.selection()].to_owned(),
-                            ));
+                canvas(
+                    move |bounds, window, cx| {
+                        let layout = Layout {
+                            origin: bounds.origin,
+                            ..layout
+                        };
+                        let (hover, overlay) = overlay_editor.read(cx).overlay(
+                            &layout,
+                            window.content_mask().bounds,
+                            window,
+                        );
+                        let overlay =
+                            overlay.and_then(|overlay| overlay.prepaint(theme, window, cx));
+                        (layout, hover, overlay)
+                    },
+                    move |bounds, (layout, hover, overlay), window, cx| {
+                        let e = editor.read(cx);
+                        let selection = e.selection();
+                        let caret = layout.bounds_at(e.cursor, e.upstream);
+                        let focus = e.focus.clone();
+                        if e.input_enabled {
+                            window.handle_input(
+                                &focus,
+                                ElementInputHandler::new(bounds, editor.clone()),
+                                cx,
+                            );
                         }
-                    }))
-                    .on_action(cx.listener(|e, _: &Cut, _, cx| {
-                        if !e.selection().is_empty() {
-                            let text = e.source()[e.selection()].to_owned();
-                            if e.replace(e.selection(), "", cx) {
-                                cx.write_to_clipboard(ClipboardItem::new_string(text));
+                        let clip = window.content_mask().bounds;
+                        let top = clip.top() - layout.origin.y;
+                        let bottom = clip.bottom() - layout.origin.y;
+                        let first = layout.rows.partition_point(|row| row.y + row.height <= top);
+                        for row in layout.rows[first..].iter().take_while(|row| row.y < bottom) {
+                            for item in &row.items {
+                                let top = layout.origin + point(item.left, row.y);
+                                let framed = item.framed_graphic()
+                                    && matches!(&item.paint, ItemPaint::Graphic(_));
+                                if framed {
+                                    window.paint_quad(quad(
+                                        Bounds::new(
+                                            top + point(px(0.), px(4.)),
+                                            size(item.width, row.height - px(8.)),
+                                        ),
+                                        px(8.),
+                                        theme.preview,
+                                        gpui::Edges::all(px(1.)),
+                                        theme.border,
+                                        Default::default(),
+                                    ));
+                                }
+                                if let ItemPaint::Block(block) = &item.paint {
+                                    block.paint_frame(top, theme, window);
+                                }
+                                let image_bounds = if let ItemPaint::Graphic(graphic) = &item.paint
+                                {
+                                    let bounds = Bounds::new(
+                                        top + point(
+                                            px(if framed { 12. } else { 0. }),
+                                            (row.height - graphic.height) / 2.,
+                                        ),
+                                        size(graphic.width, graphic.height),
+                                    );
+                                    // The math renderer outputs dark glyphs on a transparent raster.
+                                    if dark
+                                        && item.target.as_ref().is_some_and(|section| {
+                                            matches!(
+                                                section.kind,
+                                                SectionKind::InlineMath | SectionKind::DisplayMath
+                                            )
+                                        })
+                                    {
+                                        window.paint_quad(fill(bounds, rgb(0xffffff)));
+                                    }
+                                    Some(bounds)
+                                } else {
+                                    None
+                                };
+                                let start = selection.start.max(item.source.start);
+                                let end = selection.end.min(item.source.end);
+                                if start < end {
+                                    let x = item.x(start);
+                                    window.paint_quad(fill(
+                                        Bounds::new(
+                                            layout.origin + point(x, row.y),
+                                            size(item.x(end) - x, row.height),
+                                        ),
+                                        theme.selection,
+                                    ));
+                                }
+                                match &item.paint {
+                                    ItemPaint::Text(line) => {
+                                        let _ = line.paint(top, row.height, window, cx);
+                                    }
+                                    ItemPaint::Block(block) => block.paint_text(top, window, cx),
+                                    ItemPaint::Graphic(graphic) => {
+                                        let _ = window.paint_image(
+                                            image_bounds.expect("a graphic has image bounds"),
+                                            Default::default(),
+                                            graphic.image.clone(),
+                                            0,
+                                            false,
+                                        );
+                                    }
+                                }
                             }
                         }
-                    }))
-                    .on_action(cx.listener(|e, _: &Paste, window, cx| {
-                        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                            e.replace_text_in_range(None, &text, window, cx);
-                        }
-                    }))
-                    .on_action(cx.listener(|e, _: &Undo, _, cx| {
-                        if e.input_enabled
-                            && let Some(previous) = e.undo.pop()
+                        if selection.is_empty()
+                            && focus.is_focused(window)
+                            && let Some(caret) = caret
                         {
-                            e.redo.push(e.snapshot());
-                            e.restore(previous, cx);
+                            window.paint_quad(fill(caret, theme.accent));
                         }
-                    }))
-                    .on_action(cx.listener(|e, _: &Redo, _, cx| {
-                        if e.input_enabled
-                            && let Some(next) = e.redo.pop()
-                        {
-                            e.undo.push(e.snapshot());
-                            e.restore(next, cx);
+                        if let Some(mut overlay) = overlay {
+                            overlay.paint(window, cx);
                         }
-                    }))
-                    .child(
-                        canvas(
-                            move |bounds, _, _| Layout {
-                                origin: bounds.origin
-                                    + point(
-                                        ((bounds.size.width - width.max(px(620.))) / 2.)
-                                            .max(px(0.)),
-                                        px(0.),
-                                    ),
-                                ..layout
-                            },
-                            move |bounds, layout, window, cx| {
-                                let e = editor.read(cx);
-                                let selection = e.selection();
-                                let cursor = e.cursor;
-                                let focus = e.focus.clone();
-                                if e.input_enabled {
-                                    window.handle_input(
-                                        &focus,
-                                        ElementInputHandler::new(bounds, editor.clone()),
-                                        cx,
-                                    );
-                                }
-                                for row in &layout.rows {
-                                    for item in &row.items {
-                                        let top = layout.origin + point(item.left, row.y);
-                                        let framed = item.framed_graphic()
-                                            && matches!(&item.paint, ItemPaint::Graphic(_));
-                                        if framed {
-                                            window.paint_quad(quad(
-                                                Bounds::new(
-                                                    top + point(px(0.), px(4.)),
-                                                    size(item.width, row.height - px(8.)),
-                                                ),
-                                                px(8.),
-                                                rgb(0xf9fbff),
-                                                gpui::Edges::all(px(1.)),
-                                                rgb(0xd3dce9),
-                                                Default::default(),
-                                            ));
-                                        }
-                                        if let ItemPaint::Block(block) = &item.paint {
-                                            block.paint_frame(top, window);
-                                        }
-                                        let start = selection.start.max(item.source.start);
-                                        let end = selection.end.min(item.source.end);
-                                        if start < end {
-                                            let x = item.x(start);
-                                            window.paint_quad(fill(
-                                                Bounds::new(
-                                                    layout.origin + point(x, row.y),
-                                                    size(item.x(end) - x, row.height),
-                                                ),
-                                                rgba(0x4a86ed50),
-                                            ));
-                                        }
-                                        match &item.paint {
-                                            ItemPaint::Text(line) => {
-                                                let _ = line.paint(top, row.height, window, cx);
-                                            }
-                                            ItemPaint::Block(block) => {
-                                                block.paint_text(top, window, cx)
-                                            }
-                                            ItemPaint::Graphic(graphic) => {
-                                                let _ = window.paint_image(
-                                                    Bounds::new(
-                                                        top + point(
-                                                            px(if framed { 12. } else { 0. }),
-                                                            (row.height - graphic.height) / 2.,
-                                                        ),
-                                                        size(graphic.width, graphic.height),
-                                                    ),
-                                                    Default::default(),
-                                                    graphic.image.clone(),
-                                                    0,
-                                                    false,
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                                if selection.is_empty()
-                                    && focus.is_focused(window)
-                                    && let Some(caret) = layout.bounds_at(cursor)
-                                {
-                                    window.paint_quad(fill(caret, rgb(0x1463b7)));
-                                }
-                                editor.update(cx, |e, _| {
-                                    if std::mem::take(&mut e.reveal_caret)
-                                        && focus.is_focused(window)
-                                        && let Some(caret) = layout.bounds_at(cursor)
-                                        && reveal_caret(&e.scroll, caret)
-                                    {
-                                        window.on_next_frame(|window, _| window.refresh());
-                                    }
-                                    e.layout = Some(layout);
-                                });
-                            },
-                        )
-                        .w(width + px(2.))
-                        .min_w_full()
-                        .h(height)
-                        .min_h_full(),
-                    ),
+                        editor.update(cx, |e, _| {
+                            if std::mem::take(&mut e.reveal_caret)
+                                && focus.is_focused(window)
+                                && let Some(caret) = caret
+                                && reveal_caret(&e.scroll, caret)
+                            {
+                                window.on_next_frame(|window, _| window.refresh());
+                            }
+                            e.layout = Some(layout);
+                            e.hover = hover;
+                        });
+                    },
+                )
+                .w(width + px(2.))
+                .h(height),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_2()
-                    .px_3()
-                    .py_1()
-                    .text_xs()
-                    .text_color(rgb(0x475569))
-                    .bg(rgb(0xf2f5fa))
-                    .border_t_1()
-                    .border_color(rgb(0xd3dce9))
-                    .min_h(px(26.))
-                    .child(div().flex_none().child("UTF-8 Markdown"))
-                    .when(!status.is_empty(), |bar| {
-                        bar.child(div().min_w_0().truncate().child(status))
-                    })
-                    .when(self.has_blocked_images, |status| {
-                        status.child(
-                            div()
-                                .id("allow-remote-images")
-                                .text_color(rgb(0x145aac))
-                                .cursor_pointer()
-                                .on_click(cx.listener(|e, _, _, cx| {
-                                    e.allow_remote_images = true;
-                                    cx.notify();
-                                }))
-                                .child("Load remote images for this document"),
-                        )
-                    }),
+            .into_any_element()
+    }
+
+    fn overlay(
+        &self,
+        layout: &Layout,
+        viewport: Bounds<Pixels>,
+        window: &Window,
+    ) -> (Option<Range<usize>>, Option<Overlay>) {
+        let pointer = window.mouse_position();
+        let link = (!self.selecting && viewport.contains(&pointer))
+            .then(|| Self::hovered_link(layout, pointer))
+            .flatten();
+        let hover = link.map(|item| item.source.clone());
+        let caret = (self.selection().is_empty() && self.focus.is_focused(window))
+            .then(|| layout.bounds_at(self.cursor, self.upstream))
+            .flatten();
+        if let Some(message) = &self.message {
+            return (
+                hover,
+                Some(Overlay {
+                    text: message.clone(),
+                    anchor: None,
+                    viewport,
+                    caret,
+                }),
+            );
+        }
+        let overlay = link.and_then(|item| {
+            let section = item.target.as_ref()?;
+            let text = match self.link_target(section) {
+                Ok(crate::media::Target::Web(url)) => url.to_string(),
+                Ok(crate::media::Target::Local(path)) => path.display().to_string(),
+                Err(_) => section.destination.clone().unwrap_or_default(),
+            };
+            let row = layout.row_at(pointer);
+            let anchor = Bounds::new(
+                layout.origin + point(item.left, row.y),
+                size(item.width, row.height),
+            );
+            (!text.is_empty()).then_some(Overlay {
+                text,
+                anchor: Some(anchor),
+                viewport,
+                caret,
+            })
+        });
+        (hover, overlay)
+    }
+}
+
+struct Overlay {
+    text: String,
+    anchor: Option<Bounds<Pixels>>,
+    viewport: Bounds<Pixels>,
+    caret: Option<Bounds<Pixels>>,
+}
+
+impl Overlay {
+    fn prepaint(self, theme: Theme, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
+        let viewport = self.viewport.inset(px(10.));
+        if viewport.size.width <= px(0.) || viewport.size.height <= px(0.) {
+            return None;
+        }
+        let (background, foreground) = if self.anchor.is_some() {
+            (theme.tooltip, theme.on_tooltip)
+        } else {
+            (theme.error_bg, theme.error)
+        };
+        // This element has neither event handlers nor a hitbox. It floats over
+        // the scroll viewport without consuming space or intercepting input.
+        let mut element = div()
+            .max_w(viewport.size.width.min(px(440.)))
+            .max_h(viewport.size.height)
+            .overflow_hidden()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .text_sm()
+            .bg(background)
+            .text_color(foreground)
+            .child(self.text)
+            .into_any_element();
+        let size = element.layout_as_root(
+            size(AvailableSpace::MaxContent, AvailableSpace::MaxContent),
+            window,
+            cx,
+        );
+        let mut origin = if let Some(anchor) = self.anchor {
+            let below = anchor.bottom() + px(4.);
+            let above = anchor.top() - size.height - px(4.);
+            point(
+                anchor.left(),
+                if below + size.height <= viewport.bottom() {
+                    below
+                } else {
+                    above
+                },
             )
+        } else {
+            viewport.bottom_right() - point(size.width, size.height)
+        };
+        origin.x = origin.x.clamp(
+            viewport.left(),
+            (viewport.right() - size.width).max(viewport.left()),
+        );
+        origin.y = origin.y.clamp(
+            viewport.top(),
+            (viewport.bottom() - size.height).max(viewport.top()),
+        );
+        if self
+            .caret
+            .is_some_and(|caret| caret.intersects(&Bounds::new(origin, size)))
+        {
+            origin.y = if origin.y > viewport.center().y {
+                viewport.top()
+            } else {
+                (viewport.bottom() - size.height).max(viewport.top())
+            };
+        }
+        element.prepaint_at(origin, window, cx);
+        Some(element)
     }
 }
 
@@ -897,7 +1086,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn caret_reveal_scrolls_both_axes_after_paste(cx: &mut TestAppContext) {
+    fn caret_reveal_scrolls_vertically_after_wrapped_paste(cx: &mut TestAppContext) {
         let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(String::new(), window, cx));
         cx.simulate_resize(size(px(360.), px(240.)));
         cx.update(|window, cx| {
@@ -913,9 +1102,253 @@ mod tests {
         cx.run_until_parked();
         cx.update(|_, cx| {
             let e = editor.read(cx);
-            assert!(e.scroll.offset().x < px(0.));
+            assert_eq!(e.scroll.offset().x, px(0.));
+            assert_eq!(e.scroll.max_offset().width, px(0.));
             assert!(e.scroll.offset().y < px(0.));
         });
+    }
+
+    #[gpui::test]
+    fn wrapping_tracks_the_editor_pane_and_keeps_a_fixed_left_edge(cx: &mut TestAppContext) {
+        struct Pane {
+            editor: gpui::Entity<Editor>,
+            width: Pixels,
+        }
+        impl Render for Pane {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().w(self.width).h_full().child(self.editor.clone())
+            }
+        }
+        let source = format!(
+            "# {}\n\n{}",
+            "A wide **heading** ".repeat(5),
+            "A regular paragraph with *emphasis* and **bold**. ".repeat(10)
+        );
+        let (pane, cx) = cx.add_window_view(|window, cx| Pane {
+            editor: cx.new(|cx| Editor::new(source.clone(), window, cx)),
+            width: px(240.),
+        });
+        let check = |editor: &Editor, width| {
+            assert_eq!(editor.source(), source);
+            assert_eq!(editor.scroll.bounds().size.width, width);
+            assert_eq!(editor.scroll.max_offset().width, px(0.));
+            let layout = editor.layout.as_ref().unwrap();
+            assert_eq!(layout.origin.x, px(HORIZONTAL_PADDING));
+            assert!(layout.rows.iter().all(|row| row.width <= wrap_width(width)));
+            layout.rows.len()
+        };
+        let narrow = cx.update(|_, cx| check(pane.read(cx).editor.read(cx), px(240.)));
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.width = px(420.);
+                cx.notify();
+            })
+        });
+        cx.run_until_parked();
+        assert!(cx.update(|_, cx| check(pane.read(cx).editor.read(cx), px(420.))) < narrow);
+    }
+
+    #[gpui::test]
+    fn caret_can_hit_both_sides_of_a_soft_break_and_move_by_visual_row(cx: &mut TestAppContext) {
+        let source = "a".repeat(100);
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source.clone(), window, cx));
+        cx.simulate_resize(size(px(230.), px(600.)));
+        let (position, offset, next_row_y) = cx.update(|_, cx| {
+            let layout = editor.read(cx).layout.as_ref().unwrap();
+            let row = &layout.rows[0];
+            let end_of_row = layout.origin + point(row.width + px(2.), row.height / 2.);
+            let (offset, upstream) = layout.position_at(end_of_row);
+            assert!(upstream);
+            assert_eq!(
+                layout.position_at(layout.origin + point(px(0.), layout.rows[1].y + px(1.))),
+                (offset, false)
+            );
+            (end_of_row, offset, layout.origin.y + layout.rows[1].y)
+        });
+        cx.simulate_click(position, Modifiers::none());
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                assert_eq!(editor.cursor, offset);
+                let caret = editor
+                    .bounds_for_range(offset..offset, editor.scroll.bounds(), window, cx)
+                    .unwrap();
+                assert!(caret.top() < next_row_y);
+                editor.move_vertical(true, true, cx);
+                let caret = editor
+                    .layout
+                    .as_ref()
+                    .unwrap()
+                    .bounds_at(editor.cursor, editor.upstream)
+                    .unwrap();
+                assert_eq!(caret.top(), next_row_y);
+                assert_eq!(editor.anchor, offset);
+                assert!(editor.cursor > offset);
+                assert_eq!(editor.source(), source);
+            })
+        });
+    }
+
+    #[gpui::test]
+    fn wrapped_composition_keeps_graphemes_and_utf16_offsets(cx: &mut TestAppContext) {
+        let grapheme = "👩‍💻e\u{301}";
+        let marked = grapheme.repeat(32);
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(String::new(), window, cx));
+        cx.simulate_resize(size(px(190.), px(680.)));
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.replace_and_mark_text_in_range(None, &marked, None, window, cx);
+            })
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                use unicode_segmentation::UnicodeSegmentation;
+                let units = marked.encode_utf16().count();
+                assert_eq!(editor.marked_text_range(window, cx), Some(0..units));
+                let layout = editor.layout.as_ref().unwrap();
+                assert!(layout.rows.len() > 1);
+                let starts: Vec<_> = marked
+                    .grapheme_indices(true)
+                    .map(|(i, _)| i)
+                    .chain([marked.len()])
+                    .collect();
+                for row in &layout.rows {
+                    assert!(row.width <= wrap_width(px(190.)));
+                    for item in &row.items {
+                        assert!(
+                            starts.contains(&item.source.start)
+                                && starts.contains(&item.source.end)
+                        );
+                    }
+                }
+                let second = &layout.rows[1];
+                let position = layout.origin + point(px(0.), second.y + px(1.));
+                let index = editor
+                    .character_index_for_point(position, window, cx)
+                    .unwrap();
+                let bounds = editor
+                    .bounds_for_range(index..index, editor.scroll.bounds(), window, cx)
+                    .unwrap();
+                assert_eq!(bounds.top(), position.y - px(1.));
+                editor.replace_text_in_range(None, "完成", window, cx);
+                assert_eq!(editor.source(), "完成");
+                assert!(!editor.is_composing());
+            })
+        });
+    }
+
+    #[gpui::test]
+    fn active_link_source_wraps_without_hiding_markdown_bytes(cx: &mut TestAppContext) {
+        let source = format!("[A link](https://example.com/{})", "segment".repeat(16));
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source.clone(), window, cx));
+        cx.simulate_resize(size(px(230.), px(460.)));
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.command(Command::EditLink, window, cx);
+            })
+        });
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert_eq!(e.active.as_ref().unwrap().kind, SectionKind::Link);
+            assert_eq!(e.scroll.max_offset().width, px(0.));
+            let rows = &e.layout.as_ref().unwrap().rows;
+            assert!(rows.len() > 2);
+            let mut end = 0;
+            for item in rows.iter().flat_map(|row| &row.items) {
+                assert_eq!(item.source.start, end);
+                assert!(item.target.is_none());
+                end = item.source.end;
+            }
+            assert_eq!(end, source.len());
+            assert_eq!(e.source(), source);
+        });
+    }
+
+    #[gpui::test]
+    fn a_wide_code_preview_can_still_scroll_horizontally(cx: &mut TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            Editor::new(
+                format!("```\n{}\n```\n\nAfter the preview", "x".repeat(100)),
+                window,
+                cx,
+            )
+        });
+        cx.simulate_resize(size(px(230.), px(260.)));
+        cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            assert!(editor.scroll.max_offset().width > px(0.));
+            let rows = &editor.layout.as_ref().unwrap().rows;
+            assert!(matches!(rows[0].items[0].paint, ItemPaint::Block(_)));
+            assert!(
+                rows.iter()
+                    .skip(1)
+                    .all(|row| row.width <= wrap_width(px(230.)))
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn link_and_message_overlays_do_not_change_layout(cx: &mut TestAppContext) {
+        let executor = cx.executor().clone();
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            Editor::new(
+                "[Link](https://example.com/path)\n\nOther text".into(),
+                window,
+                cx,
+            )
+        });
+        cx.simulate_resize(size(px(345.), px(240.)));
+        let (link, other, viewport) = cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            let layout = editor.layout.as_ref().unwrap();
+            (
+                layout.origin + point(px(8.), px(10.)),
+                layout
+                    .bounds_at(editor.source().len(), false)
+                    .unwrap()
+                    .center(),
+                editor.scroll.bounds(),
+            )
+        });
+        cx.simulate_mouse_move(link, None, Modifiers::none());
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let editor = editor.read(cx);
+            assert!(editor.hover.is_some());
+            let layout = editor.layout.as_ref().unwrap();
+            let (_, tooltip) = editor.overlay(layout, viewport, window);
+            assert_eq!(tooltip.unwrap().text, "https://example.com/path");
+            assert_eq!(editor.scroll.bounds(), viewport);
+        });
+        cx.simulate_mouse_move(other, None, Modifiers::none());
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            editor.update(cx, |editor, cx| {
+                assert!(editor.hover.is_none());
+                editor.message = Some("Cannot edit this Markdown range".into());
+                cx.notify();
+            })
+        });
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            assert!(editor.message.is_some());
+            assert_eq!(editor.scroll.bounds(), viewport);
+            assert_eq!(
+                editor
+                    .layout
+                    .as_ref()
+                    .unwrap()
+                    .bounds_at(editor.source().len(), false)
+                    .unwrap()
+                    .center(),
+                other
+            );
+        });
+        executor.advance_clock(Duration::from_secs(5));
+        cx.run_until_parked();
+        cx.update(|_, cx| assert!(editor.read(cx).message.is_none()));
     }
 
     #[gpui::test]
@@ -926,7 +1359,7 @@ mod tests {
         cx.update(|_, cx| {
             editor.update(cx, |e, cx| {
                 let layout = e.layout.as_ref().unwrap();
-                assert!(layout.bounds_at(5).is_some());
+                assert!(layout.bounds_at(5, false).is_some());
                 assert_eq!(layout.step(3, true), 5);
                 e.move_to(5, false, cx);
                 e.remove(false, cx);
@@ -956,7 +1389,7 @@ mod tests {
                 let editor = editor.read(cx);
                 assert_eq!(editor.cursor, heading.len());
                 let layout = editor.layout.as_ref().unwrap();
-                assert!(layout.bounds_at(editor.cursor).is_some());
+                assert!(layout.bounds_at(editor.cursor, editor.upstream).is_some());
                 assert_eq!(
                     layout.index_at(layout.origin + point(px(500.), px(0.))),
                     heading.len()
@@ -1004,7 +1437,7 @@ mod tests {
                 e.activate(block.unwrap(), false, cx);
                 let layout = e.shape(window, cx);
                 assert_eq!(e.cursor, "```mermaid\n".len());
-                assert!(layout.bounds_at(e.cursor).is_some());
+                assert!(layout.bounds_at(e.cursor, e.upstream).is_some());
                 assert_eq!(layout.index_at(point(px(40.), px(0.))), e.cursor);
                 assert_eq!(e.source(), source);
             });
@@ -1051,7 +1484,11 @@ mod tests {
         });
         cx.update(|_, cx| {
             editor.update(cx, |e, cx| {
-                assert!(e.has_blocked_images);
+                assert!(e.has_blocked_images());
+                e.allow_remote_images(cx);
+                assert!(!e.has_blocked_images());
+                e.set_path(None, None);
+                assert!(e.has_blocked_images());
                 assert_eq!(e.image_requests, 0);
                 assert!(e.images.is_empty());
                 e.images
@@ -1117,7 +1554,7 @@ mod tests {
                 .layout
                 .as_ref()
                 .unwrap()
-                .bounds_at(source.len())
+                .bounds_at(source.len(), false)
                 .unwrap()
                 .center()
         });
@@ -1161,9 +1598,9 @@ mod tests {
                 })
                 .expect("the formula must render as a graphic");
             (
-                layout.bounds_at(heading).unwrap().center(),
+                layout.bounds_at(heading, false).unwrap().center(),
                 formula,
-                layout.bounds_at(paragraph).unwrap().center(),
+                layout.bounds_at(paragraph, false).unwrap().center(),
             )
         });
         cx.simulate_click(heading, Modifiers::none());
@@ -1309,7 +1746,7 @@ mod tests {
             e.layout
                 .as_ref()
                 .unwrap()
-                .bounds_at(e.source().find("Paragraph").unwrap())
+                .bounds_at(e.source().find("Paragraph").unwrap(), false)
                 .unwrap()
                 .center()
         });
