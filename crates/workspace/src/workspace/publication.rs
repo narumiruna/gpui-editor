@@ -183,6 +183,11 @@ fn same_after_rename(actual: &Stamp, expected: &Stamp) -> bool {
         && actual.owner == expected.owner
 }
 
+pub(super) fn open_search_file(workspace: &Workspace, path: &Path) -> io::Result<File> {
+    let (_, name, directory) = destination(workspace, path)?;
+    directory.open_file(&name, libc::O_RDONLY)
+}
+
 fn destination<'a>(workspace: &Workspace, path: &'a Path) -> io::Result<(&'a Path, CString, Dir)> {
     let parent = path.parent().expect("an absolute document has a parent");
     let name = basename(path.file_name().expect("a document has a name"))?;

@@ -53,6 +53,28 @@ const SHELL_ICONS: &[(&str, &str)] = &[
     ),
     ("More tools", glyph!("M5 12h.01M12 12h.01M19 12h.01")),
     ("Workspace", glyph!("M3 6h7l2 2h9v11H3z")),
+    (
+        "Tree",
+        glyph!("M4 4v15m0-12h6m-6 10h6m0-12h10v5H10zm0 10h10v5H10z"),
+    ),
+    (
+        "Recent",
+        glyph!("M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-5v5l3 2"),
+    ),
+    (
+        "Pins",
+        glyph!("m11 3 8 5-4 4 1 5-2 2-9-6 1-2 5-2zm-2 13-4 5"),
+    ),
+    ("Outline", glyph!("M4 6h16m-12 6h12m-8 6h8")),
+    (
+        "Search",
+        glyph!("M16 10a6 6 0 1 1-12 0 6 6 0 0 1 12 0Zm-2 4 6 6"),
+    ),
+    ("Pin file", glyph!("M8 3h8l-1 6 3 4v2H6v-2l3-4zm4 12v6")),
+    (
+        "Unpin file",
+        glyph!("m8 3 8 0-1 6 3 4v2H6v-2l3-4zm4 12v6M3 3l18 18"),
+    ),
     ("File", glyph!("M6 3h8l4 4v14H6zM14 3v5h5M9 12h6m-6 4h6")),
     ("Hide Sidebar", glyph!("m14 6-6 6 6 6")),
     ("Show Sidebar", glyph!("m10 6 6 6-6 6")),

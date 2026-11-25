@@ -363,6 +363,13 @@ fn switching_saving_and_closing_wait_for_committed_ime_text(cx: &mut TestAppCont
         assert!(editor.focus_handle(cx).is_focused(window));
         assert!(editor.read(cx).is_composing());
     });
+    click_tool(cx, "Hide Sidebar");
+    cx.update(|window, cx| {
+        assert!(!shell.read(cx).sidebar.visible);
+        assert!(editor.focus_handle(cx).is_focused(window));
+        assert!(editor.read(cx).is_composing());
+    });
+    click_tool(cx, "Show Sidebar");
     start(cx, &shell, Intent::Save);
     cx.update(|_, cx| assert!(shell.read(cx).active.is_none()));
     assert!(!cx.simulate_close());
@@ -537,6 +544,312 @@ fn nested_tree_preserves_selection_and_expansion_when_sidebar_is_hidden(cx: &mut
         assert_eq!(shell.selected, Some(id));
         assert_eq!(editor.read(cx).source(), "Changed");
     });
+}
+
+#[gpui::test]
+fn sidebar_views_fit_and_preserve_the_tree_at_minimum_width(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    fixture.document("notes/start.md", "# Start");
+    for index in 0..30 {
+        fixture.document(&format!("file-{index:02}.md"), "contents");
+    }
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    cx.simulate_resize(size(px(560.), px(360.)));
+    cx.run_until_parked();
+    let grip = cx.debug_bounds("resize-sidebar").unwrap().center();
+    let button = MouseButton::Left;
+    cx.simulate_mouse_down(grip, button, Modifiers::none());
+    for distance in [10., 70.] {
+        cx.simulate_mouse_move(
+            grip - point(px(distance), px(0.)),
+            button,
+            Modifiers::none(),
+        );
+    }
+    cx.simulate_mouse_up(grip - point(px(70.), px(0.)), button, Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(cx.debug_bounds("sidebar").unwrap().size.width, px(184.));
+    for (tab, panel) in [
+        ("sidebar-tab-Recent", "workspace-recent"),
+        ("sidebar-tab-Pins", "workspace-pins"),
+        ("sidebar-tab-Outline", "document-outline"),
+        ("sidebar-tab-Search", "workspace-search-empty"),
+        ("sidebar-tab-Tree", "workspace-tree"),
+    ] {
+        let bounds = cx.debug_bounds(tab).unwrap();
+        assert!(bounds.size.width >= px(28.));
+        assert!(bounds.top() >= cx.debug_bounds("Hide Sidebar").unwrap().bottom());
+        assert!(bounds.right() <= cx.debug_bounds("resize-sidebar").unwrap().left());
+        click_tool(cx, tab);
+        assert!(cx.debug_bounds(panel).is_some(), "{panel}");
+    }
+    fixture.open(cx, &shell);
+    click_tool(cx, "workspace-folder-1");
+    click_tool(cx, "workspace-file-0");
+    let (id, editor) = replace_current(cx, &shell, "# Unsaved heading");
+    let list = cx.debug_bounds("workspace-tree").unwrap();
+    cx.simulate_event(ScrollWheelEvent {
+        position: list.center(),
+        delta: ScrollDelta::Pixels(point(px(0.), px(-260.))),
+        modifiers: Modifiers::none(),
+        touch_phase: TouchPhase::Moved,
+    });
+    cx.run_until_parked();
+    let scrolled = cx.debug_bounds("workspace-file-0").unwrap().top();
+    assert!(scrolled < list.top());
+    click_tool(cx, "sidebar-tab-Outline");
+    assert!(cx.debug_bounds("outline-heading-0").is_some());
+    click_tool(cx, "Hide Sidebar");
+    click_tool(cx, "Show Sidebar");
+    assert!(cx.debug_bounds("outline-heading-0").is_some());
+    click_tool(cx, "sidebar-tab-Tree");
+    assert_eq!(cx.debug_bounds("workspace-file-0").unwrap().top(), scrolled);
+    assert!(cx.debug_bounds("workspace-file-30").is_some());
+    cx.update(|_, cx| {
+        let shell = shell.read(cx);
+        assert_eq!(shell.selected, Some(id));
+        assert_eq!(editor.read(cx).source(), "# Unsaved heading");
+        assert!(shell.current().unwrap().dirty(cx));
+    });
+}
+
+#[gpui::test]
+fn sidebar_drag_reorders_only_the_sidebar_and_only_inside_its_strip(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let first = fixture.document("first.md", "initial");
+    let second = fixture.document("second.md", "other");
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    fixture.open(cx, &shell);
+    start(cx, &shell, Intent::Open(first.clone()));
+    start(cx, &shell, Intent::Open(second.clone()));
+    let (selected, editor) = replace_current(cx, &shell, "unsaved");
+    fn drag(cx: &mut VisualTestContext, from: &'static str, to: &'static str) {
+        let source = cx.debug_bounds(from).unwrap().center();
+        let dest = cx.debug_bounds(to).unwrap().center();
+        let button = MouseButton::Left;
+        cx.simulate_mouse_down(source, button, Modifiers::none());
+        cx.simulate_mouse_move(source + point(px(1.), px(7.)), button, Modifiers::none());
+        cx.simulate_mouse_move(dest, button, Modifiers::none());
+        cx.simulate_mouse_up(dest, button, Modifiers::none());
+        cx.run_until_parked();
+    }
+    drag(cx, "sidebar-tab-Search", "sidebar-drop-Tree-before");
+    let first_position = cx.debug_bounds("sidebar-tab-Search").unwrap().left();
+    assert!(first_position < cx.debug_bounds("sidebar-tab-Tree").unwrap().left());
+    assert!(cx.debug_bounds("workspace-tree").is_some());
+    click_tool(cx, "Hide Sidebar");
+    click_tool(cx, "Show Sidebar");
+    assert_eq!(
+        cx.debug_bounds("sidebar-tab-Search").unwrap().left(),
+        first_position
+    );
+    drag(cx, "sidebar-tab-Search", "document-tabs");
+    assert_eq!(
+        cx.debug_bounds("sidebar-tab-Search").unwrap().left(),
+        first_position
+    );
+    drag(cx, "sidebar-tab-Search", "sidebar-drop-Outline-after");
+    assert!(
+        cx.debug_bounds("sidebar-tab-Search").unwrap().left()
+            > cx.debug_bounds("sidebar-tab-Outline").unwrap().left()
+    );
+    assert!(cx.debug_bounds("workspace-tree").is_some());
+    cx.update(|_, cx| {
+        let shell = shell.read(cx);
+        assert_eq!(shell.selected, Some(selected));
+        assert_eq!(tab_paths(shell), [&first, &second]);
+        assert_eq!(editor.read(cx).source(), "unsaved");
+    });
+}
+
+#[gpui::test]
+fn sidebar_pin_can_be_focused_and_toggled_once_per_key_press(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let file = fixture.document("note.md", "");
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    fixture.open(cx, &shell);
+    click_tool(cx, "sidebar-tab-Tree");
+    cx.simulate_keystrokes("shift-tab");
+    for (key, pinned) in [("enter", true), ("space", false)] {
+        cx.simulate_keystrokes(key);
+        cx.simulate_event(gpui::KeyUpEvent {
+            keystroke: gpui::Keystroke::parse(key).unwrap(),
+        });
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            let shell = shell.read(cx);
+            let expected = if pinned {
+                std::slice::from_ref(&file)
+            } else {
+                &[]
+            };
+            assert_eq!(shell.sidebar.paths().1, expected);
+            assert!(shell.tabs.is_empty());
+        });
+    }
+}
+
+#[gpui::test]
+fn sidebar_recent_and_pins_follow_successful_opens_and_workspace_changes(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let first = fixture.document("same.md", "initial");
+    let second = fixture.document("nested/same.md", "other");
+    let destination = Fixture::new();
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    fixture.open(cx, &shell);
+    click_tool(cx, "Pin file");
+    cx.update(|_, cx| assert!(shell.read(cx).tabs.is_empty()));
+    click_tool(cx, "sidebar-tab-Pins");
+    click_tool(cx, "workspace-pins-0");
+    let id = cx.update(|_, cx| shell.read(cx).selected.unwrap());
+    start(cx, &shell, Intent::CloseTab(id));
+    assert!(cx.debug_bounds("workspace-pins-0").is_some());
+    click_tool(cx, "workspace-pins-0");
+    click_tool(cx, "Unpin file");
+    cx.update(|_, cx| assert!(shell.read(cx).sidebar.paths().1.is_empty()));
+    assert_eq!(fs::read_to_string(&first).unwrap(), "initial");
+    let (id, editor) = replace_current(cx, &shell, "draft");
+    start(cx, &shell, Intent::Open(second.clone()));
+    start(cx, &shell, Intent::Open(first.clone()));
+    start(
+        cx,
+        &shell,
+        Intent::Open(fixture.workspace.root().join("missing.md")),
+    );
+    click_tool(cx, "sidebar-tab-Recent");
+    assert!(cx.debug_bounds("workspace-recent-1").is_some());
+    cx.update(|_, cx| {
+        assert_eq!(
+            shell.read(cx).sidebar.paths().0,
+            [first.clone(), second.clone()]
+        )
+    });
+    click_tool(cx, "workspace-recent-0");
+    cx.update(|_, cx| {
+        let shell = shell.read(cx);
+        assert_eq!(tab_paths(shell), [&first, &second]);
+        assert_eq!(shell.selected, Some(id));
+        assert_eq!(editor.read(cx).source(), "draft");
+    });
+    click_tool(cx, "sidebar-tab-Tree");
+    click_tool(cx, "Pin file");
+    fixture.open(cx, &shell);
+    click_tool(cx, "sidebar-tab-Pins");
+    let assert_preserved = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            let (recent, pins) = shell.read(cx).sidebar.paths();
+            assert_eq!(recent, [first.clone(), second.clone()]);
+            assert_eq!(pins, std::slice::from_ref(&first));
+        })
+    };
+    assert_preserved(cx);
+    let switch = || Intent::OpenFolder(destination.workspace.root().into());
+    start(cx, &shell, switch());
+    answer(cx, "Cancel");
+    assert_preserved(cx);
+    start(cx, &shell, switch());
+    answer(cx, "Don’t Save");
+    cx.update(|_, cx| {
+        assert_eq!(
+            shell.read(cx).sidebar.paths(),
+            ([].as_slice(), [].as_slice())
+        )
+    });
+}
+
+#[gpui::test]
+fn sidebar_outline_tracks_drafts_and_tab_changes(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let first = fixture.document("first.md", "# First");
+    let second = fixture.document("second.md", "No headings");
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    fixture.open(cx, &shell);
+    start(cx, &shell, Intent::Open(first));
+    let first_id = cx.update(|_, cx| shell.read(cx).selected.unwrap());
+    start(cx, &shell, Intent::Open(second));
+    let second_id = cx.update(|_, cx| shell.read(cx).selected.unwrap());
+    click_tool(cx, "sidebar-tab-Outline");
+    assert!(cx.debug_bounds("outline-no-headings").is_some());
+    click_tool(cx, tab_selector("tab", first_id));
+    assert!(cx.debug_bounds("outline-heading-0").is_some());
+    let (id, editor) = replace_current(cx, &shell, "# First\n\n## 第二個標題");
+    cx.run_until_parked();
+    let selected = selection(cx, &editor);
+    click_tool(cx, "outline-heading-1");
+    assert_eq!(selection(cx, &editor), selected);
+    cx.update(|_, cx| assert_eq!(shell.read(cx).selected, Some(id)));
+    click_tool(cx, tab_selector("tab", second_id));
+    cx.update(|_, cx| {
+        let current = shell.read(cx).current().unwrap();
+        assert_eq!(current.id, second_id);
+        assert!(current.editor.read(cx).headings().is_empty());
+    });
+    click_tool(cx, tab_selector("tab", first_id));
+    assert!(cx.debug_bounds("outline-heading-1").is_some());
+}
+
+#[gpui::test]
+fn sidebar_search_opens_filename_and_content_results_without_overwriting_drafts(
+    cx: &mut TestAppContext,
+) {
+    let fixture = Fixture::new();
+    let intro = "Line\n\n".repeat(50);
+    let first = fixture.document("notes/中文.md", &format!("# Heading\n\n{intro}中文內容"));
+    let second = fixture.document("other.md", &format!("{intro}中文例子"));
+    let destination = Fixture::new();
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    fixture.open(cx, &shell);
+    click_tool(cx, "sidebar-tab-Search");
+    cx.simulate_keystrokes("enter");
+    assert!(cx.debug_bounds("search-result-0").is_none());
+    cx.simulate_input("中文");
+    assert!(cx.debug_bounds("search-result-0").is_none());
+    cx.simulate_keystrokes("enter");
+    assert!(cx.debug_bounds("search-result-2").is_some());
+    click_tool(cx, "search-result-2");
+    cx.update(|_, cx| {
+        let tab = shell.read(cx).current().unwrap();
+        assert_eq!(tab.path(), Some(second.as_path()));
+        assert!(tab.editor.read(cx).vertical_scroll_offset() < px(0.));
+    });
+    click_tool(cx, "search-result-0");
+    cx.update(|_, cx| {
+        let tab = shell.read(cx).current().unwrap();
+        assert_eq!(tab.path(), Some(first.as_path()));
+        assert_eq!(tab.editor.read(cx).vertical_scroll_offset(), px(0.));
+    });
+    click_tool(cx, "search-result-1");
+    cx.update(|_, cx| {
+        let tab = shell.read(cx).current().unwrap();
+        assert!(tab.editor.read(cx).vertical_scroll_offset() < px(0.));
+        assert_eq!(shell.read(cx).tabs.len(), 2);
+    });
+    let (id, editor) = replace_current(cx, &shell, "# Heading\n\nchanged in draft");
+    click_tool(cx, "search-result-1");
+    cx.update(|_, cx| {
+        let shell = shell.read(cx);
+        assert_eq!(shell.selected, Some(id));
+        assert_eq!(tab_paths(shell), [&second, &first]);
+        assert!(shell.error.as_deref().unwrap().contains("out of date"));
+        assert_eq!(editor.read(cx).source(), "# Heading\n\nchanged in draft");
+    });
+    fs::remove_file(second).unwrap();
+    click_tool(cx, "search-result-2");
+    cx.update(|_, cx| assert_eq!(shell.read(cx).selected, Some(id)));
+    click_tool(cx, "sidebar-tab-Search");
+    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_input("absent");
+    cx.update(|_, cx| assert_eq!(shell.read(cx).sidebar.search.idle_query(), Some("absent")));
+    cx.simulate_keystrokes("enter");
+    assert!(cx.debug_bounds("search-no-matches").is_some());
+    start(
+        cx,
+        &shell,
+        Intent::OpenFolder(destination.workspace.root().into()),
+    );
+    answer(cx, "Don’t Save");
+    cx.update(|_, cx| assert_eq!(shell.read(cx).sidebar.search.idle_query(), Some("")));
+    assert!(cx.debug_bounds("workspace-search-input").is_some());
 }
 
 #[gpui::test]

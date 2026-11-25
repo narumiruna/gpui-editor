@@ -1,4 +1,4 @@
-//! Lazy workspace tree and the resizable sidebar that displays it.
+//! Resizable workspace sidebar and its navigation views.
 
 use std::{
     collections::{BTreeMap, HashSet},
@@ -6,7 +6,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use gpui::{Context, CursorStyle, Div, Pixels, ScrollHandle, Window, div, prelude::*, px};
+use gpui::{
+    Context, CursorStyle, Div, Pixels, ScrollHandle, Stateful, Window, div, prelude::*, px,
+};
 
 use super::{DocumentTab, Intent, Shell, filename, window_chrome};
 use crate::{
@@ -15,6 +17,13 @@ use crate::{
     theme::Theme,
     workspace::{DirectoryEntry, EntryKind, Workspace},
 };
+
+mod navigation;
+mod search;
+mod strip;
+
+use search::Search;
+use strip::View;
 
 pub(super) type Snapshot = BTreeMap<PathBuf, Vec<DirectoryEntry>>;
 
@@ -46,29 +55,61 @@ pub(super) struct Sidebar {
     entries: Snapshot,
     expanded: HashSet<PathBuf>,
     scroll: ScrollHandle,
+    recent_scroll: ScrollHandle,
+    pins_scroll: ScrollHandle,
+    outline_scroll: ScrollHandle,
+    view: View,
+    order: [View; 5],
+    recent: Vec<PathBuf>,
+    pins: Vec<PathBuf>,
+    pub(super) search: Search,
 }
 
-impl Default for Sidebar {
-    fn default() -> Self {
+impl Sidebar {
+    pub(super) fn new(window: &mut Window, cx: &mut Context<Shell>) -> Self {
         Self {
             visible: true,
             width: px(198.),
             entries: Snapshot::new(),
             expanded: HashSet::new(),
             scroll: ScrollHandle::new(),
+            recent_scroll: ScrollHandle::new(),
+            pins_scroll: ScrollHandle::new(),
+            outline_scroll: ScrollHandle::new(),
+            view: View::Tree,
+            order: View::DEFAULT_ORDER,
+            recent: Vec::new(),
+            pins: Vec::new(),
+            search: Search::new(window, cx),
         }
     }
-}
 
-impl Sidebar {
     pub(super) fn width(&self, viewport: Pixels) -> Pixels {
         self.width.clamp(px(184.), (viewport * 0.45).max(px(184.)))
     }
 
-    pub(super) fn reset(&mut self, root: &Path, entries: Snapshot) {
+    pub(super) fn reset(
+        &mut self,
+        root: &Path,
+        entries: Snapshot,
+        window: &mut Window,
+        cx: &mut Context<Shell>,
+    ) {
         self.entries = entries;
         self.expanded = HashSet::from([root.to_owned()]);
         self.scroll = ScrollHandle::new();
+        self.recent_scroll = ScrollHandle::new();
+        self.pins_scroll = ScrollHandle::new();
+        self.outline_scroll = ScrollHandle::new();
+        self.recent.clear();
+        self.pins.clear();
+        self.search = Search::new(window, cx);
+    }
+
+    pub(super) fn record_open(&mut self, path: &Path) {
+        self.recent.retain(|entry| entry != path);
+        self.recent.insert(0, path.to_owned());
+        self.recent.truncate(50);
     }
 
     pub(super) fn refresh(&mut self, entries: Snapshot) {
@@ -83,6 +124,11 @@ impl Sidebar {
 
     pub(super) fn loaded(&self) -> Vec<PathBuf> {
         self.entries.keys().cloned().collect()
+    }
+
+    #[cfg(test)]
+    pub(super) fn paths(&self) -> (&[PathBuf], &[PathBuf]) {
+        (&self.recent, &self.pins)
     }
 
     #[cfg(test)]
@@ -112,6 +158,10 @@ impl Sidebar {
     }
 }
 
+fn sidebar_hint(text: &'static str, theme: Theme) -> Div {
+    div().px_1().py_2().text_color(theme.muted).child(text)
+}
+
 struct Resize;
 
 impl Shell {
@@ -134,6 +184,90 @@ impl Shell {
             .children(self.folder_tools(theme, picker, cx))
             .child(window_chrome::drag_region().flex_1().h_full())
             .child(self.sidebar_toggle(theme, picker, cx));
+        let content = match self.sidebar.view {
+            View::Tree => self.file_tree(theme, picker, cx).into_any_element(),
+            View::Recent | View::Pins => self
+                .sidebar_paths(self.sidebar.view, theme, picker, cx)
+                .into_any_element(),
+            View::Outline => self.sidebar_outline(theme, picker, cx).into_any_element(),
+            View::Search => self.sidebar_search(theme, picker, cx).into_any_element(),
+        };
+        Picker::mark(
+            picker,
+            div()
+                .debug_selector(|| "sidebar".into())
+                .relative()
+                .w(width)
+                .h_full()
+                .flex_none()
+                .flex()
+                .flex_col()
+                .tab_group()
+                .on_key_down(
+                    cx.listener(|shell, event: &gpui::KeyDownEvent, window, cx| {
+                        if !shell.can_change_sidebar(cx) {
+                            return;
+                        }
+                        let key = &event.keystroke;
+                        let modifiers = key.modifiers;
+                        match key.key.as_str() {
+                            "tab"
+                                if !modifiers.platform
+                                    && !modifiers.control
+                                    && !modifiers.alt
+                                    && !modifiers.function =>
+                            {
+                                if modifiers.shift {
+                                    window.focus_prev();
+                                } else {
+                                    window.focus_next();
+                                }
+                            }
+                            "escape" if !modifiers.modified() => shell.focus_document(window, cx),
+                            _ => return,
+                        }
+                        window.prevent_default();
+                        cx.stop_propagation();
+                    }),
+                )
+                .bg(theme.panel)
+                .border_r_1()
+                .border_color(theme.border)
+                .child(tools)
+                .child(self.sidebar_strip(width, theme, picker, cx))
+                .child(content)
+                .child(
+                    div()
+                        .id("resize-sidebar")
+                        .debug_selector(|| "resize-sidebar".into())
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .right_0()
+                        .w(px(5.))
+                        .cursor(CursorStyle::ResizeLeftRight)
+                        .hover(move |style| style.bg(theme.accent))
+                        .on_drag(Resize, |_, _, _, cx| cx.new(|_| Resize))
+                        .on_drag_move(cx.listener(
+                            |shell, event: &gpui::DragMoveEvent<Resize>, window, cx| {
+                                shell.sidebar.width = event.event.position.x + px(2.);
+                                shell.sidebar.width =
+                                    shell.sidebar.width(window.viewport_size().width);
+                                cx.notify();
+                            },
+                        )),
+                ),
+            "sidebar",
+            "Workspace sidebar",
+        )
+    }
+
+    fn file_tree(
+        &self,
+        theme: Theme,
+        picker: Option<&Picker>,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
         let mut explorer = div()
             .id("workspace-tree")
             .debug_selector(|| "workspace-tree".into())
@@ -188,8 +322,12 @@ impl Shell {
                 };
                 let color = if active { theme.accent } else { theme.muted };
                 let row = row
+                    .group("sidebar-document")
                     .child(toolbar::icon(glyph, 15.).text_color(color))
-                    .child(div().min_w_0().truncate().child(label));
+                    .child(div().flex_1().min_w_0().truncate().child(label))
+                    .when(kind == EntryKind::Markdown, |row| {
+                        row.child(self.pin_button(path, theme, picker, cx))
+                    });
                 if kind == EntryKind::File {
                     explorer = explorer.child(
                         row.id(gpui::ElementId::Path(path.to_path_buf().into()))
@@ -256,46 +394,13 @@ impl Shell {
                     description,
                 ));
             }
+        } else {
+            explorer = explorer.child(sidebar_hint(
+                "Open a workspace folder to browse files.",
+                theme,
+            ));
         }
-        Picker::mark(
-            picker,
-            div()
-                .debug_selector(|| "sidebar".into())
-                .relative()
-                .w(width)
-                .h_full()
-                .flex_none()
-                .flex()
-                .flex_col()
-                .bg(theme.panel)
-                .border_r_1()
-                .border_color(theme.border)
-                .child(tools)
-                .child(explorer)
-                .child(
-                    div()
-                        .id("resize-sidebar")
-                        .debug_selector(|| "resize-sidebar".into())
-                        .absolute()
-                        .top_0()
-                        .bottom_0()
-                        .right_0()
-                        .w(px(5.))
-                        .cursor(CursorStyle::ResizeLeftRight)
-                        .hover(move |style| style.bg(theme.accent))
-                        .on_drag(Resize, |_, _, _, cx| cx.new(|_| Resize))
-                        .on_drag_move(cx.listener(
-                            |shell, event: &gpui::DragMoveEvent<Resize>, window, cx| {
-                                shell.sidebar.width = event.event.position.x + px(2.);
-                                shell.sidebar.width =
-                                    shell.sidebar.width(window.viewport_size().width);
-                                cx.notify();
-                            },
-                        )),
-                ),
-            "sidebar",
-            "Workspace sidebar",
-        )
+        explorer
     }
 
     pub(super) fn folder_tools(
@@ -334,12 +439,22 @@ impl Shell {
             "Show Sidebar"
         };
         toolbar::marked_button(label, self.active.is_none(), theme, picker)
-            .on_click(cx.listener(|shell, _, _, cx| shell.toggle_sidebar(cx)))
+            .on_click(cx.listener(|shell, _, window, cx| shell.toggle_sidebar(window, cx)))
     }
 
-    pub(super) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
-        if self.active.is_none() && !self.developer.blocks_document_actions() {
+    fn can_change_sidebar(&self, cx: &gpui::App) -> bool {
+        self.active.is_none() && !self.developer.blocks_document_actions() && !self.is_composing(cx)
+    }
+
+    pub(super) fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.active.is_none()
+            && !self.developer.blocks_document_actions()
+            && !self.sidebar.search.is_composing(cx)
+        {
             self.sidebar.visible = !self.sidebar.visible;
+            if !self.sidebar.visible && !self.is_composing(cx) {
+                self.focus_document(window, cx);
+            }
             cx.notify();
         }
     }

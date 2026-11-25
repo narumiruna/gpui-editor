@@ -18,6 +18,16 @@ pub enum SectionKind {
     ReadOnly,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Heading {
+    /// Markdown heading level, from 1 through 6.
+    pub level: u8,
+    /// Plain text from the heading's inline Markdown. May be empty.
+    pub label: String,
+    /// UTF-8 byte offset of the heading's start in the source.
+    pub offset: usize,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Section {
     pub kind: SectionKind,
@@ -105,6 +115,56 @@ impl Document {
         &self.source
     }
 
+    fn parser(&self) -> Parser<'_> {
+        Parser::new_ext(
+            &self.source,
+            Options::ENABLE_MATH
+                | Options::ENABLE_TABLES
+                | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
+                | Options::ENABLE_STRIKETHROUGH,
+        )
+    }
+
+    /// Return headings in source order, using the same Markdown rules as the editor.
+    pub fn headings(&self) -> Vec<Heading> {
+        let mut headings = Vec::new();
+        let mut current: Option<Heading> = None;
+        for (event, source) in self.parser().into_offset_iter() {
+            match event {
+                Event::Start(Tag::Heading { level, .. }) => {
+                    current = Some(Heading {
+                        level: level as u8,
+                        label: String::new(),
+                        offset: source.start,
+                    });
+                }
+                Event::End(TagEnd::Heading(_)) => {
+                    let mut heading = current.take().unwrap();
+                    heading.label = heading
+                        .label
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    headings.push(heading);
+                }
+                _ => {
+                    let Some(heading) = &mut current else {
+                        continue;
+                    };
+                    match event {
+                        Event::Text(text)
+                        | Event::Code(text)
+                        | Event::InlineMath(text)
+                        | Event::DisplayMath(text) => heading.label.push_str(&text),
+                        Event::SoftBreak | Event::HardBreak => heading.label.push(' '),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        headings
+    }
+
     pub fn sections(&self) -> Vec<Section> {
         use SectionKind as K;
 
@@ -113,12 +173,7 @@ impl Document {
         let mut heading: Option<Section> = None;
         let mut fenced_body = None;
         let mut block_preview: Option<Section> = None;
-        let options = Options::ENABLE_MATH
-            | Options::ENABLE_TABLES
-            | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
-            | Options::ENABLE_STRIKETHROUGH;
-
-        for (event, source) in Parser::new_ext(&self.source, options).into_offset_iter() {
+        for (event, source) in self.parser().into_offset_iter() {
             if let Some(section) = &mut block_preview {
                 if section.preview.as_mut().unwrap().consume(event) {
                     sections.push(block_preview.take().unwrap());

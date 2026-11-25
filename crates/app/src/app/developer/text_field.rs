@@ -1,19 +1,32 @@
-//! Plain text input for the feedback modal. Long lines scroll without changing the text.
+//! Plain text input for feedback and search. Long lines scroll without wrapping.
 
-use std::ops::Range;
+use std::{borrow::Cow, ops::Range};
 
 use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, ElementInputHandler, EntityInputHandler,
-    FocusHandle, Focusable, Global, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
-    Pixels, Point, ScrollHandle, ShapedLine, Subscription, TextRun, UTF16Selection, Window,
-    actions, canvas, div, fill, point, prelude::*, px, rgb, rgba, size,
+    EventEmitter, FocusHandle, Focusable, Global, KeyBinding, MouseButton, MouseDownEvent,
+    MouseMoveEvent, Pixels, Point, Rgba, ScrollHandle, ShapedLine, Subscription, TextRun,
+    UTF16Selection, Window, actions, canvas, div, fill, point, prelude::*, px, rgb, rgba, size,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::editor::{Copy, Cut, Paste, SelectAll};
+use crate::{
+    editor::{Copy, Cut, Paste, SelectAll},
+    theme::Theme,
+};
 
 const MAX_BYTES: usize = 16 * 1024;
-const KEY_CONTEXT: &str = "FeedbackTextField";
+const FEEDBACK_CONTEXT: &str = "FeedbackTextField";
+const SEARCH_CONTEXT: &str = "SearchTextField";
+
+/// The user pressed Enter in the search field without an active IME composition.
+pub struct SearchSubmitted;
+
+#[derive(Clone, Copy)]
+enum Mode {
+    Feedback,
+    Search,
+}
 
 struct KeysInstalled;
 impl Global for KeysInstalled {}
@@ -36,10 +49,12 @@ actions!(
         Backspace,
         Delete,
         Newline,
+        SubmitSearch,
     ]
 );
 
 pub struct TextField {
+    mode: Mode,
     focus: FocusHandle,
     blur: Option<Subscription>,
     text: String,
@@ -56,33 +71,48 @@ pub struct TextField {
 
 impl TextField {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        Self::with_mode(Mode::Feedback, cx)
+    }
+
+    pub fn search(cx: &mut Context<Self>) -> Self {
+        Self::with_mode(Mode::Search, cx)
+    }
+
+    fn with_mode(mode: Mode, cx: &mut Context<Self>) -> Self {
         if !cx.has_global::<KeysInstalled>() {
             cx.set_global(KeysInstalled);
-            let context = Some(KEY_CONTEXT);
+            for context in [Some(FEEDBACK_CONTEXT), Some(SEARCH_CONTEXT)] {
+                cx.bind_keys([
+                    KeyBinding::new("left", Left, context),
+                    KeyBinding::new("right", Right, context),
+                    KeyBinding::new("shift-left", SelectLeft, context),
+                    KeyBinding::new("shift-right", SelectRight, context),
+                    KeyBinding::new("cmd-left", LineStart, context),
+                    KeyBinding::new("cmd-right", LineEnd, context),
+                    KeyBinding::new("cmd-shift-left", SelectLineStart, context),
+                    KeyBinding::new("cmd-shift-right", SelectLineEnd, context),
+                    KeyBinding::new("cmd-a", SelectAll, context),
+                    KeyBinding::new("backspace", Backspace, context),
+                    KeyBinding::new("delete", Delete, context),
+                    KeyBinding::new("cmd-c", Copy, context),
+                    KeyBinding::new("cmd-x", Cut, context),
+                    KeyBinding::new("cmd-v", Paste, context),
+                ]);
+            }
+            let feedback = Some(FEEDBACK_CONTEXT);
             cx.bind_keys([
-                KeyBinding::new("left", Left, context),
-                KeyBinding::new("right", Right, context),
-                KeyBinding::new("shift-left", SelectLeft, context),
-                KeyBinding::new("shift-right", SelectRight, context),
-                KeyBinding::new("up", Up, context),
-                KeyBinding::new("down", Down, context),
-                KeyBinding::new("shift-up", SelectUp, context),
-                KeyBinding::new("shift-down", SelectDown, context),
-                KeyBinding::new("cmd-left", LineStart, context),
-                KeyBinding::new("cmd-right", LineEnd, context),
-                KeyBinding::new("cmd-shift-left", SelectLineStart, context),
-                KeyBinding::new("cmd-shift-right", SelectLineEnd, context),
-                KeyBinding::new("cmd-a", SelectAll, context),
-                KeyBinding::new("backspace", Backspace, context),
-                KeyBinding::new("delete", Delete, context),
-                KeyBinding::new("enter", Newline, context),
-                KeyBinding::new("shift-enter", Newline, context),
-                KeyBinding::new("cmd-c", Copy, context),
-                KeyBinding::new("cmd-x", Cut, context),
-                KeyBinding::new("cmd-v", Paste, context),
+                KeyBinding::new("up", Up, feedback),
+                KeyBinding::new("down", Down, feedback),
+                KeyBinding::new("shift-up", SelectUp, feedback),
+                KeyBinding::new("shift-down", SelectDown, feedback),
+                KeyBinding::new("enter", Newline, feedback),
+                KeyBinding::new("shift-enter", Newline, feedback),
+                KeyBinding::new("enter", SubmitSearch, Some(SEARCH_CONTEXT)),
+                KeyBinding::new("shift-enter", Newline, Some(SEARCH_CONTEXT)),
             ]);
         }
         Self {
+            mode,
             focus: cx.focus_handle(),
             blur: None,
             text: String::new(),
@@ -136,6 +166,10 @@ impl TextField {
         if !self.editable {
             return None;
         }
+        let text = match self.mode {
+            Mode::Feedback => Cow::Borrowed(text),
+            Mode::Search => single_line(text),
+        };
         let available = MAX_BYTES - (self.text.len() - range.len());
         let inserted = &text[..text.floor_char_boundary(available)];
         // At the limit, do not erase the selection if none of the input fits.
@@ -246,9 +280,23 @@ impl TextField {
     }
 }
 
+impl EventEmitter<SearchSubmitted> for TextField {}
+
 impl Focusable for TextField {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
+    }
+}
+
+fn single_line(text: &str) -> Cow<'_, str> {
+    const LINE_BREAKS: [char; 7] = [
+        '\n', '\r', '\x0B', '\x0C', '\u{0085}', '\u{2028}', '\u{2029}',
+    ];
+    if text.contains(LINE_BREAKS) {
+        // Replace one code unit at a time to preserve the IME's UTF-16 offsets.
+        Cow::Owned(text.replace(LINE_BREAKS, " "))
+    } else {
+        Cow::Borrowed(text)
     }
 }
 
@@ -414,6 +462,15 @@ impl Row {
     }
 }
 
+#[derive(Clone, Copy)]
+struct FieldColors {
+    surface: Rgba,
+    border: Rgba,
+    text: Rgba,
+    accent: Rgba,
+    selection: Rgba,
+}
+
 struct Layout {
     origin: Point<Pixels>,
     line_height: Pixels,
@@ -421,11 +478,11 @@ struct Layout {
 }
 
 impl Layout {
-    fn shape(text: &str, window: &Window) -> Self {
+    fn shape(text: &str, color: Rgba, window: &Window) -> Self {
         let mut run = TextRun {
             len: 0,
             font: window.text_style().font(),
-            color: rgb(0x172336).into(),
+            color: color.into(),
             background_color: None,
             underline: None,
             strikethrough: None,
@@ -480,6 +537,7 @@ impl Layout {
         &self,
         selection: Range<usize>,
         marked: Option<Range<usize>>,
+        colors: FieldColors,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -500,7 +558,7 @@ impl Layout {
                 let newline_width = if end > row.range.end { px(5.) } else { px(0.) };
                 window.paint_quad(fill(
                     self.rect(i, left.min(right), (right - left).abs() + newline_width),
-                    rgba(0x4a86ed50),
+                    colors.selection,
                 ));
             }
             if let Some(line) = &row.line {
@@ -521,7 +579,7 @@ impl Layout {
                         self.rect(i, left.min(right), (right - left).abs().max(px(1.)));
                     underline.origin.y += self.line_height - px(2.);
                     underline.size.height = px(1.);
-                    window.paint_quad(fill(underline, rgb(0x1463b7)));
+                    window.paint_quad(fill(underline, colors.accent));
                 }
             }
         }
@@ -576,7 +634,40 @@ impl Render for TextField {
                 cx.notify();
             }));
         }
-        let layout = Layout::shape(self.text(), window);
+        let (id, key_context, field_height, colors) = match self.mode {
+            Mode::Feedback => (
+                "feedback-text-field",
+                FEEDBACK_CONTEXT,
+                px(144.),
+                FieldColors {
+                    surface: rgb(0xffffff),
+                    border: rgb(0xd3dce9),
+                    text: rgb(0x172336),
+                    accent: rgb(0x1463b7),
+                    selection: rgba(0x4a86ed50),
+                },
+            ),
+            Mode::Search => {
+                let theme = Theme::for_window(window);
+                (
+                    "search-text-field",
+                    SEARCH_CONTEXT,
+                    px(38.),
+                    FieldColors {
+                        surface: theme.surface,
+                        border: if self.focus.is_focused(window) {
+                            theme.accent
+                        } else {
+                            theme.border
+                        },
+                        text: theme.text,
+                        accent: theme.accent,
+                        selection: theme.selection,
+                    },
+                )
+            }
+        };
+        let layout = Layout::shape(self.text(), colors.text, window);
         let width = layout
             .rows
             .iter()
@@ -586,20 +677,27 @@ impl Render for TextField {
         let height = layout.line_height * layout.rows.len();
         let field = cx.entity();
         div()
-            .id("feedback-text-field")
+            .id(id)
             .w_full()
-            .h(px(144.))
+            .h(field_height)
             .min_w_0()
             .p_2()
             .rounded_md()
             .border_1()
-            .border_color(rgb(0xd3dce9))
-            .bg(rgb(0xffffff))
-            .overflow_scroll()
+            .border_color(colors.border)
+            .bg(colors.surface)
+            .map(|element| match self.mode {
+                Mode::Feedback => element.overflow_scroll(),
+                Mode::Search => element
+                    .tab_index(0)
+                    .flex_none()
+                    .overflow_y_hidden()
+                    .overflow_x_scroll(),
+            })
             .track_scroll(&self.scroll)
             .cursor(CursorStyle::IBeam)
             .track_focus(&self.focus)
-            .key_context(KEY_CONTEXT)
+            .key_context(key_context)
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_move(cx.listener(Self::mouse_move))
             .on_mouse_up(
@@ -629,8 +727,17 @@ impl Render for TextField {
             .on_action(cx.listener(|e, _: &Backspace, _, cx| e.remove(false, cx)))
             .on_action(cx.listener(|e, _: &Delete, _, cx| e.remove(true, cx)))
             .on_action(cx.listener(|e, _: &Newline, window, cx| {
-                e.replace_text_in_range(None, "\n", window, cx);
+                if matches!(e.mode, Mode::Feedback) {
+                    e.replace_text_in_range(None, "\n", window, cx);
+                }
             }))
+            .when(matches!(self.mode, Mode::Search), |element| {
+                element.on_action(cx.listener(|e, _: &SubmitSearch, _, cx| {
+                    if e.editable && !e.is_composing() {
+                        cx.emit(SearchSubmitted);
+                    }
+                }))
+            })
             .on_action(cx.listener(|e, _: &Copy, _, cx| {
                 e.copy(cx);
             }))
@@ -668,9 +775,9 @@ impl Render for TextField {
                             );
                         }
                         let show_caret = input.editable && focused && selection.is_empty();
-                        layout.paint(selection, marked, window, cx);
+                        layout.paint(selection, marked, colors, window, cx);
                         if show_caret {
-                            window.paint_quad(fill(caret, rgb(0x1463b7)));
+                            window.paint_quad(fill(caret, colors.accent));
                         }
                         field.update(cx, |field, _| {
                             field.layout = Some(layout);
@@ -692,6 +799,8 @@ impl Render for TextField {
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
     use gpui::{Image, ImageFormat, TestAppContext};
 
     use super::*;
@@ -807,6 +916,89 @@ mod tests {
                 assert_eq!(field.marked_text_range(window, cx), None);
             })
         });
+    }
+
+    #[gpui::test]
+    fn search_uses_one_row_for_paste_and_scrolls_horizontally(cx: &mut TestAppContext) {
+        let (field, cx) = cx.add_window_view(|_, cx| TextField::search(cx));
+        cx.simulate_resize(size(px(160.), px(160.)));
+        let long = "hello".repeat(100);
+        cx.update(|window, cx| {
+            field.read(cx).focus(window);
+            cx.write_to_clipboard(ClipboardItem::new_string(format!("{long}\r\n好\u{2028}👩‍💻")));
+        });
+        cx.simulate_keystrokes("cmd-v");
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            let field = field.read(cx);
+            assert_eq!(field.text(), format!("{long}  好 👩‍💻"));
+            assert_eq!(field.layout.as_ref().unwrap().rows.len(), 1);
+            assert!(field.scroll.offset().x < px(0.));
+            assert_eq!(field.scroll.offset().y, px(0.));
+        });
+        cx.simulate_keystrokes("shift-left cmd-c cmd-x");
+        cx.update(|_, cx| {
+            assert_eq!(field.read(cx).text(), format!("{long}  好 "));
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().as_deref(),
+                Some("👩‍💻")
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn search_notifies_during_composition_but_submits_only_after_commit(cx: &mut TestAppContext) {
+        let (field, cx) = cx.add_window_view(|_, cx| TextField::search(cx));
+        let observed = Rc::new(RefCell::new(Vec::new()));
+        let submitted = Rc::new(RefCell::new(Vec::new()));
+        let (_observe, _subscribe) = cx.update(|window, cx| {
+            field.read(cx).focus(window);
+            let observe = cx.observe(&field, {
+                let observed = observed.clone();
+                move |field, cx| {
+                    let field = field.read(cx);
+                    observed
+                        .borrow_mut()
+                        .push((field.text().to_owned(), field.is_composing()));
+                }
+            });
+            let subscribe = cx.subscribe(&field, {
+                let submitted = submitted.clone();
+                move |field, _: &SearchSubmitted, cx| {
+                    submitted
+                        .borrow_mut()
+                        .push(field.read(cx).text().to_owned());
+                }
+            });
+            (observe, subscribe)
+        });
+        cx.update(|window, cx| {
+            field.update(cx, |field, cx| {
+                field.replace_and_mark_text_in_range(
+                    None,
+                    "𠮷\u{2028}かな",
+                    Some(3..4),
+                    window,
+                    cx,
+                );
+                assert_eq!(field.marked_text_range(window, cx), Some(0..5));
+                assert_eq!(
+                    field.selected_text_range(false, window, cx).unwrap().range,
+                    3..4
+                );
+            });
+        });
+        cx.simulate_keystrokes("enter");
+        assert!(submitted.borrow().is_empty());
+        assert_eq!(observed.borrow().last(), Some(&("𠮷 かな".into(), true)));
+
+        cx.simulate_input("吉");
+        assert_eq!(observed.borrow().last(), Some(&("吉".into(), false)));
+        cx.simulate_keystrokes("shift-enter");
+        assert!(submitted.borrow().is_empty());
+        cx.simulate_keystrokes("enter");
+        assert_eq!(*submitted.borrow(), ["吉"]);
+        cx.update(|_, cx| assert_eq!(field.read(cx).text(), "吉"));
     }
 
     #[gpui::test]

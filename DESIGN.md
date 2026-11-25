@@ -17,14 +17,19 @@ flowchart TD
     Window --> Sidebar
     Window --> Pane[Editor pane]
     Sidebar --> SidebarToolbar[Folder and file controls]
-    Sidebar --> Tree[Scrollable file tree]
-    Pane --> Tabs[Tab bar]
+    Sidebar --> SidebarTabs[Sidebar tabs]
+    Sidebar --> View[Active scrollable sidebar view]
+    SidebarTabs -.->|Selects| View
+    Pane --> Tabs[Document tabs]
     Pane --> Toolbar[Editor toolbar]
     Pane --> Body[Scrollable document body]
 ```
 
-- Use two full-height columns. Put the file explorer on the left and give the editor the remaining width. Separate the columns with one subtle divider. Do not add a title row, global toolbar, workspace information bar, or bottom status bar.
-- Keep the sidebar controls on top and the tree directly below them. Use chevrons and indentation for folders. Highlight the active file. Resize the sidebar by dragging the divider. Hiding the sidebar must retain the tree state and selected document; show the reopen control in the tab row.
+- Use two full-height columns. Put the sidebar on the left and give the editor the remaining width. Separate the columns with one subtle divider. Do not add a title row, global toolbar, workspace information bar, or bottom status bar.
+- Keep the sidebar toolbar and tab row fixed above the active view. Start with **Tree**, **Recent**, **Pins**, **Outline**, and **Search** in that order, with **Tree** selected. Show one view at a time and give each view its own scroll position. Use the accent to mark selection. At the minimum sidebar width of `184 px`, keep all five tabs available as icons with name tooltips; show text when space allows. Show a prompt when the active view has no content.
+- Show an insertion line when dragging a sidebar tab. Change the order only on drop in the sidebar tab row. Preserve the active sidebar view, and do not switch, save, or reorder document tabs.
+- In **Tree**, use chevrons and indentation for folders and highlight the active file. Show the pin or unpin control on Markdown rows only on hover or keyboard focus; apply the same rule to the remove control in **Pins**. Using those controls must not open, close, or delete a document.
+- Resize the sidebar by dragging the divider. Hiding the sidebar must retain its width, selected view, tab order, view state, and the selected document. Show the reopen control in the document tab row.
 - Start the editor pane with horizontally scrollable tabs, followed by one row of editing tools. Use an accent to identify the selected tab and a marker for unsaved edits. Keep secondary tools in **More tools** and label icon-only controls on hover. At narrow widths, scroll the tool row rather than wrapping it.
 - Give the document the remaining height. Wrap prose to the available width. Keep scrolling independent of the sidebar and top controls. Wide read-only previews can scroll horizontally within the document viewport.
 - Use colors from the window's appearance. Keep the sidebar slightly tinted, the editor surface neutral, and the accent consistent between selection states.

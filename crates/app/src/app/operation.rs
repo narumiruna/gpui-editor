@@ -11,14 +11,14 @@ use super::{
     ActiveOperation, DocumentFile, DocumentTab, Intent, Shell, TabId, Workspace, quit, session,
     sidebar::{Snapshot, snapshot},
 };
-use crate::workspace::DirectoryEntry;
+use crate::workspace::{DirectoryEntry, SearchLocation};
 
 enum Change {
     Folder(Workspace, Snapshot),
     RefreshTree(Snapshot),
     ExpandFolder(PathBuf, Vec<DirectoryEntry>),
-    Open(DocumentFile),
-    Select(TabId),
+    Open(DocumentFile, Option<SearchLocation>),
+    Select(TabId, Option<SearchLocation>),
     Remove(TabId),
     Saved,
     Exit,
@@ -70,7 +70,7 @@ impl Shell {
             Intent::ExpandFolder(_) => {
                 ("Expand workspace folder", "Expand workspace folder failed")
             }
-            Intent::Open(_) => ("Open document", "Open document failed"),
+            Intent::Open(_) | Intent::OpenAt(..) => ("Open document", "Open document failed"),
             Intent::Save => ("Save document", "Save document failed"),
             Intent::CloseTab(_) => ("Close tab", "Close tab failed"),
             Intent::Exit => ("Close editor", "Close editor failed"),
@@ -141,15 +141,24 @@ impl Shell {
                         self.selected = None;
                         self.show_more_tools = false;
                         self.tab_scroll = ScrollHandle::new();
-                        self.sidebar.reset(workspace.root(), entries);
+                        self.sidebar.reset(workspace.root(), entries, window, cx);
                         self.workspace = Some(workspace);
                     }
                     Some(Change::RefreshTree(entries)) => self.sidebar.refresh(entries),
                     Some(Change::ExpandFolder(path, entries)) => self.sidebar.expand(path, entries),
-                    Some(Change::Open(file)) => {
+                    Some(Change::Open(file, location)) => {
+                        self.sidebar.record_open(file.path());
                         self.open_editor(Some(file), window, cx);
+                        self.reveal_search_result(location, cx);
                     }
-                    Some(Change::Select(id)) => self.select_tab(id, window, cx),
+                    Some(Change::Select(id, location)) => {
+                        self.select_tab(id, window, cx);
+                        if let Some(path) = self.current().and_then(DocumentTab::path) {
+                            let path = path.to_owned();
+                            self.sidebar.record_open(&path);
+                        }
+                        self.reveal_search_result(location, cx);
+                    }
                     Some(Change::Remove(id)) => self.remove_tab(id, window, cx),
                     Some(Change::Saved) if exit_queued => {
                         self.start(Intent::Exit, window, cx);
@@ -227,7 +236,12 @@ impl Operation {
                 let id = self.selected.expect("Save requires a selected tab");
                 return Ok(self.save(id, shell, cx).await?.then_some(Change::Saved));
             }
-            Intent::Open(path) => {
+            Intent::Open(_) | Intent::OpenAt(..) => {
+                let (path, location) = match intent {
+                    Intent::Open(path) => (path, None),
+                    Intent::OpenAt(path, location) => (path, Some(location)),
+                    _ => unreachable!(),
+                };
                 let workspace = self
                     .workspace
                     .ok_or("Open a workspace folder before following document links.")?;
@@ -239,9 +253,11 @@ impl Operation {
                             if let Some((_, id)) =
                                 self.open.iter().find(|(open, _)| open == &normalized)
                             {
-                                return Ok(Change::Select(*id));
+                                return Ok(Change::Select(*id, location));
                             }
-                            workspace.read_document(&normalized).map(Change::Open)
+                            workspace
+                                .read_document(&normalized)
+                                .map(|file| Change::Open(file, location))
                         })();
                         result.map_err(|error: std::io::Error| {
                             format!("Could not open {}: {error}", path.display())
