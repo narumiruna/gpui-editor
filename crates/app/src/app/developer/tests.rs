@@ -124,6 +124,11 @@ fn picker_selects_wrapped_controls_and_scrolled_rows_without_activating_them(
     cx.simulate_resize(size(px(560.), px(360.)));
     enable(cx, &shell);
     paired(cx, &shell);
+    let open = cx.debug_bounds("Open Folder…").unwrap();
+    let picker = cx.debug_bounds("developer-picker").unwrap();
+    assert_eq!(picker.top(), open.top());
+    assert!(picker.size.width >= px(100.));
+    assert!(picker.right() <= px(560.));
     let file = workspace.root().join("file-00.md");
     for (button, target) in [("Save", "Save"), ("More tools", "More tools")] {
         click(cx, "developer-picker");

@@ -39,9 +39,9 @@ The app and its internal crates build from source as a workspace. They are not p
 
 ### Developer Mode and Pi
 
-1. Start GPUI Editor with `just run`. In **GPUI Editor → Preferences…**, turn on **Developer Mode**. A target icon appears in the upper-right corner.
+1. Start GPUI Editor with `just run`. In **GPUI Editor → Preferences…**, turn on **Developer Mode**. A **Select element** button with a target icon appears in the upper-right corner.
 2. Start Pi 1.6.0 or later in this repository. Trust the project if you want Pi to load [its local extension](.pi/extensions/gpui-editor.ts). In Pi, run `/gpui-pair`. If Pi finds more than one editor, choose the one to pair. Verify the code in both apps, then choose **Pair** in GPUI Editor.
-3. Click the target icon, then click an element such as **Save**, a sidebar row, or the editing surface. Picking does not run the element's usual action. Press `Esc` to leave picking mode.
+3. Click **Select element**, then click an element such as **Save**, a sidebar row, or the editing surface. Picking does not run the element's usual action. Press `Esc` to leave picking mode.
 4. Write your feedback. Choose **Capture Window** to attach a screenshot of GPUI Editor, or **Paste Image** to attach a PNG, JPEG, or TIFF image from the clipboard. If macOS denies Screen & System Audio Recording, use **Paste Image** or send text only. Review attachments before choosing **Send to Pi**. An image requires an image-capable Pi model.
 
 Feedback goes to the paired session as a user message. If Pi is busy, it follows the current task. Pi may save feedback in its session history or send it to its model provider. A receipt confirms only that the extension handed feedback to Pi. If the connection drops before the receipt, check Pi before resending.

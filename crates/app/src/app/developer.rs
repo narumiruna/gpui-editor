@@ -460,6 +460,8 @@ impl Shell {
     ) -> Option<Stateful<Div>> {
         self.developer.bridge.as_ref()?;
         let connected = self.developer.connected();
+        let ready = connected && enabled;
+        let color = rgb(if ready { 0x21478e } else { 0x475569 });
         let reason = if connected {
             "Select an element for Pi"
         } else {
@@ -469,16 +471,27 @@ impl Shell {
             div()
                 .id("developer-picker")
                 .debug_selector(|| "developer-picker".into())
+                .m_1()
                 .flex_none()
+                .flex()
+                .items_center()
+                .gap_1()
+                .min_h(px(30.))
                 .rounded_md()
-                .p_2()
-                .text_color(rgb(if connected { 0x2859ad } else { 0x64748b }))
-                .child(toolbar::icon("Developer target", 20.))
+                .px_2()
+                .bg(rgb(if ready { 0xe4eeff } else { 0xf2f5fa }))
+                .text_color(color)
+                .text_xs()
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .child(toolbar::icon("Developer target", 18.).text_color(color))
+                .child("Select element")
                 .tooltip(move |_, cx| cx.new(|_| Tooltip(reason)).into())
-                .when(connected && enabled, |el| {
-                    el.cursor_pointer().on_click(
-                        cx.listener(|shell, _, window, cx| shell.start_picker(window, cx)),
-                    )
+                .when(ready, |el| {
+                    el.cursor_pointer()
+                        .hover(|style| style.bg(rgb(0xd3e3ff)))
+                        .on_click(
+                            cx.listener(|shell, _, window, cx| shell.start_picker(window, cx)),
+                        )
                 }),
         )
     }
