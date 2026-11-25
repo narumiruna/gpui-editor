@@ -14,10 +14,10 @@ just run
 
 This builds and starts the app. It uses `/Applications/Xcode.app` by default. If Xcode is installed elsewhere, set `DEVELOPER_DIR` to that installation's `Contents/Developer` directory before running `just run`.
 
-The command takes no path. In the window, choose **Open Folder…**, then select a Markdown file from the sidebar. Use **New** for a blank document and **Save** or `Cmd-S` to save. The sidebar lists only the workspace's top-level `.md` files.
+The command takes no path. In the window, choose **Open Folder…**, then select a Markdown file from the sidebar. Use **New note** for a blank document and **Save** or `Cmd-S` to save. The document bar shows the filename and save status. The sidebar lists only the workspace's top-level `.md` files.
 
-- Use the toolbar icons to format a selection or insert an item. Hover over an icon to see its name. Click front matter, a diagram, or a formula to edit its source. Click outside the item to preview the change; this does not save the file.
-- For links, hover to see the full destination in the bottom bar. Click to open the web browser or follow an in-workspace `.md` link. To edit a link without opening it, place the caret at its edge and choose the **Edit link** icon.
+- Use the labeled toolbar to format a selection, insert a diagram, add an inline formula, or insert a link. **More tools** shows front matter, display formulas, images, and item actions. Click front matter, a diagram, or a formula to edit its source. Click outside the item to preview the change; this does not save the file.
+- For links, hover to see the full destination in the bottom bar. Click to open the web browser or follow an in-workspace `.md` link. To edit a link without opening it, place the caret at its edge and choose **More tools** → **Edit link**.
 - Image previews support local or HTTPS PNG, JPEG, GIF, and WebP still images. Relative paths are based on the document's folder. To fetch HTTPS previews, choose **Load remote images for this document**. The remote host receives the image request; redirects are not followed.
 - The editor supports a subset of Markdown. Inline math cannot span paragraph breaks. The Mermaid renderer supports flat flowcharts; unsupported blocks such as GFM tables are shown as read-only source.
 - Finish or cancel any active input method composition before saving, closing, or switching documents. Then try the action again.

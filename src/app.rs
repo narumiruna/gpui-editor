@@ -4,13 +4,13 @@ use std::path::{Path, PathBuf};
 
 use gpui::{
     App, Application, AsyncWindowContext, Bounds, Context, Entity, FocusHandle, KeyBinding, Menu,
-    MenuItem, OsAction, PathPromptOptions, PromptButton, PromptLevel, SharedString, Stateful,
-    Subscription, TitlebarOptions, Window, WindowBounds, WindowHandle, WindowOptions, actions, div,
-    prelude::*, px, rgb, rgba, size,
+    MenuItem, OsAction, PathPromptOptions, PromptButton, PromptLevel, SharedString, Subscription,
+    TitlebarOptions, Window, WindowBounds, WindowHandle, WindowOptions, actions, div, prelude::*,
+    px, rgb, rgba, size,
 };
 
 use crate::{
-    editor::{self, Editor, OpenLocalDocument},
+    editor::{self, Editor, OpenLocalDocument, toolbar},
     workspace::{DocumentFile, Workspace},
 };
 
@@ -124,6 +124,7 @@ struct Shell {
     current: Option<CurrentDocument>,
     active: Option<ActiveOperation>,
     error: Option<String>,
+    show_more_tools: bool,
 }
 
 enum ActiveOperation {
@@ -178,6 +179,7 @@ impl Shell {
             current: None,
             active: None,
             error: None,
+            show_more_tools: false,
         }
     }
 
@@ -219,6 +221,7 @@ impl Shell {
             },
         );
         let updates = cx.observe(&editor, |_, _, cx| cx.notify());
+        self.show_more_tools = false;
         self.current = Some(CurrentDocument {
             editor,
             file,
@@ -503,45 +506,51 @@ fn filename(path: &Path) -> String {
         .into_owned()
 }
 
-fn button(id: &'static str, label: &'static str, enabled: bool) -> Stateful<gpui::Div> {
-    div()
-        .id(id)
-        .px_3()
-        .py_1()
-        .rounded_md()
-        .border_1()
-        .border_color(rgb(0xcbd5e1))
-        .child(label)
-        .when(enabled, |el| {
-            el.cursor_pointer().hover(|style| style.bg(rgb(0xe2e8f0)))
-        })
-        .when(!enabled, |el| el.text_color(rgb(0x64748b)))
-}
-
 impl Render for Shell {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let busy = self.active.is_some();
-        let can_save = self.current.is_some() && !busy;
-        let mut sidebar = div()
-            .w(px(220.))
+        let current = self.current.as_ref();
+        let can_save = current.is_some() && !busy;
+        let workspace_name = self
+            .workspace
+            .as_ref()
+            .map(|workspace| filename(workspace.root()));
+        let sidebar = div()
+            .w(px(172.))
             .flex_none()
             .flex()
             .flex_col()
             .min_h_0()
             .border_r_1()
-            .border_color(rgb(0xe2e8f0))
-            .bg(rgb(0xf8fafc))
+            .border_color(rgb(0xd3dce9))
+            .bg(rgb(0xf2f5fa))
             .child(
                 div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
                     .px_3()
-                    .py_2()
-                    .truncate()
+                    .py_3()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child(self.workspace.as_ref().map_or_else(
-                        || "No workspace".to_owned(),
-                        |workspace| filename(workspace.root()),
-                    )),
-            );
+                    .child(toolbar::icon("Workspace", 15.).text_color(rgb(0x2859ad)))
+                    .child(
+                        div().min_w_0().truncate().child(
+                            workspace_name
+                                .clone()
+                                .unwrap_or_else(|| "No workspace".into()),
+                        ),
+                    ),
+            )
+            .when(self.workspace.is_some(), |sidebar| {
+                sidebar.child(
+                    div()
+                        .px_3()
+                        .pb_1()
+                        .text_xs()
+                        .text_color(rgb(0x475569))
+                        .child("Workspace files"),
+                )
+            });
         let mut files = div()
             .id("workspace-files")
             .flex_1()
@@ -561,12 +570,19 @@ impl Render for Shell {
                     .id(("file", index))
                     .px_2()
                     .py_1()
+                    .flex()
+                    .items_center()
+                    .gap_2()
                     .rounded_md()
-                    .truncate()
                     .cursor_pointer()
                     .hover(|style| style.bg(rgb(0xe2e8f0)))
-                    .when(active, |el| el.bg(rgb(0xdbeafe)))
-                    .child(filename(&path))
+                    .when(active, |el| {
+                        el.bg(rgb(0xe4eeff))
+                            .text_color(rgb(0x234e9a))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                    })
+                    .child(toolbar::icon("File", 14.).text_color(rgb(0x2859ad)))
+                    .child(div().min_w_0().truncate().child(filename(&path)))
                     .on_click(cx.listener(move |shell, _, window, cx| {
                         shell.start(Intent::Open(path.clone()), window, cx)
                     })),
@@ -581,50 +597,127 @@ impl Render for Shell {
                 },
             ));
         }
-        sidebar = sidebar.child(files);
-        let title = self.current.as_ref().map(|current| {
-            let name = current
-                .file
-                .as_ref()
-                .map_or_else(|| "Untitled.md".to_owned(), |file| filename(file.path()));
-            if current.dirty(cx) {
-                format!("{name} • Unsaved")
-            } else {
-                name
-            }
-        });
-        let toolbar = div()
+        let sidebar = sidebar.child(files);
+        let file_tools = toolbar::group()
+            .child(
+                toolbar::button("Open Folder…", !busy).when(!busy, |button| {
+                    button.on_click(cx.listener(|shell, _, window, cx| {
+                        shell.start(Intent::ChooseFolder, window, cx)
+                    }))
+                }),
+            )
+            .child(toolbar::button("New note", !busy).when(!busy, |button| {
+                button.on_click(
+                    cx.listener(|shell, _, window, cx| shell.start(Intent::New, window, cx)),
+                )
+            }))
+            .child(toolbar::button("Save", can_save).when(can_save, |button| {
+                button.on_click(
+                    cx.listener(|shell, _, window, cx| shell.start(Intent::Save, window, cx)),
+                )
+            }));
+        let mut tools = div()
             .flex()
-            .flex_none()
+            .flex_wrap()
             .items_center()
             .gap_2()
-            .p_2()
-            .bg(rgb(0xf8fafc))
+            .px_2()
+            .py_1()
+            .child(file_tools);
+        let mut more_tools = None;
+        if let Some(current) = current {
+            let edit_enabled = !busy && !current.editor.read(cx).is_composing();
+            let label = if self.show_more_tools {
+                "Fewer tools"
+            } else {
+                "More tools"
+            };
+            tools = tools
+                .children(toolbar::primary_groups(&current.editor, edit_enabled))
+                .child(toolbar::button(label, !busy).when(!busy, |button| {
+                    button.on_click(cx.listener(|shell, _, _, cx| {
+                        shell.show_more_tools = !shell.show_more_tools;
+                        cx.notify();
+                    }))
+                }));
+            if self.show_more_tools {
+                more_tools = Some(
+                    toolbar::more_group(&current.editor, edit_enabled)
+                        .px_2()
+                        .py_1()
+                        .border_t_1()
+                        .border_color(rgb(0xd3dce9)),
+                );
+            }
+        }
+        let toolbar = div()
+            .flex_none()
+            .bg(rgb(0xf9fbff))
             .border_b_1()
-            .border_color(rgb(0xe2e8f0))
-            .child(button("open-folder", "Open Folder…", !busy).on_click(
-                cx.listener(|shell, _, window, cx| shell.start(Intent::ChooseFolder, window, cx)),
-            ))
-            .child(
-                button("new", "New", !busy).on_click(
-                    cx.listener(|shell, _, window, cx| shell.start(Intent::New, window, cx)),
-                ),
-            )
-            .child(button("save", "Save", can_save).on_click(
-                cx.listener(|shell, _, window, cx| shell.start(Intent::Save, window, cx)),
-            ))
-            .when_some(title, |el, title| {
-                el.child(div().ml_2().min_w_0().truncate().child(title))
-            })
-            .when(busy, |el| {
-                el.child(
+            .border_color(rgb(0xd3dce9))
+            .child(tools)
+            .children(more_tools);
+        let path = current.map(|current| {
+            current
+                .file
+                .as_ref()
+                .map_or_else(|| "Untitled.md".to_owned(), |file| filename(file.path()))
+        });
+        let (status, saved) = if busy {
+            ("Working…", false)
+        } else if let Some(current) = current {
+            if current.dirty(cx) {
+                ("Unsaved changes", false)
+            } else if current.file.is_some() {
+                ("Saved locally", true)
+            } else {
+                ("Not saved", false)
+            }
+        } else {
+            ("", false)
+        };
+        let document_bar = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_3()
+            .py_1()
+            .bg(rgb(0xf2f5fa))
+            .border_b_1()
+            .border_color(rgb(0xd3dce9))
+            .when_some(workspace_name, |bar, name| {
+                bar.child(
                     div()
-                        .ml_auto()
-                        .flex_none()
-                        .text_color(rgb(0x64748b))
-                        .child("Working…"),
+                        .max_w(px(125.))
+                        .truncate()
+                        .text_color(rgb(0x475569))
+                        .child(name),
                 )
-            });
+                .when(path.is_some(), |bar| bar.child("/"))
+            })
+            .when_some(path, |bar, path| {
+                bar.child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .child(path),
+                )
+            })
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .text_xs()
+                    .text_color(rgb(if saved { 0x234e9a } else { 0x475569 }))
+                    .when(saved, |el| {
+                        el.child(toolbar::icon("Saved", 13.).text_color(rgb(0x234e9a)))
+                    })
+                    .child(status),
+            );
         let content = div().flex_1().min_w_0().min_h_0().overflow_hidden();
         let content = match &self.current {
             Some(current) => content.child(current.editor.clone()),
@@ -661,6 +754,10 @@ impl Render for Shell {
             .on_action(
                 cx.listener(|shell, _: &Close, window, cx| shell.start(Intent::Exit, window, cx)),
             )
+            .when(
+                busy || current.is_some() || self.workspace.is_some(),
+                |el| el.child(document_bar),
+            )
             .child(toolbar)
             .when_some(self.error.clone(), |el, error| {
                 el.child(
@@ -691,9 +788,79 @@ impl Render for Shell {
 mod tests {
     use std::fs;
 
-    use gpui::{EntityInputHandler as _, TestAppContext, VisualTestContext};
+    use gpui::{EntityInputHandler as _, Modifiers, TestAppContext, VisualTestContext};
 
     use super::*;
+
+    fn click_tool(cx: &mut VisualTestContext, label: &'static str) {
+        let bounds = cx
+            .debug_bounds(label)
+            .unwrap_or_else(|| panic!("missing tool: {label}"));
+        cx.simulate_click(bounds.center(), Modifiers::none());
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn unified_toolbar_formats_and_saves_the_current_document(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = Workspace::open(directory.path()).unwrap();
+        let path = workspace.root().join("note.md");
+        fs::write(&path, "note").unwrap();
+        let file = workspace.read_document(&path).unwrap();
+        let (shell, cx) = cx.add_window_view(Shell::new);
+        cx.update(|window, cx| {
+            editor::bind_keys(cx);
+            shell.update(cx, |shell, cx| {
+                shell.open_editor(Some(file), window, cx);
+                cx.focus_view(&shell.current.as_ref().unwrap().editor, window);
+                cx.notify();
+            });
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("Display formula").is_none());
+        cx.simulate_keystrokes("cmd-a");
+        click_tool(cx, "Bold");
+        cx.update(|_, cx| {
+            let current = shell.read(cx).current.as_ref().unwrap();
+            assert_eq!(current.editor.read(cx).source(), "**note**");
+            assert!(current.dirty(cx));
+        });
+        click_tool(cx, "More tools");
+        click_tool(cx, "Display formula");
+        click_tool(cx, "Fewer tools");
+        cx.update(|_, cx| assert!(!shell.read(cx).show_more_tools));
+        click_tool(cx, "Save");
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "**note**\n\n$$\nx^2\n$$\n\n"
+        );
+        cx.update(|_, cx| assert!(!shell.read(cx).current.as_ref().unwrap().dirty(cx)));
+    }
+
+    #[gpui::test]
+    fn unified_toolbar_fits_on_one_desktop_row_and_wraps_in_a_narrow_window(
+        cx: &mut TestAppContext,
+    ) {
+        let (shell, cx) = cx.add_window_view(Shell::new);
+        click_tool(cx, "New note");
+        cx.update(|_, cx| assert!(shell.read(cx).current.is_some()));
+        cx.simulate_resize(size(px(1040.), px(720.)));
+        cx.run_until_parked();
+        let open = cx.debug_bounds("Open Folder…").unwrap();
+        let more = cx.debug_bounds("More tools").unwrap();
+        assert_eq!(open.top(), more.top());
+        assert!(more.right() <= px(1040.));
+        cx.simulate_resize(size(px(560.), px(360.)));
+        cx.run_until_parked();
+        cx.update(|window, _| assert_eq!(window.viewport_size().width, px(560.)));
+        let open = cx.debug_bounds("Open Folder…").unwrap();
+        let more = cx.debug_bounds("More tools").unwrap();
+        assert!(more.top() > open.top());
+        assert!(more.right() <= px(560.));
+        click_tool(cx, "More tools");
+        let remove_item = cx.debug_bounds("Remove item").unwrap();
+        assert!(remove_item.right() <= px(560.));
+    }
 
     fn start_save_with_queued_quit(
         cx: &mut VisualTestContext,
