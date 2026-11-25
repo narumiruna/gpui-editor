@@ -10,6 +10,10 @@
 
 - Run `changenote version` or `changenote tag`, trigger the release workflow, push tags, create GitHub Releases, or upload packages only when the user explicitly requests that action.
 
+## GUI design
+
+- Follow the principles in [DESIGN.md](DESIGN.md) when designing or changing the graphical user interface (GUI).
+
 ## Testing
 
 - Test CLI behavior by running the built executable in integration tests under `tests/`.
