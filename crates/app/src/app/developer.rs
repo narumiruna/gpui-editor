@@ -201,6 +201,11 @@ impl Shell {
                 self.developer.record("Pi session disconnected");
                 if let Some(draft) = &mut self.developer.draft {
                     let uncertain = draft.delivery.take().is_some();
+                    if uncertain {
+                        draft
+                            .text
+                            .update(cx, |text, cx| text.set_editable(true, cx));
+                    }
                     draft.notice = Some(if uncertain {
                         "Disconnected before Pi confirmed receipt. Check Pi before sending again."
                     } else {
@@ -227,6 +232,9 @@ impl Shell {
                     self.developer.notice = Some("Feedback handed to Pi.".into());
                     self.resume_developer_focus(window, cx);
                 } else {
+                    draft
+                        .text
+                        .update(cx, |text, cx| text.set_editable(true, cx));
                     draft.notice =
                         Some(message.unwrap_or_else(|| "Pi did not accept the feedback.".into()));
                 }
@@ -445,6 +453,9 @@ impl Shell {
             match bridge.send_feedback(draft.target.clone(), text.into(), image) {
                 Ok(id) => {
                     draft.delivery = Some(id);
+                    draft
+                        .text
+                        .update(cx, |text, cx| text.set_editable(false, cx));
                     draft.notice = Some("Handing feedback to Pi…".into());
                 }
                 Err(_) => draft.notice = Some("Could not send. The draft is still here.".into()),

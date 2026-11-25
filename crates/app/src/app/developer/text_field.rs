@@ -10,6 +10,8 @@ use gpui::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::editor::{Copy, Cut, Paste, SelectAll};
+
 const MAX_BYTES: usize = 16 * 1024;
 const KEY_CONTEXT: &str = "FeedbackTextField";
 
@@ -31,13 +33,9 @@ actions!(
         LineEnd,
         SelectLineStart,
         SelectLineEnd,
-        SelectAll,
         Backspace,
         Delete,
         Newline,
-        Copy,
-        Cut,
-        Paste,
     ]
 );
 
@@ -45,6 +43,7 @@ pub struct TextField {
     focus: FocusHandle,
     blur: Option<Subscription>,
     text: String,
+    editable: bool,
     anchor: usize,
     cursor: usize,
     marked: Option<Range<usize>>,
@@ -87,6 +86,7 @@ impl TextField {
             focus: cx.focus_handle(),
             blur: None,
             text: String::new(),
+            editable: true,
             anchor: 0,
             cursor: 0,
             marked: None,
@@ -105,6 +105,11 @@ impl TextField {
 
     pub fn is_composing(&self) -> bool {
         self.marked.is_some()
+    }
+
+    pub(super) fn set_editable(&mut self, editable: bool, cx: &mut Context<Self>) {
+        self.editable = editable;
+        cx.notify();
     }
 
     pub fn focus(&self, window: &mut Window) {
@@ -128,6 +133,9 @@ impl TextField {
         text: &str,
         cx: &mut Context<Self>,
     ) -> Option<Range<usize>> {
+        if !self.editable {
+            return None;
+        }
         let available = MAX_BYTES - (self.text.len() - range.len());
         let inserted = &text[..text.floor_char_boundary(available)];
         // At the limit, do not erase the selection if none of the input fits.
@@ -627,12 +635,14 @@ impl Render for TextField {
                 e.copy(cx);
             }))
             .on_action(cx.listener(|e, _: &Cut, _, cx| {
-                if e.copy(cx) {
+                if e.editable && e.copy(cx) {
                     e.replace(e.selection(), "", cx);
                 }
             }))
             .on_action(cx.listener(|e, _: &Paste, window, cx| {
-                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                if e.editable
+                    && let Some(text) = cx.read_from_clipboard().and_then(|item| item.text())
+                {
                     e.replace_text_in_range(None, &text, window, cx);
                 }
             }))
@@ -650,12 +660,14 @@ impl Render for TextField {
                         let row = layout.row_index(input.cursor);
                         let caret = layout.rect(row, layout.rows[row].x(input.cursor), px(2.));
                         let focused = focus.is_focused(window);
-                        window.handle_input(
-                            &focus,
-                            ElementInputHandler::new(bounds, field.clone()),
-                            cx,
-                        );
-                        let show_caret = focused && selection.is_empty();
+                        if input.editable {
+                            window.handle_input(
+                                &focus,
+                                ElementInputHandler::new(bounds, field.clone()),
+                                cx,
+                            );
+                        }
+                        let show_caret = input.editable && focused && selection.is_empty();
                         layout.paint(selection, marked, window, cx);
                         if show_caret {
                             window.paint_quad(fill(caret, rgb(0x1463b7)));
@@ -715,6 +727,26 @@ mod tests {
                 Some("\n**好**\r\n")
             );
         });
+    }
+
+    #[gpui::test]
+    fn native_edit_menu_actions_operate_on_the_focused_feedback_field(cx: &mut TestAppContext) {
+        let (field, cx) = cx.add_window_view(|_, cx| TextField::new(cx));
+        cx.update(|window, cx| field.read(cx).focus(window));
+        cx.simulate_input("feedback");
+        cx.dispatch_action(crate::editor::SelectAll);
+        cx.dispatch_action(crate::editor::Copy);
+        cx.update(|_, cx| {
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().as_deref(),
+                Some("feedback")
+            );
+            assert_eq!(field.read(cx).text(), "feedback");
+        });
+        cx.dispatch_action(crate::editor::Cut);
+        cx.update(|_, cx| assert_eq!(field.read(cx).text(), ""));
+        cx.dispatch_action(crate::editor::Paste);
+        cx.update(|_, cx| assert_eq!(field.read(cx).text(), "feedback"));
     }
 
     #[gpui::test]

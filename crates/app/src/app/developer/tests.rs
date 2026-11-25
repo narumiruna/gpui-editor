@@ -317,6 +317,25 @@ fn only_explicit_send_delivers_feedback_to_the_approved_socket(cx: &mut TestAppC
     click(cx, "Paste Image");
     click(cx, "Send to Pi");
     let feedback = receive(&mut client);
+    cx.simulate_input("not in the sent snapshot");
+    cx.simulate_keystrokes("cmd-a backspace cmd-v");
+    cx.update(|window, cx| {
+        let text = shell
+            .read(cx)
+            .developer
+            .draft
+            .as_ref()
+            .unwrap()
+            .text
+            .clone();
+        text.update(cx, |text, cx| {
+            // A platform input callback can arrive before the view redraws.
+            text.replace_text_in_range(Some(0..1), "late input", window, cx);
+            text.replace_and_mark_text_in_range(None, "未確認", None, window, cx);
+            assert_eq!(text.text(), "  test feedback\n文字  ");
+            assert!(!text.is_composing());
+        });
+    });
     assert_eq!(feedback["type"], "feedback");
     assert_eq!(feedback["target"]["id"], "New note");
     assert_eq!(feedback["text"], "  test feedback\n文字  ");
@@ -329,25 +348,46 @@ fn only_explicit_send_delivers_feedback_to_the_approved_socket(cx: &mut TestAppC
     );
     send(
         &mut client,
+        json!({"type":"receipt", "id":feedback["id"], "accepted":false}),
+    );
+    apply_event(&shell, cx);
+    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_input("edited after rejection");
+    click(cx, "Send to Pi");
+    let feedback = receive(&mut client);
+    assert_eq!(feedback["text"], "edited after rejection");
+    send(
+        &mut client,
         json!({"type":"receipt", "id":feedback["id"], "accepted":true}),
     );
     apply_event(&shell, cx);
-    cx.update(|window, cx| {
-        shell.update(cx, |shell, cx| {
-            assert_eq!(
-                shell
-                    .current
-                    .as_ref()
-                    .unwrap()
-                    .file
-                    .as_ref()
-                    .unwrap()
-                    .path(),
-                preview_file
-            );
-            assert!(shell.developer.draft.is_none());
-            shell.unpair(window, cx);
-        })
+    cx.update(|_, cx| {
+        let shell = shell.read(cx);
+        assert_eq!(
+            shell
+                .current
+                .as_ref()
+                .unwrap()
+                .file
+                .as_ref()
+                .unwrap()
+                .path(),
+            preview_file
+        );
+        assert!(shell.developer.draft.is_none());
     });
+    click(cx, "developer-picker");
+    click(cx, "New note");
+    cx.simulate_input("draft before disconnect");
+    click(cx, "Send to Pi");
+    assert_eq!(receive(&mut client)["text"], "draft before disconnect");
+    cx.update(|window, cx| shell.update(cx, |shell, cx| shell.unpair(window, cx)));
     assert_eq!(client.read_line(&mut String::new()).unwrap(), 0);
+    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_input("edited after disconnect");
+    cx.update(|_, cx| {
+        let draft = shell.read(cx).developer.draft.as_ref().unwrap();
+        assert_eq!(draft.text.read(cx).text(), "edited after disconnect");
+        assert!(draft.delivery.is_none());
+    });
 }
