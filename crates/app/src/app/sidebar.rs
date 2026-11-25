@@ -443,11 +443,15 @@ impl Shell {
     }
 
     fn can_change_sidebar(&self, cx: &gpui::App) -> bool {
-        self.active.is_none() && !self.developer.blocks_document_actions() && !self.is_composing(cx)
+        self.active.is_none()
+            && self.palette.is_none()
+            && !self.developer.blocks_document_actions()
+            && !self.is_composing(cx)
     }
 
     pub(super) fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.active.is_none()
+            && self.palette.is_none()
             && !self.developer.blocks_document_actions()
             && !self.sidebar.search.is_composing(cx)
         {

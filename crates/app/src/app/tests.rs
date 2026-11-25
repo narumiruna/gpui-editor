@@ -16,18 +16,18 @@ fn click_tool(cx: &mut VisualTestContext, selector: &'static str) {
 }
 
 // GPUI's test-only debug lookup requires a static string, even for an element with a dynamic ID.
-fn tab_selector(prefix: &str, id: TabId) -> &'static str {
+pub(super) fn tab_selector(prefix: &str, id: TabId) -> &'static str {
     Box::leak(format!("{prefix}-{id}").into_boxed_str())
 }
 
-struct Fixture {
+pub(super) struct Fixture {
     directory: tempfile::TempDir,
-    workspace: Workspace,
-    session_path: PathBuf,
+    pub(super) workspace: Workspace,
+    pub(super) session_path: PathBuf,
 }
 
 impl Fixture {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("workspace");
         fs::create_dir(&root).unwrap();
@@ -40,14 +40,14 @@ impl Fixture {
         }
     }
 
-    fn document(&self, name: &str, source: &str) -> PathBuf {
+    pub(super) fn document(&self, name: &str, source: &str) -> PathBuf {
         let path = self.workspace.root().join(name);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, source).unwrap();
         path
     }
 
-    fn open(&self, cx: &mut VisualTestContext, shell: &Entity<Shell>) {
+    pub(super) fn open(&self, cx: &mut VisualTestContext, shell: &Entity<Shell>) {
         start(cx, shell, Intent::OpenFolder(self.workspace.root().into()));
         cx.update(|_, cx| assert_eq!(shell.read(cx).workspace.as_ref(), Some(&self.workspace)));
     }
@@ -59,12 +59,12 @@ impl Fixture {
     }
 }
 
-fn start(cx: &mut VisualTestContext, shell: &Entity<Shell>, intent: Intent) {
+pub(super) fn start(cx: &mut VisualTestContext, shell: &Entity<Shell>, intent: Intent) {
     cx.update(|window, cx| shell.update(cx, |shell, cx| shell.start(intent, window, cx)));
     cx.run_until_parked();
 }
 
-fn restore(cx: &mut VisualTestContext, shell: &Entity<Shell>, path: &Path) {
+pub(super) fn restore(cx: &mut VisualTestContext, shell: &Entity<Shell>, path: &Path) {
     cx.update(|window, cx| {
         shell.update(cx, |shell, cx| {
             shell.restore_session(path.into(), window, cx)
@@ -73,15 +73,15 @@ fn restore(cx: &mut VisualTestContext, shell: &Entity<Shell>, path: &Path) {
     cx.run_until_parked();
 }
 
-fn use_session(cx: &mut VisualTestContext, shell: &Entity<Shell>, path: &Path) {
+pub(super) fn use_session(cx: &mut VisualTestContext, shell: &Entity<Shell>, path: &Path) {
     cx.update(|_, cx| shell.update(cx, |shell, _| shell.session_path = Some(path.into())));
 }
 
-fn tab_paths(shell: &Shell) -> Vec<&Path> {
+pub(super) fn tab_paths(shell: &Shell) -> Vec<&Path> {
     shell.tabs.iter().map(|tab| tab.path().unwrap()).collect()
 }
 
-fn selection(cx: &mut VisualTestContext, editor: &Entity<Editor>) -> Range<usize> {
+pub(super) fn selection(cx: &mut VisualTestContext, editor: &Entity<Editor>) -> Range<usize> {
     cx.update(|window, cx| {
         editor.update(cx, |editor, cx| {
             editor.selected_text_range(false, window, cx).unwrap().range
@@ -89,7 +89,7 @@ fn selection(cx: &mut VisualTestContext, editor: &Entity<Editor>) -> Range<usize
     })
 }
 
-fn replace_current(
+pub(super) fn replace_current(
     cx: &mut VisualTestContext,
     shell: &Entity<Shell>,
     source: &str,
@@ -544,6 +544,159 @@ fn nested_tree_preserves_selection_and_expansion_when_sidebar_is_hidden(cx: &mut
         assert_eq!(shell.selected, Some(id));
         assert_eq!(editor.read(cx).source(), "Changed");
     });
+}
+
+#[gpui::test]
+fn command_palette_filters_and_runs_only_the_selected_command(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let note = fixture.document("note.md", "Original");
+    let other = fixture.document("other.md", "Other original");
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    cx.update(|_, cx| {
+        editor::bind_keys(cx);
+        cx.bind_keys([
+            KeyBinding::new("cmd-p", OpenPalette, None),
+            KeyBinding::new("cmd-n", NewDocument, None),
+            KeyBinding::new("cmd-s", SaveDocument, None),
+            KeyBinding::new("cmd-w", Close, None),
+        ]);
+    });
+    cx.simulate_resize(size(px(560.), px(360.)));
+    fixture.open(cx, &shell);
+    cx.simulate_keystrokes("cmd-p cmd-w");
+    assert!(cx.debug_bounds("command-palette").is_some());
+    cx.simulate_input("save");
+    cx.simulate_keystrokes("enter");
+    cx.update(|_, cx| {
+        let shell = shell.read(cx);
+        assert!(shell.palette.is_some());
+        assert!(shell.tabs.is_empty());
+    });
+    cx.simulate_keystrokes("escape");
+    start(cx, &shell, Intent::Open(other.clone()));
+    let (_, other_editor) = replace_current(cx, &shell, "Other draft");
+    start(cx, &shell, Intent::Open(note.clone()));
+    let (id, editor) = replace_current(cx, &shell, "Draft");
+    cx.simulate_keystrokes("cmd-p cmd-n cmd-s");
+    cx.simulate_input("no matching command");
+    assert!(cx.debug_bounds("palette-empty").is_some());
+    cx.simulate_keystrokes("enter escape");
+    cx.update(|window, cx| {
+        let shell = shell.read(cx);
+        assert!(shell.palette.is_none());
+        assert_eq!(shell.tabs.len(), 2);
+        assert_eq!(shell.selected, Some(id));
+        assert!(editor.focus_handle(cx).is_focused(window));
+        assert_eq!(editor.read(cx).source(), "Draft");
+    });
+    assert_eq!(fs::read_to_string(&note).unwrap(), "Original");
+    cx.simulate_keystrokes("cmd-p");
+    cx.simulate_input("SAVE");
+    cx.simulate_keystrokes("enter");
+    assert_eq!(fs::read_to_string(&note).unwrap(), "Draft");
+    assert_eq!(fs::read_to_string(&other).unwrap(), "Other original");
+    cx.update(|_, cx| {
+        assert!(shell.read(cx).palette.is_none());
+        assert_eq!(other_editor.read(cx).source(), "Other draft");
+    });
+}
+
+#[gpui::test]
+fn command_palette_uses_arrow_keys_and_restores_previous_editor_focus(cx: &mut TestAppContext) {
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    cx.update(|_, cx| cx.bind_keys([KeyBinding::new("cmd-p", OpenPalette, None)]));
+    cx.simulate_keystrokes("cmd-p down enter");
+    cx.update(|window, cx| {
+        let shell = shell.read(cx);
+        assert!(shell.palette.is_none());
+        let editor = &shell.current().expect("New note command").editor;
+        assert!(editor.focus_handle(cx).is_focused(window));
+    });
+    cx.simulate_input("Draft");
+    cx.simulate_keystrokes("cmd-p");
+    cx.simulate_input("toggle sidebar");
+    cx.simulate_keystrokes("enter");
+    cx.simulate_input(" text");
+    cx.update(|window, cx| {
+        let shell = shell.read(cx);
+        assert!(!shell.sidebar.visible);
+        assert_eq!(shell.tabs.len(), 1);
+        let editor = &shell.current().unwrap().editor;
+        assert!(editor.focus_handle(cx).is_focused(window));
+        assert_eq!(editor.read(cx).source(), "Draft text");
+    });
+}
+
+#[gpui::test]
+fn command_palette_returns_to_sidebar_search_without_running_a_click_behind_it(
+    cx: &mut TestAppContext,
+) {
+    let fixture = Fixture::new();
+    let note = fixture.document("note.md", "keyword");
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    cx.update(|_, cx| cx.bind_keys([KeyBinding::new("cmd-p", OpenPalette, None)]));
+    fixture.open(cx, &shell);
+    click_tool(cx, "sidebar-tab-Search");
+    cx.simulate_input("key");
+    cx.simulate_keystrokes("cmd-p");
+    let background = cx.debug_bounds("New note").unwrap().center();
+    cx.simulate_click(background, Modifiers::none());
+    cx.run_until_parked();
+    cx.update(|_, cx| assert!(shell.read(cx).tabs.is_empty()));
+    cx.simulate_keystrokes("escape");
+    cx.simulate_input("word");
+    cx.simulate_keystrokes("enter");
+    click_tool(cx, "search-result-0");
+    cx.update(|_, cx| {
+        let shell = shell.read(cx);
+        assert!(shell.palette.is_none());
+        assert_eq!(tab_paths(shell), [&note]);
+    });
+}
+
+#[gpui::test]
+fn command_palette_waits_for_ime_and_reuses_the_first_save_picker(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    cx.update(|_, cx| cx.bind_keys([KeyBinding::new("cmd-p", OpenPalette, None)]));
+    fixture.open(cx, &shell);
+    start(cx, &shell, Intent::New);
+    replace_current(cx, &shell, "Draft");
+    cx.simulate_keystrokes("cmd-p");
+    let field = cx.update(|window, cx| {
+        let field = shell.read(cx).palette.as_ref().unwrap().text.clone();
+        assert!(field.read(cx).focus_handle(cx).is_focused(window));
+        field.update(cx, |field, cx| {
+            field.replace_and_mark_text_in_range(None, "save", None, window, cx);
+        });
+        field
+    });
+    cx.simulate_keystrokes("enter escape");
+    cx.update(|window, cx| {
+        assert!(shell.read(cx).palette.is_some());
+        assert!(field.read(cx).focus_handle(cx).is_focused(window));
+        field.update(cx, |field, cx| {
+            assert!(field.is_composing());
+            field.replace_text_in_range(None, "Save", window, cx);
+        });
+    });
+    cx.simulate_keystrokes("enter");
+    cx.simulate_new_path_selection(|_| None);
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let shell = shell.read(cx);
+        assert!(shell.palette.is_none());
+        let current = shell.current().unwrap();
+        assert!(current.path().is_none());
+        assert_eq!(current.editor.read(cx).source(), "Draft");
+    });
+    cx.simulate_keystrokes("cmd-p");
+    cx.simulate_input("save");
+    cx.simulate_keystrokes("enter");
+    let target = fixture.workspace.root().join("saved.md");
+    cx.simulate_new_path_selection(|_| Some(target.clone()));
+    cx.run_until_parked();
+    assert_eq!(fs::read_to_string(&target).unwrap(), "Draft");
 }
 
 #[gpui::test]

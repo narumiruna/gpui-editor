@@ -8,7 +8,7 @@ use super::{Shell, toolbar};
 use crate::theme::Theme;
 use bridge::{Attachment, Bridge, Event, Target};
 pub(crate) use picker::Picker;
-pub(super) use text_field::{SearchSubmitted, TextField};
+pub(super) use text_field::{PaletteInput, SearchSubmitted, TextField};
 
 mod bridge;
 mod picker;
@@ -86,11 +86,13 @@ impl Developer {
 impl Shell {
     pub(super) fn developer_preferences(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.active.is_some()
+            || self.palette.is_some()
             || self.developer.blocks_document_actions()
             || self.is_composing(cx)
         {
             return;
         }
+        self.cancel_document_drag(window, cx);
         self.developer.return_focus = window.focused(cx);
         self.developer.preferences = true;
         window.focus(&self.focus);
@@ -152,6 +154,7 @@ impl Shell {
                 code,
             } => {
                 if self.active.is_some()
+                    || self.palette.is_some()
                     || self.is_composing(cx)
                     || self.developer.partner.is_some()
                     || self
@@ -165,6 +168,7 @@ impl Shell {
                     }
                     return;
                 }
+                self.cancel_document_drag(window, cx);
                 if !self.developer.blocks_document_actions() {
                     self.developer.return_focus = window.focused(cx);
                 }
@@ -265,6 +269,7 @@ impl Shell {
 
     fn start_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.developer.connected()
+            || self.palette.is_some()
             || self.developer.blocks_document_actions()
             || self.is_composing(cx)
         {
@@ -296,7 +301,7 @@ impl Shell {
     }
 
     pub(super) fn resume_developer_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.active.is_some() {
+        if self.active.is_some() || self.palette.is_some() {
             return;
         }
         if self.developer.preferences

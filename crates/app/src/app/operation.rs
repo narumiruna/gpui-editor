@@ -55,6 +55,10 @@ impl Shell {
         {
             return;
         }
+        if self.palette.is_some() && matches!(intent, Intent::Exit) {
+            self.close_palette(window, cx);
+        }
+        self.cancel_document_drag(window, cx);
         let interrupted_restore = std::mem::take(&mut self.restoring);
         self.error = None;
         if matches!(intent, Intent::New) {

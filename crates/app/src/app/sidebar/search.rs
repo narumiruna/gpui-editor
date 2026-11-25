@@ -336,6 +336,48 @@ mod tests {
     }
 
     #[gpui::test]
+    fn sidebar_search_waits_for_confirmed_chinese_text_and_returns_to_the_editor(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use gpui::Focusable as _;
+
+        let fixture = crate::app::tests::Fixture::new();
+        let note = fixture.document("note.md", "已確認中文");
+        let (shell, cx) = cx.add_window_view(Shell::new);
+        fixture.open(cx, &shell);
+        let search_tab = cx.debug_bounds("sidebar-tab-Search").unwrap().center();
+        cx.simulate_click(search_tab, gpui::Modifiers::none());
+        cx.run_until_parked();
+        let field = cx.update(|window, cx| {
+            let field = shell.read(cx).sidebar.search.field.clone();
+            assert!(field.read(cx).focus_handle(cx).is_focused(window));
+            field.update(cx, |field, cx| {
+                field.replace_and_mark_text_in_range(None, "ㄓㄨㄥ", None, window, cx);
+            });
+            field
+        });
+        cx.simulate_keystrokes("enter");
+        cx.update(|window, cx| {
+            assert_eq!(shell.read(cx).sidebar.search.idle_query(), Some("ㄓㄨㄥ"));
+            field.update(cx, |field, cx| {
+                assert!(field.is_composing());
+                field.replace_text_in_range(None, "中文", window, cx);
+            });
+        });
+        cx.update(|_, cx| assert_eq!(shell.read(cx).sidebar.search.idle_query(), Some("中文")));
+        cx.simulate_keystrokes("enter");
+        let hit = cx.debug_bounds("search-result-0").unwrap().center();
+        cx.simulate_click(hit, gpui::Modifiers::none());
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let tab = shell.read(cx).current().unwrap();
+            assert_eq!(tab.path(), Some(note.as_path()));
+            assert!(tab.editor.read(cx).focus_handle(cx).is_focused(window));
+            assert_eq!(tab.editor.read(cx).source(), "已確認中文");
+        });
+    }
+
+    #[gpui::test]
     fn older_queries_cannot_replace_newer_results_or_survive_workspace_reset(
         cx: &mut gpui::TestAppContext,
     ) {
