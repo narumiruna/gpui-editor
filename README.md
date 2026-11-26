@@ -74,6 +74,7 @@ The editor stores the folder and tab list locally in `~/Library/Application Supp
 
 ### Edit Markdown
 
+- Undo reverses a run of typing in one step. A pause of one second or more, moving the caret, or changing the selection ends the run. Paste, line breaks, deletion, formatting, and each input method composition have their own undo steps.
 - Use the toolbar below the tabs to save, format a selection, insert a diagram, add an inline formula, or insert a link. Hover over an icon to see its name. At narrow window widths, scroll the toolbar to reach more actions. The three-dot **More tools** button shows front matter, display formulas, images, and item actions. Click front matter, a diagram, or a formula to edit its source. Click elsewhere in the document to preview the change; this does not save the file.
 - Source editing shows a type label such as `<mermaid>` and a border around the editable text. The label and border are not part of the Markdown.
 - Type three backticks at the start of an empty line to insert a matching closing fence and put the caret on the blank line between them. The block stays editable until you move the caret outside it. Pasting Markdown does not insert a closing fence.

@@ -1,6 +1,11 @@
 //! One GPUI input surface backed by offsets in the Markdown source.
 
-use std::{collections::HashMap, ops::Range, path::PathBuf, time::Duration};
+use std::{
+    collections::HashMap,
+    ops::Range,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 use crate::{
     document::{Heading, Markdown, Section, SectionKind},
@@ -72,9 +77,12 @@ pub fn bind_keys(cx: &mut App) {
     ]);
 }
 
+const TYPING_PAUSE: Duration = Duration::from_secs(1);
+
 pub struct Editor {
     focus: FocusHandle,
     history: History<Option<Section>>,
+    last_typed_at: Option<Instant>,
     // A soft break shares a byte offset between the end of one row and the start of the next.
     upstream: bool,
     marked: Option<Range<usize>>,
@@ -122,6 +130,7 @@ impl Editor {
         Self {
             focus,
             history: History::new(EditorState::new(source)),
+            last_typed_at: None,
             upstream: false,
             marked: None,
             active: None,
@@ -191,6 +200,7 @@ impl Editor {
         debug_assert!(enabled || !self.is_composing());
         self.input_enabled = enabled;
         if !enabled {
+            self.finish_typing();
             self.selecting = false;
         }
         cx.notify();
@@ -209,6 +219,7 @@ impl Editor {
     }
 
     fn set_selection(&mut self, anchor: usize, head: usize) {
+        self.finish_typing();
         self.history
             .set_selection(EditorSelection::single(anchor, head))
             .expect("selection must use source byte boundaries");
@@ -227,7 +238,14 @@ impl Editor {
         }
     }
 
+    fn finish_typing(&mut self) {
+        if self.last_typed_at.take().is_some() {
+            self.history.end_group();
+        }
+    }
+
     fn finish_composition(&mut self) {
+        self.last_typed_at = None;
         self.marked = None;
         self.history.end_group();
     }
@@ -244,6 +262,7 @@ impl Editor {
         if !self.input_enabled {
             return;
         }
+        self.finish_typing();
         let active = if redo {
             self.history.redo()
         } else {
@@ -269,6 +288,7 @@ impl Editor {
         finish: impl FnOnce(&str, &mut SelectionRange, &mut Option<Section>),
         cx: &mut Context<Self>,
     ) -> bool {
+        self.finish_typing();
         if self.replace_with(scope, range, text, finish, cx).is_none() {
             return false;
         }
@@ -603,10 +623,14 @@ impl EntityInputHandler for Editor {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.input_enabled {
+            return;
+        }
+        let selection = self.selection();
         let range = range
             .map(|range| from_utf16(self.source(), range))
             .or_else(|| self.marked.clone())
-            .unwrap_or_else(|| self.selection());
+            .unwrap_or_else(|| selection.clone());
         if text == "`"
             && range.is_empty()
             && range.start == self.cursor()
@@ -615,7 +639,30 @@ impl EntityInputHandler for Editor {
         {
             return;
         }
-        self.replace(range, text, cx);
+        if self.marked.is_some()
+            || !range.is_empty()
+            || range != selection
+            || text.is_empty()
+            || text.contains(['\r', '\n'])
+        {
+            self.replace(range, text, cx);
+            return;
+        }
+        let now = cx.background_executor().now();
+        if self
+            .last_typed_at
+            .is_none_or(|previous| now.duration_since(previous) >= TYPING_PAUSE)
+        {
+            self.history.start_group();
+        }
+        if self
+            .replace_with(EditScope::Active, range, text, |_, _, _| {}, cx)
+            .is_some()
+        {
+            self.last_typed_at = Some(now);
+        } else {
+            self.finish_composition();
+        }
     }
 
     fn replace_and_mark_text_in_range(
@@ -632,6 +679,7 @@ impl EntityInputHandler for Editor {
             .unwrap_or_else(|| self.selection());
         let starting = self.marked.is_none();
         if starting {
+            self.finish_typing();
             self.history.start_group();
         }
         let start = range.start;
@@ -1727,7 +1775,9 @@ mod tests {
         });
         cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "``"));
-        cx.simulate_keystrokes("secondary-shift-z");
+        cx.simulate_keystrokes("secondary-z");
+        cx.update(|_, cx| assert!(editor.read(cx).source().is_empty()));
+        cx.simulate_keystrokes("secondary-shift-z secondary-shift-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).selection(), 4..4));
         cx.simulate_input("let x = 1;");
         cx.simulate_keystrokes("backspace");
@@ -1940,6 +1990,102 @@ mod tests {
                     );
                 })
             });
+        }
+    }
+
+    #[gpui::test]
+    fn typing_undo_groups_adjacent_input_until_a_pause(cx: &mut TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(String::new(), window, cx));
+        let executor = cx.update(|window, cx| {
+            bind_keys(cx);
+            window.focus(&editor.read(cx).focus);
+            cx.background_executor().clone()
+        });
+        cx.run_until_parked();
+        cx.simulate_input("ab");
+        executor.advance_clock(Duration::from_millis(750));
+        cx.simulate_input("好");
+        executor.advance_clock(Duration::from_millis(750));
+        cx.simulate_input("d");
+        executor.advance_clock(Duration::from_secs(1));
+        cx.simulate_input("ef");
+        cx.simulate_keystrokes("secondary-z");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "ab好d"));
+        cx.simulate_keystrokes("secondary-z");
+        cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            assert!(editor.source().is_empty());
+            assert_eq!(editor.selection(), 0..0);
+        });
+        cx.simulate_keystrokes("secondary-shift-z secondary-shift-z");
+        cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            assert_eq!(editor.source(), "ab好def");
+            assert_eq!(editor.selection(), 8..8);
+        });
+    }
+
+    #[gpui::test]
+    fn typing_undo_separates_navigation_paste_newlines_and_deletion(cx: &mut TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(String::new(), window, cx));
+        cx.update(|window, cx| {
+            bind_keys(cx);
+            window.focus(&editor.read(cx).focus);
+            cx.write_to_clipboard(ClipboardItem::new_string("XY".into()));
+        });
+        cx.run_until_parked();
+        cx.simulate_input("ab");
+        cx.simulate_keystrokes("left right");
+        cx.simulate_input("cd");
+        cx.simulate_keystrokes("secondary-v");
+        cx.simulate_input("ef");
+        cx.simulate_keystrokes("enter");
+        cx.simulate_input("gh");
+        cx.simulate_keystrokes("backspace");
+        cx.simulate_input("ij");
+        for source in [
+            "abcdXYef\ng",
+            "abcdXYef\ngh",
+            "abcdXYef\n",
+            "abcdXYef",
+            "abcdXY",
+            "abcd",
+            "ab",
+            "",
+        ] {
+            cx.simulate_keystrokes("secondary-z");
+            cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source));
+        }
+    }
+
+    #[gpui::test]
+    fn typing_undo_keeps_ime_composition_separate(cx: &mut TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(String::new(), window, cx));
+        let executor = cx.update(|window, cx| {
+            bind_keys(cx);
+            window.focus(&editor.read(cx).focus);
+            cx.background_executor().clone()
+        });
+        cx.run_until_parked();
+        cx.simulate_input("ab");
+        cx.update(|window, cx| {
+            editor.update(cx, |e, cx| {
+                e.replace_and_mark_text_in_range(None, "n", None, window, cx);
+            });
+        });
+        executor.advance_clock(Duration::from_secs(2));
+        cx.update(|window, cx| {
+            editor.update(cx, |e, cx| {
+                e.replace_and_mark_text_in_range(None, "ni", None, window, cx);
+                e.replace_text_in_range(None, "你", window, cx);
+                assert_eq!(e.source(), "ab你");
+                assert!(!e.is_composing());
+            });
+        });
+        cx.simulate_input("cd");
+        for source in ["ab你", "ab", ""] {
+            cx.simulate_keystrokes("secondary-z");
+            cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source));
         }
     }
 
