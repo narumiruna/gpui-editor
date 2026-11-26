@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/app",
+    "crates/codemirror",
     "crates/document",
     "crates/preview",
     "crates/workspace",

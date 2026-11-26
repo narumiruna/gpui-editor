@@ -395,6 +395,185 @@ fn switching_saving_and_closing_wait_for_committed_ime_text(cx: &mut TestAppCont
 }
 
 #[gpui::test]
+fn marked_text_updates_form_one_undo_step_per_commit(cx: &mut TestAppContext) {
+    let code = "\n\n```rust\n1\n```";
+    let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(format!("x{code}"), window, cx));
+    cx.update(|window, cx| {
+        editor::bind_keys(cx);
+        window.focus(&editor.focus_handle(cx));
+    });
+    cx.run_until_parked();
+    cx.simulate_keystrokes("shift-right");
+    assert_eq!(selection(cx, &editor), 0..1);
+
+    let code_unit = |source: &str| source.split_once('1').unwrap().0.encode_utf16().count();
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| {
+            editor.replace_and_mark_text_in_range(None, "ㄓ", None, window, cx);
+            assert_eq!(editor.source(), format!("ㄓ{code}"));
+            assert_eq!(editor.marked_text_range(window, cx), Some(0..1));
+            editor.replace_and_mark_text_in_range(None, "中🙂", Some(1..3), window, cx);
+            assert_eq!(editor.source(), format!("中🙂{code}"));
+            assert_eq!(editor.marked_text_range(window, cx), Some(0..3));
+
+            let start = code_unit(editor.source());
+            editor.replace_and_mark_text_in_range(Some(start..start + 1), "拒絕", None, window, cx);
+            assert_eq!(editor.source(), format!("中🙂{code}"));
+            assert_eq!(editor.marked_text_range(window, cx), Some(0..3));
+            assert_eq!(
+                editor.selected_text_range(false, window, cx).unwrap().range,
+                1..3
+            );
+
+            editor.replace_and_mark_text_in_range(None, "中文🙂", Some(0..4), window, cx);
+            assert_eq!(
+                editor.selected_text_range(false, window, cx).unwrap().range,
+                0..4
+            );
+            editor.replace_text_in_range(None, "中文🙂", window, cx);
+            assert_eq!(editor.source(), format!("中文🙂{code}"));
+            assert_eq!(editor.marked_text_range(window, cx), None);
+        });
+    });
+    assert_eq!(selection(cx, &editor), 4..4);
+
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| {
+            editor.replace_and_mark_text_in_range(None, "ㄨ", None, window, cx);
+            assert_eq!(editor.source(), format!("中文🙂ㄨ{code}"));
+            assert_eq!(editor.marked_text_range(window, cx), Some(4..5));
+            editor.replace_and_mark_text_in_range(None, "完成🎉", None, window, cx);
+            assert_eq!(editor.source(), format!("中文🙂完成🎉{code}"));
+            assert_eq!(editor.marked_text_range(window, cx), Some(4..8));
+            editor.unmark_text(window, cx);
+            assert_eq!(editor.source(), format!("中文🙂完成🎉{code}"));
+            assert_eq!(editor.marked_text_range(window, cx), None);
+        });
+    });
+    cx.run_until_parked();
+    cx.simulate_keystrokes("cmd-z");
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| {
+            assert_eq!(editor.source(), format!("中文🙂{code}"));
+            // Rejection must not add an undo step or clear the pending redo.
+            let start = code_unit(editor.source());
+            editor.replace_text_in_range(Some(start..start + 1), "2", window, cx);
+            assert_eq!(editor.source(), format!("中文🙂{code}"));
+        });
+    });
+    assert_eq!(selection(cx, &editor), 4..4);
+
+    for (key, prefix, selected) in [
+        ("cmd-z", "x", 0..1),
+        ("cmd-shift-z", "中文🙂", 4..4),
+        ("cmd-shift-z", "中文🙂完成🎉", 8..8),
+    ] {
+        cx.simulate_keystrokes(key);
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                assert_eq!(editor.source(), format!("{prefix}{code}"));
+                assert_eq!(editor.marked_text_range(window, cx), None);
+            });
+        });
+        assert_eq!(selection(cx, &editor), selected);
+    }
+}
+
+#[gpui::test]
+fn saving_and_reopening_preserves_crlf_rich_and_read_only_blocks(cx: &mut TestAppContext) {
+    const ORIGINAL: &str =
+        "---\r\ntitle: Draft\r\n---\r\n\r\n原稿\r\n\r\n```rust\r\nlet n = 1;\r\n```";
+    const EXPECTED: &str =
+        "---\r\ntitle: 測試\r\n---\r\n\r\n中文\r\n\r\n```rust\r\nlet n = 1;\r\n```";
+    let fixture = Fixture::new();
+    let path = fixture.document("ime.md", ORIGINAL);
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    cx.simulate_resize(size(px(800.), px(480.)));
+    cx.update(|_, cx| editor::bind_keys(cx));
+    fixture.open(cx, &shell);
+    start(cx, &shell, Intent::Open(path.clone()));
+    let (id, editor) = cx.update(|_, cx| {
+        let current = shell.read(cx).current().unwrap();
+        (current.id, current.editor.clone())
+    });
+
+    let click_preview = |cx: &mut VisualTestContext, editor: &Entity<Editor>, offset| {
+        let body = cx.debug_bounds("document-body").unwrap();
+        let position = cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor
+                    .bounds_for_range(offset..offset, body, window, cx)
+                    .unwrap()
+                    .center()
+            })
+        });
+        // Move from the leading caret into the preview's hit area.
+        cx.simulate_click(position + point(px(4.), px(0.)), Modifiers::none());
+        cx.run_until_parked();
+    };
+
+    let prose_start = ORIGINAL[..ORIGINAL.find("原稿").unwrap()]
+        .encode_utf16()
+        .count();
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| {
+            editor.replace_text_in_range(Some(prose_start..prose_start + 2), "中文", window, cx);
+        });
+    });
+    cx.run_until_parked();
+    click_preview(cx, &editor, 0);
+    cx.simulate_keystrokes("cmd-a");
+    assert_eq!(selection(cx, &editor), 5..17);
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| {
+            editor.replace_text_in_range(None, "title: 測試", window, cx);
+            assert_eq!(editor.source(), EXPECTED);
+        });
+    });
+    cx.run_until_parked();
+
+    let code_start = EXPECTED[..EXPECTED.find("```rust").unwrap()]
+        .encode_utf16()
+        .count();
+    let code_range = code_start..EXPECTED.encode_utf16().count();
+    click_preview(cx, &editor, code_start);
+    assert_eq!(selection(cx, &editor), code_range);
+    cx.simulate_keystrokes("cmd-z cmd-a");
+    cx.update(|_, cx| assert_eq!(editor.read(cx).source(), ORIGINAL.replace("原稿", "中文")));
+    assert_eq!(selection(cx, &editor), 5..17);
+    cx.simulate_keystrokes("cmd-shift-z cmd-a");
+    cx.update(|_, cx| assert_eq!(editor.read(cx).source(), EXPECTED));
+    assert_eq!(selection(cx, &editor), 5..14);
+
+    assert_eq!(fs::read(&path).unwrap(), ORIGINAL.as_bytes());
+    click_tool(cx, "Save");
+    assert_eq!(fs::read(&path).unwrap(), EXPECTED.as_bytes());
+    start(cx, &shell, Intent::CloseTab(id));
+    assert!(!cx.has_pending_prompt());
+    start(cx, &shell, Intent::Open(path.clone()));
+    let reopened = cx.update(|_, cx| {
+        let current = shell.read(cx).current().unwrap();
+        assert_ne!(current.editor, editor);
+        assert_eq!(current.editor.read(cx).source(), EXPECTED);
+        assert!(!current.dirty(cx));
+        current.editor.clone()
+    });
+
+    click_preview(cx, &reopened, 0);
+    cx.simulate_keystrokes("cmd-a");
+    assert_eq!(selection(cx, &reopened), 5..14);
+    click_preview(cx, &reopened, code_start);
+    assert_eq!(selection(cx, &reopened), code_range);
+    cx.simulate_keystrokes("x backspace");
+    cx.update(|_, cx| {
+        let current = shell.read(cx).current().unwrap();
+        assert_eq!(current.editor.read(cx).source(), EXPECTED);
+        assert!(!current.dirty(cx));
+    });
+    assert_eq!(fs::read(path).unwrap(), EXPECTED.as_bytes());
+}
+
+#[gpui::test]
 fn closing_an_untitled_tab_can_cancel_and_first_save_on_exit_is_restored(app: &mut TestAppContext) {
     let fixture = Fixture::new();
     let path = fixture.workspace.root().join("saved.md");

@@ -2220,6 +2220,7 @@ version = "0.2.0"
 dependencies = [
  "base64 0.23.1",
  "gpui",
+ "gpui-editor-codemirror",
  "gpui-editor-document",
  "gpui-editor-preview",
  "gpui-editor-workspace",
@@ -2234,6 +2235,10 @@ dependencies = [
  "tempfile",
  "unicode-segmentation",
 ]
+
+[[package]]
+name = "gpui-editor-codemirror"
+version = "0.1.0"
 
 [[package]]
 name = "gpui-editor-document"

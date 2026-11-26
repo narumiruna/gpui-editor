@@ -1,7 +1,8 @@
 use gpui::{Context, Window};
+use gpui_editor_codemirror::SelectionRange;
 
-use super::Editor;
-use crate::document::{Document, Section, SectionKind};
+use super::{EditScope, Editor};
+use crate::document::{Document, Markdown, Section, SectionKind};
 
 #[derive(Clone, Copy)]
 pub(super) enum Command {
@@ -24,6 +25,15 @@ fn can_edit_as_item(kind: SectionKind) -> bool {
             | SectionKind::Image
             | SectionKind::Link
     )
+}
+
+fn source_selection(section: &mut Section, select: bool) -> SelectionRange {
+    if matches!(section.kind, SectionKind::Image | SectionKind::Link) {
+        section.content = section.source.clone();
+    }
+    let head = section.content.start;
+    let anchor = if select { section.content.end } else { head };
+    SelectionRange::new(anchor, head)
 }
 
 impl Editor {
@@ -50,7 +60,7 @@ impl Editor {
             return false;
         };
         let start = offset - 2;
-        let mut candidate = self.document.clone();
+        let mut candidate = Document::new(source.to_owned());
         if candidate.replace(offset..offset, "`").is_err()
             || !candidate.sections().iter().any(|section| {
                 section.kind == SectionKind::DraftCode && section.source.start == start
@@ -58,31 +68,28 @@ impl Editor {
         {
             return false;
         }
-        if !self.replace(offset..offset, &format!("`{ending}{ending}{indent}```"), cx) {
-            return false;
-        }
-        let draft = start..self.cursor;
-        self.active = Some(Section::new(SectionKind::DraftCode, draft.clone(), draft));
-        self.cursor = offset + 1 + ending.len();
-        self.anchor = self.cursor;
-        true
+        self.replace_and_finish(
+            EditScope::Active,
+            offset..offset,
+            &format!("`{ending}{ending}{indent}```"),
+            |_, selection, active| {
+                let draft = start..selection.head();
+                *active = Some(Section::new(SectionKind::DraftCode, draft.clone(), draft));
+                let caret = offset + 1 + ending.len();
+                *selection = SelectionRange::new(caret, caret);
+            },
+            cx,
+        )
     }
 
     pub(super) fn activate(&mut self, mut section: Section, select: bool, cx: &mut Context<Self>) {
-        if matches!(section.kind, SectionKind::Image | SectionKind::Link) {
-            section.content = section.source.clone();
-        }
-        self.cursor = section.content.start;
-        self.anchor = if select {
-            section.content.end
-        } else {
-            self.cursor
-        };
+        let selection = source_selection(&mut section, select);
+        self.set_selection(selection.anchor(), selection.head());
         self.active = Some(section);
         self.upstream = false;
         self.reveal_caret = true;
         self.preferred_x = None;
-        self.marked = None;
+        self.finish_composition();
         self.message = None;
         cx.notify();
     }
@@ -119,10 +126,12 @@ impl Editor {
                     .clone()
                     .or_else(|| self.section_at_cursor(can_edit_as_item))
                 {
-                    if section.kind != K::DraftCode {
-                        self.active = None;
-                    }
-                    self.replace(section.source, "", cx);
+                    let scope = if section.kind == K::DraftCode {
+                        EditScope::Active
+                    } else {
+                        EditScope::Document
+                    };
+                    self.replace_and_finish(scope, section.source, "", |_, _, _| {}, cx);
                 } else {
                     self.message = Some(
                         "Place the caret next to an item or click it before removing it".into(),
@@ -134,10 +143,10 @@ impl Editor {
     }
 
     fn section_at_cursor(&self, predicate: impl Fn(SectionKind) -> bool) -> Option<Section> {
-        self.document.sections().into_iter().find(|section| {
+        self.markdown().sections().into_iter().find(|section| {
             predicate(section.kind)
-                && section.source.start <= self.cursor
-                && self.cursor <= section.source.end
+                && section.source.start <= self.cursor()
+                && self.cursor() <= section.source.end
         })
     }
 
@@ -145,7 +154,7 @@ impl Editor {
         use SectionKind as K;
         if kind == K::FrontMatter
             && let Some(section) = self
-                .document
+                .markdown()
                 .sections()
                 .into_iter()
                 .find(|it| it.kind == kind)
@@ -157,10 +166,10 @@ impl Editor {
             K::FrontMatter => (0..0, "---\ntitle: Document\n---\n\n".into(), 0),
             K::Mermaid | K::DisplayMath => {
                 let source = self.source();
-                let end = self.cursor
-                    + source[self.cursor..]
+                let end = self.cursor()
+                    + source[self.cursor()..]
                         .find('\n')
-                        .unwrap_or(source.len() - self.cursor);
+                        .unwrap_or(source.len() - self.cursor());
                 let body = if kind == K::Mermaid {
                     "```mermaid\nflowchart LR\n    A[Start] --> B[End]\n```"
                 } else {
@@ -219,23 +228,28 @@ impl Editor {
             }
             _ => return,
         };
-        self.active = None;
-        if self.replace(range, &snippet, cx)
-            && let Some(section) = self
-                .document
-                .sections()
-                .into_iter()
-                .find(|section| section.kind == kind && section.source.start == probe)
-        {
-            self.activate(section, true, cx);
-        }
+        self.replace_and_finish(
+            EditScope::Document,
+            range,
+            &snippet,
+            |source, selection, active| {
+                *active = Markdown::new(source)
+                    .sections()
+                    .into_iter()
+                    .find(|section| section.kind == kind && section.source.start == probe);
+                if let Some(section) = active {
+                    *selection = source_selection(section, true);
+                }
+            },
+            cx,
+        );
     }
 
     fn block(&mut self, kind: SectionKind, marker: &str, cx: &mut Context<Self>) {
         let source = self.source();
         let cursor = self.selection().start;
         let start = source[..cursor].rfind('\n').map_or(0, |index| index + 1);
-        let existing = self.document.sections().into_iter().find(|section| {
+        let existing = self.markdown().sections().into_iter().find(|section| {
             matches!(section.kind, SectionKind::Heading | SectionKind::Bullet)
                 && section.source.start == start
         });
@@ -276,7 +290,7 @@ impl Editor {
 
     fn inline(&mut self, kind: SectionKind, marker: &str, cx: &mut Context<Self>) {
         let selection = self.selection();
-        if let Some(section) = self.document.sections().into_iter().find(|section| {
+        if let Some(section) = self.markdown().sections().into_iter().find(|section| {
             section.kind == kind
                 && section.content.start <= selection.start
                 && section.content.end >= selection.end
@@ -287,16 +301,22 @@ impl Editor {
         }
         if selection.is_empty() {
             let start = selection.start;
-            if self.replace(selection, &format!("{marker}text{marker}"), cx) {
-                self.anchor = start + marker.len();
-                self.cursor = self.anchor + "text".len();
-            }
+            self.replace_and_finish(
+                EditScope::Active,
+                selection,
+                &format!("{marker}text{marker}"),
+                |_, selection, _| {
+                    let anchor = start + marker.len();
+                    *selection = SelectionRange::new(anchor, anchor + "text".len());
+                },
+                cx,
+            );
             return;
         }
         // Apply an inline style to each selected line separately; inline Markdown
         // delimiters cannot enclose a blank line.
         let blocks = self
-            .document
+            .markdown()
             .sections()
             .into_iter()
             .filter(|section| matches!(section.kind, SectionKind::Heading | SectionKind::Bullet))
@@ -376,13 +396,13 @@ mod tests {
             editor.update(cx, |editor, cx| {
                 editor.preferred_x = Some(gpui::px(1_000.));
                 editor.command(Command::Add(SectionKind::FrontMatter), window, cx);
-                assert_eq!(editor.cursor, source.find("title").unwrap());
+                assert_eq!(editor.cursor(), source.find("title").unwrap());
                 let layout = editor.shape(window, cx);
-                let caret = layout.bounds_at(editor.cursor, false).unwrap();
+                let caret = layout.bounds_at(editor.cursor(), false).unwrap();
                 let column = caret.left() - layout.origin.x;
                 editor.layout = Some(layout);
                 editor.move_vertical(true, false, cx);
-                assert_eq!(editor.cursor, source.find("width").unwrap());
+                assert_eq!(editor.cursor(), source.find("width").unwrap());
                 assert_eq!(editor.preferred_x, Some(column));
             });
         });
@@ -396,8 +416,7 @@ mod tests {
             editor.update(cx, |editor, cx| {
                 editor.command(Command::EditLink, window, cx);
                 assert_eq!(editor.active.as_ref().unwrap().kind, SectionKind::Link);
-                editor.anchor = "[**".len();
-                editor.cursor = "[**x".len();
+                editor.set_selection("[**".len(), "[**x".len());
                 editor.remove(false, cx);
                 assert_eq!(editor.source(), "[****](https://example.com)");
                 assert!(editor.active.is_some());
@@ -419,13 +438,12 @@ mod tests {
             cx.update(|window, cx| {
                 editor.update(cx, |editor, cx| {
                     let selection = prefix.len()..prefix.len() + body.len();
-                    editor.anchor = selection.start;
-                    editor.cursor = selection.end;
+                    editor.set_selection(selection.start, selection.end);
                     editor.command(Command::Add(SectionKind::InlineMath), window, cx);
                     assert_eq!(editor.source(), source);
                     assert_eq!(editor.selection(), selection);
                     assert!(editor.active.is_none());
-                    assert!(editor.undo.is_empty());
+                    assert!(!editor.history.can_undo());
                     assert!(editor.message.as_deref().unwrap().contains("inline math"));
                 });
             });
@@ -448,8 +466,7 @@ mod tests {
             });
             cx.update(|window, cx| {
                 editor.update(cx, |editor, cx| {
-                    editor.anchor = "Before ".len();
-                    editor.cursor = editor.anchor + selected.len();
+                    editor.set_selection("Before ".len(), "Before ".len() + selected.len());
                     editor.command(Command::Add(kind), window, cx);
                     assert_eq!(editor.source(), format!("Before {expected} after"));
                     assert_eq!(

@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{borrow::Cow, ops::Range};
 
 pub use pulldown_cmark::Alignment;
 use pulldown_cmark::{CodeBlockKind, Event, LinkType, Options, Parser, Tag, TagEnd};
@@ -116,9 +116,47 @@ impl Document {
         &self.source
     }
 
-    fn parser(&self) -> Parser<'_> {
+    /// Return headings in source order, using the same Markdown rules as the editor.
+    pub fn headings(&self) -> Vec<Heading> {
+        Markdown::new(&self.source).headings()
+    }
+
+    pub fn sections(&self) -> Vec<Section> {
+        Markdown::new(&self.source).sections()
+    }
+
+    pub fn replace(&mut self, range: Range<usize>, text: &str) -> Result<(), EditError> {
+        self.replacement(range, text, None).map(|_| ())
+    }
+
+    /// Apply the edit and return the actual old range and inserted byte count.
+    /// Place the caret after `text`, before any added fence separator.
+    /// An active code draft permits edits to its own code preview, not other read-only sections.
+    pub fn replacement(
+        &mut self,
+        range: Range<usize>,
+        text: &str,
+        active: Option<&Section>,
+    ) -> Result<(Range<usize>, usize), EditError> {
+        let (range, text) = Markdown::new(&self.source).plan_replacement(range, text, active)?;
+        self.source.replace_range(range.clone(), &text);
+        Ok((range, text.len()))
+    }
+}
+
+/// Parse Markdown and plan edits to its borrowed source.
+pub struct Markdown<'a> {
+    source: &'a str,
+}
+
+impl<'a> Markdown<'a> {
+    pub fn new(source: &'a str) -> Self {
+        Self { source }
+    }
+
+    fn parser(&self) -> Parser<'a> {
         Parser::new_ext(
-            &self.source,
+            self.source,
             Options::ENABLE_MATH
                 | Options::ENABLE_TABLES
                 | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
@@ -347,19 +385,15 @@ impl Document {
         sections
     }
 
-    pub fn replace(&mut self, range: Range<usize>, text: &str) -> Result<(), EditError> {
-        self.replacement(range, text, None).map(|_| ())
-    }
-
-    /// Apply the edit and return the actual old range and inserted byte count.
-    /// Place the caret after `text`, before any added fence separator.
+    /// Return the actual range and replacement text without changing the source.
+    /// The range uses UTF-8 byte offsets. The result borrows `text` unless a fence separator is added.
     /// An active code draft permits edits to its own code preview, not other read-only sections.
-    pub fn replacement(
-        &mut self,
+    pub fn plan_replacement<'text>(
+        &self,
         mut range: Range<usize>,
-        text: &str,
+        text: &'text str,
         active: Option<&Section>,
-    ) -> Result<(Range<usize>, usize), EditError> {
+    ) -> Result<(Range<usize>, Cow<'text, str>), EditError> {
         use SectionKind as K;
 
         if self.source.get(range.clone()).is_none() {
@@ -403,20 +437,17 @@ impl Document {
                     && section.source.end > range.start
                     && !self.source[range.start..].starts_with(['\r', '\n'])
             });
-        let inserted = if needs_separator {
+        let replacement = if needs_separator {
             let ending = if self.source[..range.start].ends_with("\r\n") {
                 "\r\n"
             } else {
                 "\n"
             };
-            self.source
-                .replace_range(range.clone(), &format!("{text}{ending}"));
-            text.len() + ending.len()
+            Cow::Owned(format!("{text}{ending}"))
         } else {
-            self.source.replace_range(range.clone(), text);
-            text.len()
+            Cow::Borrowed(text)
         };
-        Ok((range, inserted))
+        Ok((range, replacement))
     }
 }
 
