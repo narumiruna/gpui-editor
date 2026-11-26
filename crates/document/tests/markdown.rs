@@ -5,7 +5,12 @@ use gpui_editor_document::{EditError, Markdown, SectionKind};
 #[test]
 fn deleting_formatted_content_expands_the_range_to_include_delimiters() {
     let prefix = "前段  ";
-    for (formatted, body) in [("**x**", "x"), ("_x_", "x"), ("***字***", "字")] {
+    for (formatted, body) in [
+        ("**x**", "x"),
+        ("_x_", "x"),
+        ("***字***", "字"),
+        ("`` 字 ``", "字"),
+    ] {
         let source = format!("{prefix}{formatted}  後段\r\n");
         let start = prefix.len() + formatted.find(body).unwrap();
         let (range, replacement) = Markdown::new(&source)
@@ -14,6 +19,32 @@ fn deleting_formatted_content_expands_the_range_to_include_delimiters() {
         assert_eq!(range, prefix.len()..prefix.len() + formatted.len());
         assert!(matches!(replacement, Cow::Borrowed("")));
     }
+}
+
+#[test]
+fn inline_code_preserves_source_ranges_and_uses_the_parsed_text() {
+    let prefix = "前段 ";
+    for (span, content, display) in [
+        ("`ls -la`", "ls -la", "ls -la"),
+        ("``  ls `字`  ``", " ls `字` ", " ls `字` "),
+        ("`  `", "  ", "  "),
+        ("`` a\nb ``", " a\nb ", "a b"),
+        ("`$x`", "$x", "$x"),
+    ] {
+        let source = format!("{prefix}{span} 後段\r\n");
+        let sections = Markdown::new(&source).sections();
+        assert_eq!(sections.len(), 1);
+        let code = &sections[0];
+        assert_eq!(code.kind, SectionKind::InlineCode);
+        assert_eq!(code.source, prefix.len()..prefix.len() + span.len());
+        assert_eq!(&source[code.content.clone()], content);
+        assert_eq!(code.inline_code.as_deref().unwrap_or(content), display);
+    }
+    assert!(
+        Markdown::new(r"Escaped \`x\` and `unclosed")
+            .sections()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -40,9 +71,9 @@ fn inserting_into_an_empty_mermaid_block_adds_only_a_missing_line_ending() {
 
 #[test]
 fn planning_rejects_read_only_content_and_invalid_utf8_ranges() {
-    let source = "前段 `原文` 後段\r\n";
-    let start = source.find('`').unwrap();
-    let end = start + "`原文`".len();
+    let source = "前段\r\n\r\n> 原文\r\n";
+    let start = source.find('>').unwrap();
+    let end = start + "> 原文".len();
     let markdown = Markdown::new(source);
     assert_eq!(
         markdown.plan_replacement(start..end, "", None),
