@@ -108,11 +108,11 @@ flowchart TD
 
 ### Developer Mode 原生驗收
 
-用測試文件和不含敏感資料的測試圖片驗證。從此 repository 啟動 Pi 並允許載入專案 extension；要測圖片傳送，使用支援圖片的 model。
+在 macOS 和 Windows 上使用測試文件和不含敏感資料的圖片驗證。從此 repository 啟動 Pi 並允許載入專案 extension；要測圖片傳送，使用支援圖片的 model。
 
 1. 重新啟動編輯器，確認箭靶預設隱藏。在 **Preferences…** 開啟 **Developer Mode**，確認右上角顯示帶箭靶的 **Select element** 按鈕，但尚無法選取元件。
 2. 在 Pi 執行 `/gpui-pair`，比對兩邊的配對碼。先拒絕，確認 Pi 無法讀取診斷，接著重試並同意。關閉 Preferences，確認箭靶可用。
-3. 修改測試文件但不存檔。用箭靶選取 **Save**，確認未存檔；取消並核對 Pi 未收到訊息。再次選取並輸入文字。用 **Capture Window** 核對只擷取編輯器視窗，不含重疊視窗或桌面。若系統拒絕權限，確認仍可貼圖或只送文字。使用 **Paste Image** 附上另一張測試圖，核對預覽和移除操作。
+3. 修改測試文件但不存檔。用箭靶選取 **Save**，確認未存檔；取消並核對 Pi 未收到訊息。再次選取並輸入文字。在 macOS 上用 **Capture Window** 核對只擷取編輯器視窗，不含重疊視窗或桌面。若系統拒絕權限，確認仍可貼圖或只送文字。在 Windows 上確認 **Capture Window** 提示改用貼圖。兩個平台都用 **Paste Image** 附上測試圖，核對預覽和移除操作。
 4. 送出文字及圖片，在配對的 Pi session 核對元件、文字與附件。用 `gpui_editor_logs` 核對近期診斷中不含測試文件文字或路徑。切換 Pi session 或停用 Developer Mode 後，確認原連線無法再讀取診斷。
 
 ### macOS 原生驗收

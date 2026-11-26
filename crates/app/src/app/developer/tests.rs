@@ -1,8 +1,6 @@
-use std::fs;
-#[cfg(target_os = "macos")]
 use std::{
+    fs,
     io::{BufRead, BufReader, Write},
-    os::unix::net::UnixStream,
     thread,
     time::Instant,
 };
@@ -12,10 +10,9 @@ use gpui::{
     VisualTestContext, point, size,
 };
 
-#[cfg(target_os = "macos")]
 use serde_json::{Value, json};
 
-use super::*;
+use super::{bridge::TestClient, *};
 use crate::workspace::Workspace;
 
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
@@ -31,20 +28,9 @@ fn enable(cx: &mut VisualTestContext, shell: &Entity<Shell>) {
         shell.update(cx, |shell, cx| shell.developer_preferences(window, cx));
     });
     click(cx, "Developer Mode: Off");
-    #[cfg(not(target_os = "macos"))]
     cx.update(|_, cx| {
-        shell.update(cx, |shell, cx| {
-            // Pairing is unsupported. Inject its zero-state stub only to test
-            // the UI with controlled connection events, without a transport.
-            assert_eq!(
-                shell.developer.notice.as_deref(),
-                Some("Pi pairing is not supported on Windows.")
-            );
-            assert!(shell.developer.bridge.is_none());
-            shell.developer.bridge = Some(Bridge);
-            shell.developer.notice = None;
-            cx.notify();
-        });
+        let developer = &shell.read(cx).developer;
+        assert!(developer.bridge.is_some(), "{:?}", developer.notice);
     });
     click(cx, "Done");
 }
@@ -263,19 +249,16 @@ fn clipboard_picture_can_be_added_and_removed_without_window_capture(cx: &mut Te
     });
 }
 
-#[cfg(target_os = "macos")]
-fn send(client: &mut BufReader<UnixStream>, value: Value) {
+fn send(client: &mut BufReader<TestClient>, value: Value) {
     writeln!(client.get_mut(), "{value}").unwrap();
 }
 
-#[cfg(target_os = "macos")]
-fn receive(client: &mut BufReader<UnixStream>) -> Value {
+fn receive(client: &mut BufReader<TestClient>) -> Value {
     let mut line = String::new();
     client.read_line(&mut line).unwrap();
     serde_json::from_str(&line).unwrap()
 }
 
-#[cfg(target_os = "macos")]
 fn apply_event(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
@@ -300,22 +283,11 @@ fn apply_event(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
     }
 }
 
-#[cfg(target_os = "macos")]
 #[gpui::test]
-fn only_explicit_send_delivers_feedback_to_the_approved_socket(cx: &mut TestAppContext) {
-    let directory = tempfile::tempdir_in("/tmp").unwrap();
+fn only_explicit_send_delivers_feedback_to_the_approved_peer(cx: &mut TestAppContext) {
+    let directory = bridge::test_directory().unwrap();
     let bridge = Bridge::listen(directory.path()).unwrap();
-    let instance = fs::read_dir(directory.path())
-        .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path();
-    let socket = UnixStream::connect(instance.join("s")).unwrap();
-    socket
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .unwrap();
-    let mut client = BufReader::new(socket);
+    let mut client = TestClient::connect(directory.path()).unwrap();
     let (shell, cx) = cx.add_window_view(Shell::new);
     cx.update(|_, cx| {
         shell.update(cx, |shell, cx| {

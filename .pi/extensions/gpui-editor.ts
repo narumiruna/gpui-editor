@@ -20,7 +20,7 @@ const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const timeouts = { discovery: 5000, connect: 500, select: 30_000, approval: 60_000, frame: 10_000, logs: 5000 };
 
 type Frame = Record<string, unknown>;
-type Endpoint = { path: string; socket: BigIntStats };
+type Endpoint = { path: string; identity: BigIntStats };
 type PairRequest = { type: "pair"; version: number; project: string; session: string; code: string };
 type PendingLogs = { limit: number; finish(error: Error | null, entries?: string[]): void };
 
@@ -44,30 +44,40 @@ function utf8Head(value: string, limit: number): string {
 	return bytes.toString("utf8", 0, limit);
 }
 
-async function darwinUserTempDir(signal: AbortSignal): Promise<string> {
-	if (process.platform !== "darwin") throw new Error("GPUI pairing requires macOS.");
+async function userDiscoveryDirectory(signal: AbortSignal): Promise<string> {
+	if (process.platform === "win32") return process.env.LOCALAPPDATA ?? "";
+	if (process.platform !== "darwin") throw new Error("GPUI pairing requires macOS or Windows.");
 	const { stdout } = await promisify(execFile)("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"], {
 		encoding: "utf8", maxBuffer: 4096, signal, timeout: 2000, shell: false,
 	});
 	return stdout.replace(/\r?\n$/, "");
 }
 
-async function privateStat(path: string, type: "directory" | "socket"): Promise<BigIntStats | undefined> {
+async function discoveryStat(path: string, type: "directory" | "socket" | "file"): Promise<BigIntStats | undefined> {
 	const stat = await lstat(path, { bigint: true }).catch(() => undefined);
-	const uid = process.geteuid?.();
-	const mode = type === "directory" ? 0o700n : 0o600n;
-	if (!stat || uid === undefined || stat.uid !== BigInt(uid) || (stat.mode & 0o7777n) !== mode) return;
-	if (type === "directory" ? stat.isDirectory() : stat.isSocket()) return stat;
+	if (!stat) return;
+	if (process.platform !== "win32") {
+		const uid = process.geteuid?.();
+		const mode = type === "directory" ? 0o700n : 0o600n;
+		if (uid === undefined || stat.uid !== BigInt(uid) || (stat.mode & 0o7777n) !== mode) return;
+	}
+	if (type === "directory" && stat.isDirectory() || type === "socket" && stat.isSocket() || type === "file" && stat.isFile()) return stat;
 }
 
 async function endpoint(root: string, name: string): Promise<Endpoint | undefined> {
+	if (process.platform === "win32") {
+		if (!/^i-[A-Za-z0-9]{24}$/.test(name)) return;
+		const identity = await discoveryStat(join(root, name), "file");
+		if (identity) return { path: "\\\\.\\pipe\\gpui-editor-pi-" + name, identity };
+		return;
+	}
 	const directory = join(root, name);
 	const path = join(directory, "s");
 	// Do not let the OS or runtime truncate a Unix socket address.
 	if (Buffer.byteLength(path) >= (process.platform === "darwin" ? 104 : 108)) return;
-	if (!await privateStat(directory, "directory")) return;
-	const socket = await privateStat(path, "socket");
-	if (socket) return { path, socket };
+	if (!await discoveryStat(directory, "directory")) return;
+	const identity = await discoveryStat(path, "socket");
+	if (identity) return { path, identity };
 }
 
 function openSocket(path: string, signal: AbortSignal, timeout: number): Promise<Socket> {
@@ -100,21 +110,21 @@ function openSocket(path: string, signal: AbortSignal, timeout: number): Promise
 }
 
 async function discover(temp: string, signal: AbortSignal, connectTimeout: number) {
-	if (!isAbsolute(temp) || temp.includes("\0")) throw new Error("Invalid macOS user temp directory.");
-	// Resolve system aliases (such as /var), but reject a symlink at the temp directory itself.
+	if (!isAbsolute(temp) || temp.includes("\0")) throw new Error("Invalid GPUI Editor user discovery directory.");
+	// Resolve system aliases such as /var, but do not follow a link at the supplied directory itself.
 	const tempPath = resolve(temp);
-	if (!await privateStat(tempPath, "directory")) throw new Error("Unsafe macOS user temp directory.");
+	if (!await discoveryStat(tempPath, "directory")) throw new Error("Unsafe GPUI Editor user discovery directory.");
 	const base = await realpath(tempPath);
 	const root = join(base, "gpui-pi");
 	const instances = new Map<string, Endpoint>();
-	if (!await privateStat(base, "directory") || !await privateStat(root, "directory")) return { base, root, instances };
+	if (!await discoveryStat(base, "directory") || !await discoveryStat(root, "directory")) return { base, root, instances };
 
 	let scanned = 0;
 	const candidates: [string, Endpoint][] = [];
 	for await (const entry of await opendir(root)) {
 		signal.throwIfAborted();
-		if (++scanned > 256) throw new Error("Too many entries in the GPUI Editor socket directory.");
-		if (!entry.isDirectory()) continue;
+		if (++scanned > 256) throw new Error("Too many entries in the GPUI Editor discovery directory.");
+		if (process.platform === "win32" ? !entry.isFile() : !entry.isDirectory()) continue;
 		const candidate = await endpoint(root, entry.name);
 		if (candidate) candidates.push([entry.name, candidate]);
 	}
@@ -308,7 +318,7 @@ function renderLogs(entries: string[]): string {
 // Optional injected discovery and deadlines keep tests isolated from the real app.
 export default function gpuiEditor(
 	pi: ExtensionAPI,
-	getUserTempDir = darwinUserTempDir,
+	getDiscoveryDirectory = userDiscoveryDirectory,
 	timeout = timeouts,
 ) {
 	let stopped = false;
@@ -357,7 +367,7 @@ export default function gpuiEditor(
 			let socket: Socket | undefined;
 			try {
 				const signal = AbortSignal.any([operation.signal, AbortSignal.timeout(timeout.discovery)]);
-				const { base, root, instances } = await discover(await getUserTempDir(signal), signal, timeout.connect);
+				const { base, root, instances } = await discover(await getDiscoveryDirectory(signal), signal, timeout.connect);
 				if (!current()) return;
 				if (instances.size === 0) throw new Error("No GPUI Editor found. Enable Developer Mode in the running app.");
 
@@ -375,10 +385,10 @@ export default function gpuiEditor(
 				}
 
 				const selected = instances.get(name)!;
-				const verified = await privateStat(base, "directory") && await privateStat(root, "directory") &&
+				const verified = await discoveryStat(base, "directory") && await discoveryStat(root, "directory") &&
 					await endpoint(root, name);
-				if (!verified || verified.socket.ino !== selected.socket.ino || verified.socket.dev !== selected.socket.dev) {
-					throw new Error("The GPUI Editor socket changed. Run /gpui-pair again.");
+				if (!verified || verified.identity.ino !== selected.identity.ino || verified.identity.dev !== selected.identity.dev) {
+					throw new Error("The GPUI Editor endpoint changed. Run /gpui-pair again.");
 				}
 				if (!current()) return;
 				socket = await openSocket(verified.path, operation.signal, timeout.connect);

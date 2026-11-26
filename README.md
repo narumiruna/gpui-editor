@@ -22,7 +22,7 @@ Install Rust with the MSVC toolchain and Visual Studio Build Tools with **Deskto
 cargo run --locked
 ```
 
-You can also use `just run` if Just is installed. The app uses a native Windows title bar. Pi pairing and window capture are not supported on Windows.
+You can also use `just run` if Just is installed. The app uses a native Windows title bar. Pi pairing works on Windows, but window capture does not.
 
 ## Use the editor
 
@@ -77,6 +77,7 @@ The editor stores the folder and tab list locally in `~/Library/Application Supp
 - Undo reverses a run of typing in one step. A pause of one second or more, moving the caret, or changing the selection ends the run. Paste, line breaks, deletion, formatting, and each input method composition have their own undo steps.
 - Use the toolbar below the tabs to save, format a selection, insert a diagram, add an inline formula, or insert a link. Hover over an icon to see its name. At narrow window widths, scroll the toolbar to reach more actions. The three-dot **More tools** button shows front matter, display formulas, images, and item actions. Click front matter, a diagram, or a formula to edit its source. Click elsewhere in the document to preview the change; this does not save the file.
 - Source editing shows a type label such as `<mermaid>` and a border around the editable text. The label and border are not part of the Markdown.
+- Inline code uses a monospaced font. Click inside it or move the caret into it to show its backticks and edit the Markdown. The backticks hide again when the caret leaves. The editor keeps them in the saved file.
 - Type three backticks at the start of an empty line to insert a matching closing fence and put the caret on the blank line between them. The block stays editable until you move the caret outside it. Pasting Markdown does not insert a closing fence.
 - For links, hover to see the full destination in a tooltip. Click to open the web browser or follow an in-workspace `.md` link. To edit a link without opening it, place the caret at its edge and choose **More tools** → **Edit link**.
 - Image previews support local or HTTPS PNG, JPEG, GIF, and WebP still images. Relative paths are based on the document's folder. To fetch HTTPS previews, choose **Load remote images for this document** in the editor toolbar. The remote host receives the image request; redirects are not followed.
@@ -100,12 +101,12 @@ The app and its internal crates build from source as a workspace. They are not p
 
 ### Developer Mode and Pi
 
-Pi pairing and window capture require macOS.
+Pi pairing works on macOS and Windows. Run GPUI Editor and Pi on the same computer under the same OS account. On Windows, run Pi in Windows, not in WSL. Window capture is available only on macOS.
 
-1. Start GPUI Editor with `just run`. In **GPUI Editor → Preferences…**, turn on **Developer Mode**. A **Select element** button with a target icon appears in the upper-right corner.
+1. Start GPUI Editor. In **Preferences…** (`Cmd-,` on macOS or `Ctrl-,` on Windows), turn on **Developer Mode**. A **Select element** button with a target icon appears in the upper-right corner.
 2. Start Pi 1.6.0 or later in this repository. Trust the project if you want Pi to load [its local extension](.pi/extensions/gpui-editor.ts). In Pi, run `/gpui-pair`. If Pi finds more than one editor, choose the one to pair. Verify the code in both apps, then choose **Pair** in GPUI Editor.
 3. Click **Select element**, then click an element such as **Save**, a sidebar row, or the editing surface. Picking does not run the element's usual action. Press `Esc` to leave picking mode.
-4. Write your feedback. Choose **Capture Window** to attach a screenshot of GPUI Editor, or **Paste Image** to attach a PNG, JPEG, or TIFF image from the clipboard. If macOS denies Screen & System Audio Recording, use **Paste Image** or send text only. Review attachments before choosing **Send to Pi**. An image requires an image-capable Pi model.
+4. Write your feedback. On macOS, choose **Capture Window** to attach a screenshot of GPUI Editor. On either platform, choose **Paste Image** to attach a PNG, JPEG, or TIFF image from the clipboard, or send text only. Review attachments before choosing **Send to Pi**. An image requires an image-capable Pi model.
 
 Feedback goes to the paired session as a user message. If Pi is busy, it follows the current task. Pi may save feedback in its session history or send it to its model provider. You cannot edit the draft while it waits for a receipt. A receipt confirms only that the extension handed feedback to Pi. If Pi rejects the feedback or the connection drops before the receipt, the draft becomes editable again. After a dropped connection, check Pi before resending.
 
@@ -113,7 +114,7 @@ With a live pairing, Pi can call `gpui_editor_logs` to read a bounded history of
 
 ## Checks
 
-Install [Bun](https://bun.com/) to run the Pi extension tests on macOS.
+Install [Bun](https://bun.com/) to run the Pi extension tests on macOS or Windows.
 
 ```sh
 cargo fmt --all -- --check
@@ -122,7 +123,7 @@ cargo test --locked --all-targets
 prek run --all-files
 ```
 
-On macOS, also run:
+On macOS and Windows, also run:
 
 ```sh
 bun test ./.pi/tests/gpui-editor.test.ts

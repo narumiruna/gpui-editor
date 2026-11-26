@@ -406,8 +406,13 @@ impl Editor {
                         .markdown()
                         .sections()
                         .into_iter()
-                        .filter(|section| {
-                            matches!(section.kind, SectionKind::Strong | SectionKind::Emphasis)
+                        .filter(|section| match section.kind {
+                            SectionKind::Strong | SectionKind::Emphasis => true,
+                            SectionKind::InlineCode => {
+                                self.cursor() <= section.source.start
+                                    || self.cursor() >= section.source.end
+                            }
+                            _ => false,
                         })
                         .collect();
                     // Skip hidden delimiters in the rendered view, not in source edit mode.
@@ -1641,6 +1646,74 @@ mod tests {
             cx.simulate_keystrokes("enter");
             cx.update(|_, cx| assert_eq!(editor.read(cx).source(), format!("{heading}\n{eol}")));
         }
+    }
+
+    #[gpui::test]
+    fn inline_code_hides_delimiters_until_the_caret_enters_and_keeps_the_source(
+        cx: &mut TestAppContext,
+    ) {
+        let source = "Before `ls -la` after";
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source.into(), window, cx));
+        cx.update(|window, cx| {
+            bind_keys(cx);
+            window.focus(&editor.read(cx).focus);
+        });
+        cx.run_until_parked();
+        let code = 8..14;
+        let visible = |e: &Editor, expected: &str| {
+            let layout = e.layout.as_ref().unwrap();
+            assert!(layout.source_frame.is_none());
+            assert!(layout.rows.iter().flat_map(|row| &row.items).any(
+                |item| matches!(&item.paint, ItemPaint::Text(line) if line.text.as_ref() == expected)
+            ));
+        };
+        let hit = cx.update(|_, cx| {
+            let e = editor.read(cx);
+            visible(e, "ls -la");
+            let layout = e.layout.as_ref().unwrap();
+            layout.bounds_at(code.start + 1, false).unwrap().center()
+        });
+        cx.simulate_click(hit, Modifiers::none());
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert_eq!(e.cursor(), code.start + 1);
+            visible(e, "`ls -la`");
+        });
+        cx.simulate_input("X");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "Before `lXs -la` after"));
+        cx.simulate_keystrokes("secondary-z");
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert_eq!(e.source(), source);
+            assert_eq!(e.cursor(), code.start + 1);
+        });
+        cx.simulate_keystrokes("left left");
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert_eq!(e.cursor(), code.start - 1);
+            visible(e, "ls -la");
+        });
+        cx.simulate_keystrokes("right");
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert_eq!(e.cursor(), code.start);
+            visible(e, "`ls -la`");
+        });
+    }
+
+    #[gpui::test]
+    fn deleting_next_to_inline_code_skips_hidden_backticks(cx: &mut TestAppContext) {
+        let (editor, cx) =
+            cx.add_window_view(|window, cx| Editor::new("`x` followed".into(), window, cx));
+        cx.update(|window, cx| {
+            bind_keys(cx);
+            window.focus(&editor.read(cx).focus);
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("delete");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), " followed"));
+        cx.simulate_keystrokes("secondary-z right backspace");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "x` followed"));
     }
 
     #[gpui::test]

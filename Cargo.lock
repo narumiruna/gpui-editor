@@ -2234,6 +2234,7 @@ dependencies = [
  "serde_yaml_ng",
  "tempfile",
  "unicode-segmentation",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

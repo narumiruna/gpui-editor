@@ -1,5 +1,6 @@
 // Run from the repository root: bun test ./.pi/tests/gpui-editor.test.ts
 import { afterEach, expect, test } from "bun:test";
+import { randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { chmod, lstat, mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
@@ -7,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import gpuiEditor from "../extensions/gpui-editor.ts";
 
+const windows = process.platform === "win32";
 const MAX_FRAME = 6 * 1024 * 1024;
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jE1sAAAAASUVORK5CYII=";
 const DEADLINES = { discovery: 2000, connect: 250, select: 1000, approval: 1500, frame: 1500, logs: 1500 };
@@ -38,10 +40,11 @@ function channel<T>() {
 type Message = { type: string; id?: number; code?: string; limit?: number };
 const line = (message: object) => JSON.stringify(message) + "\n";
 
-async function fakeEditor(root: string, name = "instance-a") {
+async function fakeEditor(root: string, label = "instance-a") {
+	const name = windows ? `i-${label.replaceAll("-", "") + randomBytes(12).toString("hex")}`.slice(0, 26) : label;
 	const directory = join(root, name);
-	await mkdir(directory, { mode: 0o700 });
-	const path = join(directory, "s");
+	const path = windows ? "\\\\.\\pipe\\gpui-editor-pi-" + name : join(directory, "s");
+	if (!windows) await mkdir(directory, { mode: 0o700 });
 	const sockets = new Set<Socket>();
 	const requests = channel<{ frame: Message; peer: Socket; closed: Promise<unknown> }>();
 	let probes = 0;
@@ -73,8 +76,9 @@ async function fakeEditor(root: string, name = "instance-a") {
 	server.listen(path);
 	cleanups.push(stop);
 	await once(server, "listening");
-	await chmod(path, 0o600);
-	return { directory, path, requests, stop, get probes() { return probes; } };
+	if (windows) await writeFile(directory, "", { flag: "wx" });
+	else await chmod(path, 0o600);
+	return { name, directory, path, requests, stop, get probes() { return probes; } };
 }
 
 async function fixture(overrides: Partial<typeof DEADLINES> = {}) {
@@ -179,7 +183,7 @@ test("shows the code before the pair request and delivers idle and busy feedback
 	expect((await app.requests.take()).frame).toEqual({ type: "receipt", id: 0xffff_ffff, accepted: true });
 });
 
-test("skips stale or unsafe entries and asks which live instance to pair", async () => {
+test.skipIf(windows)("skips stale or unsafe Unix sockets and asks which live instance to pair", async () => {
 	const f = await fixture();
 	const first = await fakeEditor(f.root, "a");
 	const second = await fakeEditor(f.root, "b");
@@ -209,11 +213,27 @@ test("skips stale or unsafe entries and asks which live instance to pair", async
 	expect(publicDirectory.probes).toBe(0);
 });
 
-test("rejects a symlink socket root and skips discovery with no Pi UI", async () => {
+test.skipIf(!windows)("skips stale and invalid Windows markers and pairs the selected live pipe", async () => {
+	const f = await fixture();
+	const first = await fakeEditor(f.root, "a");
+	const second = await fakeEditor(f.root, "b");
+	await writeFile(join(f.root, `i-${"c".repeat(24)}`), "");
+	await mkdir(join(f.root, `i-${"d".repeat(24)}`));
+	await writeFile(join(f.root, "not-an-instance"), "");
+	const pair = f.pair();
+	const { choices } = await f.selections.take();
+	expect(choices).toEqual([`1: ${first.name}`, `2: ${second.name}`]);
+	f.answers.put(choices[1]);
+	await pair;
+	expect((await second.requests.take()).frame.type).toBe("pair");
+	expect(first.probes).toBe(1);
+});
+
+test("rejects a linked discovery root and skips discovery with no Pi UI", async () => {
 	const f = await fixture();
 	const app = await fakeEditor(f.root);
 	await rename(f.root, join(f.temp, "alias-target"));
-	await symlink(join(f.temp, "alias-target"), f.root);
+	await symlink(join(f.temp, "alias-target"), f.root, windows ? "junction" : "dir");
 	f.ctx.hasUI = false;
 	await f.pair();
 	expect(f.discoveryCalls).toBe(0);
@@ -223,16 +243,17 @@ test("rejects a symlink socket root and skips discovery with no Pi UI", async ()
 	expect(app.probes).toBe(0);
 });
 
-test("does not send a pair request if the chosen socket is replaced or made public", async () => {
+test("does not send a pair request if the chosen discovery entry becomes invalid", async () => {
 	const f = await fixture();
 	const app = await fakeEditor(f.root, "a");
 	await fakeEditor(f.root, "b");
 	const pair = f.pair();
 	const { choices } = await f.selections.take();
-	await chmod(app.path, 0o666);
+	if (windows) await rm(app.directory);
+	else await chmod(app.path, 0o666);
 	f.answers.put(choices[0]);
 	await pair;
-	expect(await f.notices.take()).toContain("socket changed");
+	expect(await f.notices.take()).toContain("endpoint changed");
 });
 
 test("shutting down during selection aborts the dialog and cannot pair the old session", async () => {

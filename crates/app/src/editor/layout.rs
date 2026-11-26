@@ -23,12 +23,19 @@ mod blocks;
 
 use blocks::BlockLayout;
 
+const CODE_FONT_FAMILY: &str = if cfg!(target_os = "windows") {
+    "Consolas"
+} else {
+    "Menlo"
+};
+
 #[derive(Clone, Copy, Default)]
 struct Face {
     heading: bool,
     bold: bool,
     italic: bool,
     muted: bool,
+    code: bool,
 }
 
 #[derive(Clone)]
@@ -494,6 +501,9 @@ impl<'a> LayoutBuilder<'a> {
         self.resume_after_source_frame(source.start);
         let style = self.window.text_style();
         let mut font = style.font();
+        if face.code {
+            font.family = CODE_FONT_FAMILY.into();
+        }
         if face.heading || face.bold {
             font.weight = FontWeight::BOLD;
         }
@@ -917,6 +927,9 @@ impl Editor {
         let projection = Projection {
             source,
             active: self.active.as_ref(),
+            inline_caret: (self.focus.is_focused(window)
+                && (self.selection().is_empty() || self.is_composing()))
+            .then(|| self.cursor()),
             previews,
         };
         projection.add(&mut builder, 0..source.len(), &sections, Face::default(), 0);
@@ -1000,6 +1013,7 @@ fn preview_error(kind: SectionKind, error: &str) -> &'static str {
 struct Projection<'a> {
     source: &'a str,
     active: Option<&'a Section>,
+    inline_caret: Option<usize>,
     previews: std::collections::HashMap<usize, Result<Graphic, &'static str>>,
 }
 
@@ -1075,6 +1089,21 @@ impl Projection<'_> {
                                 builder.row.end.max(section.content.end + same_line.len());
                         }
                         self.finish_line(builder, section.content.end, section);
+                    }
+                    K::InlineCode => {
+                        let face = Face { code: true, ..face };
+                        if self.inline_caret.is_some_and(|caret| {
+                            section.source.start < caret && caret < section.source.end
+                        }) {
+                            builder.add_text(self.source, section.source.clone(), face);
+                        } else {
+                            if let Some(code) = &section.inline_code {
+                                builder.text(code, section.content.clone(), face, None, true);
+                            } else {
+                                builder.add_text(self.source, section.content.clone(), face);
+                            }
+                            builder.row.end = section.source.end;
+                        }
                     }
                     K::DraftCode => builder.add_text(self.source, section.source.clone(), face),
                     K::ReadOnly => {
@@ -1240,6 +1269,44 @@ mod tests {
             assert_eq!(layout.rows[0].end, prefix.len());
             assert_eq!(layout.rows[1].start, prefix.len());
             assert_eq!(layout.step(prefix.len(), false), prefix.len() - 1);
+        });
+    }
+
+    #[gpui::test]
+    fn multiline_inline_code_uses_the_same_row_and_monospace_font(cx: &mut TestAppContext) {
+        let source = "**Before `` a\nb `` after**";
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source.into(), window, cx));
+        cx.update(|window, cx| {
+            editor.update(cx, |e, cx| {
+                let layout = e.shape_for_width(window, cx, px(400.));
+                assert_eq!(layout.rows.len(), 1);
+                let code = layout.rows[0]
+                    .items
+                    .iter()
+                    .find_map(|item| match &item.paint {
+                        ItemPaint::Text(line) if line.text.as_ref() == "a b" => Some(line),
+                        _ => None,
+                    })
+                    .unwrap();
+                let mut font = window.text_style().font();
+                font.family = CODE_FONT_FAMILY.into();
+                font.weight = FontWeight::BOLD;
+                let expected = window.text_system().shape_line(
+                    "a b".into(),
+                    px(16.),
+                    &[TextRun {
+                        len: 3,
+                        font,
+                        color: Theme::for_window(window).text.into(),
+                        background_color: None,
+                        underline: None,
+                        strikethrough: None,
+                    }],
+                    None,
+                );
+                assert_eq!(code.runs[0].font_id, expected.runs[0].font_id);
+                assert_eq!(e.source(), source);
+            });
         });
     }
 

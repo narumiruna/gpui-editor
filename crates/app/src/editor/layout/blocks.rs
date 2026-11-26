@@ -8,6 +8,8 @@ use crate::{
     theme::Theme,
 };
 
+use super::CODE_FONT_FAMILY;
+
 const PADDING: f32 = 12.;
 const MARGIN: f32 = 4.;
 const CODE_LINE_HEIGHT: f32 = 22.;
@@ -37,12 +39,7 @@ impl BlockLayout {
     fn code(body: &str, window: &Window) -> Self {
         let style = window.text_style();
         let mut font = style.font();
-        font.family = if cfg!(target_os = "windows") {
-            "Consolas"
-        } else {
-            "Menlo"
-        }
-        .into();
+        font.family = CODE_FONT_FAMILY.into();
         let mut width = px(120.);
         let lines: Vec<_> = body
             .lines()
