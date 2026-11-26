@@ -26,6 +26,7 @@ use gpui_editor_codemirror::{
 };
 
 mod commands;
+mod highlight;
 mod layout;
 pub(crate) mod toolbar;
 #[cfg(test)]
@@ -90,6 +91,7 @@ pub struct Editor {
     active: Option<Section>,
     selecting: bool,
     layout: Option<Layout>,
+    highlighting: highlight::Highlighting,
     input_enabled: bool,
     scroll: ScrollHandle,
     reveal_caret: bool,
@@ -137,6 +139,7 @@ impl Editor {
             active: None,
             selecting: false,
             layout: None,
+            highlighting: highlight::Highlighting::default(),
             input_enabled: true,
             scroll: ScrollHandle::new(),
             reveal_caret: false,
@@ -190,6 +193,9 @@ impl Editor {
     }
 
     pub fn set_path(&mut self, path: Option<PathBuf>, workspace: Option<Workspace>) {
+        if self.path != path {
+            self.highlighting.invalidate();
+        }
         self.path = path;
         self.workspace = workspace;
         self.images.clear();
@@ -260,6 +266,7 @@ impl Editor {
     }
 
     fn invalidate_edit_layout(&mut self) {
+        self.highlighting.invalidate();
         self.layout = None;
         self.upstream = false;
         self.reveal_caret = true;

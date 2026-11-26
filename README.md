@@ -76,6 +76,8 @@ The editor stores the folder and tab list locally in `~/Library/Application Supp
 
 Open existing UTF-8 files such as `.txt`, `.json`, source files, or files without an extension from **Tree**. Files other than `.md` appear as plain text in a monospaced font. They do not use Markdown tools, previews, or code fence completion. Save keeps the filename, the extension, and the line endings you did not edit.
 
+Source and configuration files use syntax colors based on their extension, including `.py`, `.rs`, `.go`, `.ts`, `.js`, `.toml`, `.yaml`, `.yml`, and `.json`. The editor does not run the code or reformat it. Unrecognized extensions, files without an extension, and files with a line longer than 16 KiB keep the default text color.
+
 Plain text files are limited to 1 MiB. Files with invalid UTF-8 or control characters other than tab, carriage return, and line feed do not open as plain text.
 
 ### Edit Markdown
@@ -102,6 +104,8 @@ Run checks for a single component with `-p`. For example, this tests the Markdow
 ```sh
 cargo test --locked -p gpui-editor-document
 ```
+
+Syntax definitions come from [Two Face](https://docs.rs/two-face/) and its [embedded grammar acknowledgements](https://codeberg.org/CosmicHarper/two-face/src/tag/v0.5.2+bat-0.26.1/generated/acknowledgements_full.md).
 
 The app and its internal crates build from source as a workspace. They are not published separately to crates.io.
 
