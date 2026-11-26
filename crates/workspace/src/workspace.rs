@@ -1,8 +1,8 @@
-//! Local Markdown workspaces and conflict-checked file saves.
+//! Local text workspaces and conflict-checked file saves.
 
 use std::{
     fs::{self, DirEntry, Metadata, Permissions},
-    io,
+    io::{self, Read as _},
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -15,6 +15,8 @@ mod publication;
 mod search;
 
 pub use search::{SearchHit, SearchLocation, SearchResults};
+
+const MAX_PLAIN_TEXT_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Workspace {
@@ -93,23 +95,27 @@ impl Workspace {
         Ok(entries)
     }
 
-    /// Resolve an absolute or workspace-relative Markdown file path without reading the file.
+    /// Resolve an absolute or workspace-relative regular file without reading it.
     pub fn resolve_document(&self, path: &Path) -> io::Result<PathBuf> {
-        let path = self.resolve_markdown_path(path)?;
+        let path = self.resolve(path)?;
         file_metadata(&path)?;
         Ok(path)
     }
 
-    /// Open a Markdown file by absolute path or by a path relative to the workspace root.
+    /// Open a UTF-8 file by absolute path or by a path relative to the workspace root.
     pub fn read_document(&self, path: &Path) -> io::Result<DocumentFile> {
-        let path = self.resolve_markdown_path(path)?;
+        let path = self.resolve_document(path)?;
         #[cfg(any(target_os = "macos", target_os = "linux", windows))]
         let parent = path.parent().expect("an absolute document has a parent");
         #[cfg(any(target_os = "macos", target_os = "linux", windows))]
         let parent_identity = directory_identity(parent)?;
         let stamp = path_stamp(&path)?;
-        let source = fs::read_to_string(&path)?;
-        if self.resolve_markdown_path(&path)? != path || path_stamp(&path)? != stamp {
+        let source = if is_markdown(&path) {
+            fs::read_to_string(&path)?
+        } else {
+            read_plain_text(&path, stamp.len)?
+        };
+        if self.resolve(&path)? != path || path_stamp(&path)? != stamp {
             return Err(external_change());
         }
         #[cfg(any(target_os = "macos", target_os = "linux", windows))]
@@ -158,13 +164,6 @@ impl Workspace {
             return Err(io::Error::other("not a direct workspace path"));
         }
         Ok(())
-    }
-
-    fn resolve_markdown_path(&self, path: &Path) -> io::Result<PathBuf> {
-        check_extension(path)?;
-        let path = self.resolve(path)?;
-        check_extension(&path)?;
-        Ok(path)
     }
 }
 
@@ -233,6 +232,10 @@ impl DocumentFile {
     /// On a late conflict the draft may be at the document path, but the displaced version
     /// is kept for recovery and the saved snapshot stays unchanged.
     pub fn save(&mut self, source: &str) -> io::Result<()> {
+        if !is_markdown(&self.path) {
+            check_plain_text_size(source.len() as u64)?;
+            check_plain_text(source)?;
+        }
         #[cfg(any(target_os = "macos", target_os = "linux", windows))]
         let stamp = publication::save(self, source, || {})?;
         #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
@@ -304,8 +307,44 @@ fn classify_entry(entry: &DirEntry) -> io::Result<Option<DirectoryEntry>> {
     Ok(Some(DirectoryEntry { path, kind }))
 }
 
-fn is_markdown(path: &Path) -> bool {
+pub fn is_markdown(path: &Path) -> bool {
     path.extension().is_some_and(|extension| extension == "md")
+}
+
+fn read_plain_text(path: &Path, size: u64) -> io::Result<String> {
+    check_plain_text_size(size)?;
+    let mut bytes = Vec::with_capacity(size as usize);
+    fs::File::open(path)?
+        .take(MAX_PLAIN_TEXT_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    check_plain_text_size(bytes.len() as u64)?;
+    let source = String::from_utf8(bytes).map_err(|_| invalid_plain_text())?;
+    check_plain_text(&source)?;
+    Ok(source)
+}
+
+fn check_plain_text_size(size: u64) -> io::Result<()> {
+    if size > MAX_PLAIN_TEXT_BYTES as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "plain text files cannot exceed 1 MiB",
+        ));
+    }
+    Ok(())
+}
+
+fn check_plain_text(source: &str) -> io::Result<()> {
+    if source.contains(|ch: char| ch.is_control() && !matches!(ch, '\t' | '\r' | '\n')) {
+        return Err(invalid_plain_text());
+    }
+    Ok(())
+}
+
+fn invalid_plain_text() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "the file is not UTF-8 plain text",
+    )
 }
 
 fn check_extension(path: &Path) -> io::Result<()> {

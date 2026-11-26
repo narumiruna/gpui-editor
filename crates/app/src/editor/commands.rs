@@ -38,7 +38,7 @@ fn source_selection(section: &mut Section, select: bool) -> SelectionRange {
 
 impl Editor {
     pub(super) fn complete_code_fence(&mut self, offset: usize, cx: &mut Context<Self>) -> bool {
-        if !self.input_enabled || self.active.is_some() {
+        if !self.input_enabled || self.active.is_some() || !self.is_markdown() {
             return false;
         }
         let source = self.source();
@@ -101,7 +101,7 @@ impl Editor {
         cx: &mut Context<Self>,
     ) {
         use SectionKind as K;
-        if !self.input_enabled {
+        if !self.input_enabled || !self.is_markdown() {
             return;
         }
         window.focus(&self.focus);

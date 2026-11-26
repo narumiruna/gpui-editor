@@ -147,6 +147,51 @@ fn unified_toolbar_formats_and_saves_the_current_document(cx: &mut TestAppContex
 }
 
 #[gpui::test]
+fn tree_opens_plain_text_and_keeps_markdown_tools_on_markdown_tabs(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let text = fixture.document("a.txt", "# **literal**\r\n> 原文\r\n");
+    fs::write(fixture.workspace.root().join("b.bin"), b"text\0binary").unwrap();
+    let markdown = fixture.document("c.md", "# Markdown heading");
+    let extensionless = fixture.document("readme", "some text");
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    fixture.open(cx, &shell);
+    click_tool(cx, "workspace-file-0");
+    let text_id = cx.update(|_, cx| {
+        let tab = shell.read(cx).current().unwrap();
+        assert_eq!(tab.path(), Some(text.as_path()));
+        assert!(!tab.editor.read(cx).is_markdown());
+        assert!(tab.editor.read(cx).headings().is_empty());
+        tab.id
+    });
+    assert!(cx.debug_bounds("Bold").is_none());
+    assert!(cx.debug_bounds("More tools").is_none());
+    let edited = "# **literal**\r\n> 改寫\r\n";
+    replace_current(cx, &shell, edited);
+    click_tool(cx, "Save");
+    assert_eq!(fs::read(&text).unwrap(), edited.as_bytes());
+
+    click_tool(cx, "workspace-file-1");
+    cx.update(|_, cx| {
+        let shell = shell.read(cx);
+        assert_eq!(tab_paths(shell), [&text]);
+        assert_eq!(shell.selected, Some(text_id));
+        assert!(shell.error.as_ref().unwrap().contains("UTF-8 plain text"));
+    });
+
+    click_tool(cx, "workspace-file-2");
+    assert!(cx.debug_bounds("Bold").is_some());
+    click_tool(cx, "workspace-file-3");
+    cx.update(|_, cx| {
+        let shell = shell.read(cx);
+        assert!(shell.error.is_none());
+        assert_eq!(tab_paths(shell), [&text, &markdown, &extensionless]);
+        let tab = shell.current().unwrap();
+        assert_eq!(tab.path(), Some(extensionless.as_path()));
+        assert!(!tab.editor.read(cx).is_markdown());
+    });
+}
+
+#[gpui::test]
 fn compact_toolbar_fits_on_one_row_at_minimum_window_width(cx: &mut TestAppContext) {
     let (shell, cx) = cx.add_window_view(Shell::new);
     click_tool(cx, "New note");

@@ -106,21 +106,66 @@ fn a_replaced_workspace_requires_reopening_before_listing_or_opening_documents()
 }
 
 #[test]
-fn missing_non_utf8_and_non_markdown_documents_fail_to_open() {
+fn missing_non_utf8_and_binary_documents_fail_to_open() {
     let folder = tempdir().unwrap();
     fs::write(folder.path().join("invalid.md"), [0xff]).unwrap();
-    fs::write(folder.path().join("plain.txt"), "valid UTF-8").unwrap();
+    fs::write(folder.path().join("invalid.txt"), [0xff]).unwrap();
+    fs::write(
+        folder.path().join("binary"),
+        b"valid UTF-8\0with a NUL byte",
+    )
+    .unwrap();
     let workspace = Workspace::open(folder.path()).unwrap();
     for (path, kind) in [
         ("missing.md", ErrorKind::NotFound),
         ("invalid.md", ErrorKind::InvalidData),
-        ("plain.txt", ErrorKind::InvalidInput),
+        ("invalid.txt", ErrorKind::InvalidData),
+        ("binary", ErrorKind::InvalidData),
     ] {
         assert_eq!(
             workspace.read_document(Path::new(path)).unwrap_err().kind(),
             kind
         );
     }
+}
+
+#[test]
+fn opens_and_saves_existing_plain_text_without_changing_its_name_or_line_endings() {
+    let folder = tempdir().unwrap();
+    let workspace = Workspace::open(folder.path()).unwrap();
+    for name in ["note.txt", "config.json", "Makefile", ".gitignore"] {
+        let path = workspace.root().join(name);
+        fs::write(&path, "# 原文\r\n\t**literal**").unwrap();
+        let mut file = workspace.read_document(Path::new(name)).unwrap();
+        assert_eq!(file.path(), path);
+        assert_eq!(file.source(), "# 原文\r\n\t**literal**");
+        let changed = "# 新文字\r\n\t**literal**";
+        file.save(changed).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), changed.as_bytes());
+        assert_eq!(workspace.read_document(&path).unwrap().source(), changed);
+    }
+}
+
+#[test]
+fn rejects_oversized_plain_text_and_does_not_publish_unsupported_edits() {
+    let folder = tempdir().unwrap();
+    let workspace = Workspace::open(folder.path()).unwrap();
+    let path = workspace.root().join("data.txt");
+    let limit = 1024 * 1024;
+    let source = "x".repeat(limit);
+    fs::write(&path, &source).unwrap();
+    let mut file = workspace.read_document(&path).unwrap();
+    assert_eq!(file.source().len(), limit);
+    for draft in ["invalid\0".to_owned(), "x".repeat(limit + 1)] {
+        assert_eq!(
+            file.save(&draft).unwrap_err().kind(),
+            ErrorKind::InvalidData
+        );
+        assert!(fs::read(&path).unwrap() == source.as_bytes());
+    }
+    fs::write(&path, "x".repeat(limit + 1)).unwrap();
+    let error = workspace.read_document(&path).unwrap_err();
+    assert!(error.to_string().contains("1 MiB"));
 }
 
 #[test]

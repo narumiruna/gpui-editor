@@ -805,9 +805,21 @@ impl Editor {
         cx: &mut Context<Self>,
         width: Pixels,
     ) -> Layout {
-        let scale = window.scale_factor();
         let source = self.history.state().text().as_str();
         let mut builder = LayoutBuilder::new(window, self.marked.clone(), width);
+        if !self.is_markdown() {
+            builder.add_text(
+                source,
+                0..source.len(),
+                Face {
+                    code: true,
+                    ..Face::default()
+                },
+            );
+            return builder.build();
+        }
+
+        let scale = window.scale_factor();
         let sections = self.projected_sections();
         let visible_previews = self.preview_sections(&sections);
         let mut previews = std::collections::HashMap::new();
@@ -1269,6 +1281,27 @@ mod tests {
             assert_eq!(layout.rows[0].end, prefix.len());
             assert_eq!(layout.rows[1].start, prefix.len());
             assert_eq!(layout.step(prefix.len(), false), prefix.len() - 1);
+        });
+    }
+
+    #[gpui::test]
+    fn plain_text_shapes_markdown_syntax_as_literal_text(cx: &mut TestAppContext) {
+        let source = "# **Title**\r\n> `[raw]`\r\n";
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            let mut editor = Editor::new(source.into(), window, cx);
+            editor.set_path(Some("Makefile".into()), None);
+            editor
+        });
+        cx.update(|window, cx| {
+            editor.update(cx, |e, cx| {
+                let layout = e.shape_for_width(window, cx, px(400.));
+                assert_eq!(layout.rows.len(), 3);
+                for (row, expected) in layout.rows.iter().zip(["# **Title**", "> `[raw]`"]) {
+                    let [item] = row.items.as_slice() else { panic!("expected one text item"); };
+                    assert!(matches!(&item.paint, ItemPaint::Text(line) if line.text.as_ref() == expected));
+                    assert_eq!(&source[item.source.clone()], expected);
+                }
+            });
         });
     }
 

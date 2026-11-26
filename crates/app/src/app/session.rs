@@ -313,7 +313,7 @@ mod tests {
     fn skips_missing_invalid_external_and_duplicate_tabs_and_falls_back() {
         let fixture = Fixture::new();
         let first = fixture.document("first.md", "first");
-        let last = fixture.document("last.md", "last");
+        let last = fixture.document("last.txt", "last");
         let missing = fixture.document("missing.md", "missing");
         let bad = fixture.workspace.root().join("bad.md");
         fs::write(&bad, [0xff]).unwrap();

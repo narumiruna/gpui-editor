@@ -1,6 +1,7 @@
 //! One GPUI input surface backed by offsets in the Markdown source.
 
 use std::{
+    borrow::Cow,
     collections::HashMap,
     ops::Range,
     path::PathBuf,
@@ -10,7 +11,7 @@ use std::{
 use crate::{
     document::{Heading, Markdown, Section, SectionKind},
     theme::Theme,
-    workspace::Workspace,
+    workspace::{Workspace, is_markdown},
 };
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, ClipboardItem, Context, CursorStyle,
@@ -158,6 +159,10 @@ impl Editor {
         self.history.state().text().as_str()
     }
 
+    pub(crate) fn is_markdown(&self) -> bool {
+        self.path.as_deref().is_none_or(is_markdown)
+    }
+
     fn markdown(&self) -> Markdown<'_> {
         Markdown::new(self.source())
     }
@@ -168,7 +173,11 @@ impl Editor {
     }
 
     pub(crate) fn headings(&self) -> Vec<Heading> {
-        self.markdown().headings()
+        if self.is_markdown() {
+            self.markdown().headings()
+        } else {
+            Vec::new()
+        }
     }
 
     /// Scroll to a UTF-8 byte offset without moving the caret or taking focus.
@@ -311,8 +320,23 @@ impl Editor {
             EditScope::Active => self.active.as_ref(),
             EditScope::Document => None,
         };
-        let Ok((range, inserted)) = self.markdown().plan_replacement(range, text, active) else {
-            self.message = Some("Cannot edit this Markdown range".into());
+        let markdown = self.is_markdown();
+        let planned = if markdown {
+            self.markdown().plan_replacement(range, text, active).ok()
+        } else {
+            self.source()
+                .get(range.clone())
+                .map(|_| (range, Cow::Borrowed(text)))
+        };
+        let Some((range, inserted)) = planned else {
+            self.message = Some(
+                if markdown {
+                    "Cannot edit this Markdown range"
+                } else {
+                    "Cannot edit this text range"
+                }
+                .into(),
+            );
             cx.notify();
             return None;
         };
@@ -401,7 +425,7 @@ impl Editor {
         if selection.is_empty() {
             if let Some(layout) = &self.layout {
                 let mut at = self.cursor();
-                if self.active.is_none() {
+                if self.active.is_none() && self.is_markdown() {
                     let inline: Vec<_> = self
                         .markdown()
                         .sections()
@@ -1826,6 +1850,27 @@ mod tests {
             assert!(matches!(e.images.get("same.png"), Some(ImageEntry::Ready(Err(message))) if message == "new"));
             assert_eq!(e.image_requests, 0);
         }));
+    }
+
+    #[gpui::test]
+    fn typing_backticks_in_plain_text_does_not_complete_a_fence(cx: &mut TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            let mut editor = Editor::new(String::new(), window, cx);
+            editor.set_path(Some("script.txt".into()), None);
+            editor
+        });
+        cx.update(|window, cx| {
+            bind_keys(cx);
+            window.focus(&editor.read(cx).focus);
+        });
+        cx.run_until_parked();
+        cx.simulate_input("```");
+        cx.update(|_, cx| {
+            assert_eq!(editor.read(cx).source(), "```");
+            assert_eq!(editor.read(cx).cursor(), 3);
+        });
+        cx.simulate_keystrokes("secondary-z");
+        cx.update(|_, cx| assert!(editor.read(cx).source().is_empty()));
     }
 
     #[gpui::test]
