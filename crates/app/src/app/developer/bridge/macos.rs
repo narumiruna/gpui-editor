@@ -114,7 +114,7 @@ fn effective_uid() -> libc::uid_t {
     unsafe { libc::geteuid() }
 }
 
-fn same_user(socket: &UnixStream) -> bool {
+fn same_user(socket: &Stream) -> bool {
     let (mut uid, mut gid) = (0, 0);
     // SAFETY: the descriptor stays open for this call, and both outputs are writable.
     let result = unsafe { libc::getpeereid(socket.as_raw_fd(), &mut uid, &mut gid) };
