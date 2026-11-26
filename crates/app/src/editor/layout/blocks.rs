@@ -37,7 +37,12 @@ impl BlockLayout {
     fn code(body: &str, window: &Window) -> Self {
         let style = window.text_style();
         let mut font = style.font();
-        font.family = "Menlo".into();
+        font.family = if cfg!(target_os = "windows") {
+            "Consolas"
+        } else {
+            "Menlo"
+        }
+        .into();
         let mut width = px(120.);
         let lines: Vec<_> = body
             .lines()

@@ -11,7 +11,7 @@ use gpui::{
 
 use super::{
     ChooseFolder, Close, NewDocument, OpenPalette, Preferences, Quit, SaveDocument, Shell,
-    TextField, ToggleSidebar, set_menus, state_file,
+    TextField, ToggleSidebar, state_file,
 };
 use crate::{editor, theme::Theme};
 
@@ -29,54 +29,54 @@ const COMMANDS: [Command; 6] = [
     Command {
         id: "open-folder",
         label: "Open Folder",
-        default: "cmd-o",
+        default: "secondary-o",
         bind: |key| KeyBinding::new(key, ChooseFolder, None),
     },
     Command {
         id: "new-document",
         label: "New Document",
-        default: "cmd-n",
+        default: "secondary-n",
         bind: |key| KeyBinding::new(key, NewDocument, None),
     },
     Command {
         id: "save",
         label: "Save",
-        default: "cmd-s",
+        default: "secondary-s",
         bind: |key| KeyBinding::new(key, SaveDocument, None),
     },
     Command {
         id: "close-tab",
         label: "Close Tab",
-        default: "cmd-w",
+        default: "secondary-w",
         bind: |key| KeyBinding::new(key, Close, None),
     },
     Command {
         id: "toggle-sidebar",
         label: "Toggle Sidebar",
-        default: "cmd-/",
+        default: "secondary-/",
         bind: |key| KeyBinding::new(key, ToggleSidebar, None),
     },
     Command {
         id: "command-palette",
         label: "Command Palette",
-        default: "cmd-p",
+        default: "secondary-p",
         bind: |key| KeyBinding::new(key, OpenPalette, None),
     },
 ];
 const FIXED: &[&str] = &[
-    "cmd-q",
-    "cmd-shift-q",
-    "cmd-,",
-    "cmd-a",
-    "cmd-c",
-    "cmd-x",
-    "cmd-v",
-    "cmd-z",
-    "cmd-shift-z",
-    "cmd-h",
-    "cmd-m",
-    "cmd-`",
-    "cmd-~",
+    "secondary-q",
+    "secondary-shift-q",
+    "secondary-,",
+    "secondary-a",
+    "secondary-c",
+    "secondary-x",
+    "secondary-v",
+    "secondary-z",
+    "secondary-shift-z",
+    "secondary-h",
+    "secondary-m",
+    "secondary-`",
+    "secondary-~",
 ];
 const MAX_BYTES: u64 = 4096;
 
@@ -85,7 +85,7 @@ pub(super) struct Bindings([String; COMMANDS.len()]);
 
 impl Default for Bindings {
     fn default() -> Self {
-        Self(COMMANDS.map(|command| command.default.into()))
+        Self(COMMANDS.map(|command| normalize(command.default)))
     }
 }
 
@@ -98,8 +98,8 @@ impl Bindings {
                 .map(|(command, key)| (command.bind)(key)),
         );
         cx.bind_keys([
-            KeyBinding::new("cmd-q", Quit, None),
-            KeyBinding::new("cmd-,", Preferences, None),
+            KeyBinding::new("secondary-q", Quit, None),
+            KeyBinding::new("secondary-,", Preferences, None),
         ]);
     }
 
@@ -131,7 +131,7 @@ impl Bindings {
         let overrides: BTreeMap<_, _> = COMMANDS
             .iter()
             .zip(&self.0)
-            .filter(|(command, key)| command.default != key.as_str())
+            .filter(|(command, key)| normalize(command.default) != key.as_str())
             .map(|(command, key)| (command.id, key))
             .collect();
         state_file::write_atomically(path, |file| {
@@ -150,18 +150,29 @@ fn invalid(error: impl std::fmt::Display) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error.to_string())
 }
 
+fn normalize(key: &str) -> String {
+    Keystroke::parse(key)
+        .expect("valid built-in shortcut")
+        .unparse()
+}
+
 fn parse(key: &str) -> Result<String, &'static str> {
-    let chord = Keystroke::parse(key).map_err(|_| "Enter one shortcut with Cmd and a key.")?;
-    if !chord.modifiers.platform
+    let required = if cfg!(target_os = "macos") {
+        "Use Cmd with a letter, number, or punctuation key."
+    } else {
+        "Use Ctrl with a letter, number, or punctuation key."
+    };
+    let chord = Keystroke::parse(key).map_err(|_| required)?;
+    if !chord.modifiers.secondary()
         || chord.modifiers.function
         || chord.key_char.is_some()
         || chord.key.len() != 1
         || !chord.key.as_bytes()[0].is_ascii_graphic()
     {
-        return Err("Use Cmd with a letter, number, or punctuation key.");
+        return Err(required);
     }
     let key = chord.unparse();
-    if FIXED.contains(&key.as_str()) {
+    if FIXED.iter().any(|fixed| normalize(fixed) == key) {
         return Err("This shortcut is reserved.");
     }
     Ok(key)
@@ -169,12 +180,23 @@ fn parse(key: &str) -> Result<String, &'static str> {
 
 fn label(key: &str) -> String {
     let chord = Keystroke::parse(key).expect("validated shortcut");
-    let mut label = String::from("Cmd+");
+    let mut label = String::new();
+    if chord.modifiers.platform {
+        label.push_str(if cfg!(target_os = "macos") {
+            "Cmd+"
+        } else {
+            "Win+"
+        });
+    }
     if chord.modifiers.control {
         label.push_str("Ctrl+");
     }
     if chord.modifiers.alt {
-        label.push_str("Option+");
+        label.push_str(if cfg!(target_os = "macos") {
+            "Option+"
+        } else {
+            "Alt+"
+        });
     }
     if chord.modifiers.shift {
         label.push_str("Shift+");
@@ -252,7 +274,7 @@ impl Shell {
         };
         if !key.modifiers.modified() && key.key == "escape" {
             self.hotkeys.cancel_recording();
-        } else if key.modifiers.platform
+        } else if key.modifiers.secondary()
             || !matches!(
                 key.key.as_str(),
                 "shift" | "control" | "alt" | "platform" | "function"
@@ -304,7 +326,8 @@ impl Shell {
                         editor::bind_keys(cx);
                         TextField::bind_keys(cx);
                         shell.hotkeys.bindings.bind(cx);
-                        set_menus(cx);
+                        #[cfg(target_os = "macos")]
+                        super::set_menus(cx);
                     }
                     Err(_) => {
                         shell.hotkeys.notice =

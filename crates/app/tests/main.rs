@@ -10,7 +10,9 @@ fn help_explains_how_to_start_without_a_path() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("Usage: gpui-editor\n"));
+    assert!(stdout.contains("Launch the desktop app"));
     assert!(stdout.contains("Choose a folder inside the app"));
+    assert!(!stdout.contains("macOS app"));
 }
 
 #[test]
@@ -28,9 +30,9 @@ fn path_arguments_do_not_start_the_app() {
     );
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 #[test]
-fn reports_that_the_desktop_app_requires_macos() {
+fn reports_supported_desktop_platforms() {
     let output = Command::new(env!("CARGO_BIN_EXE_gpui-editor"))
         .output()
         .expect("launch the built CLI");
@@ -38,6 +40,6 @@ fn reports_that_the_desktop_app_requires_macos() {
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()
-            .contains("requires macOS")
+            .contains("requires macOS or Windows")
     );
 }

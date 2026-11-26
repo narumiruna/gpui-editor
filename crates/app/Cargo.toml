@@ -2,7 +2,7 @@
 name = "gpui-editor"
 version = "0.2.0"
 edition.workspace = true
-description = "A local Markdown editor for macOS"
+description = "A local Markdown editor for macOS and Windows"
 readme = "../../README.md"
 repository.workspace = true
 license.workspace = true
@@ -13,20 +13,22 @@ gpui-editor-document = { path = "../document" }
 gpui-editor-preview = { path = "../preview" }
 gpui-editor-workspace = { path = "../workspace" }
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 base64 = "0.23"
 gpui-editor-codemirror = { path = "../codemirror" }
 gpui.workspace = true
 image = { workspace = true, features = ["jpeg", "png", "tiff"] }
-libc = "0.2"
-objc2 = "0.6.5"
-raw-window-handle = "0.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml_ng = "0.10.0"
 tempfile.workspace = true
 unicode-segmentation = "1.12.0"
 
-[target.'cfg(target_os = "macos")'.dev-dependencies]
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+objc2 = "0.6.5"
+raw-window-handle = "0.6"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
 resvg.workspace = true

@@ -1,9 +1,8 @@
-#![cfg(target_os = "macos")]
+#![cfg(any(target_os = "macos", target_os = "windows"))]
 
-use std::{
-    fs::{self, File},
-    os::unix::{fs::symlink, net::UnixListener},
-};
+use std::fs::{self, File};
+#[cfg(unix)]
+use std::os::unix::{fs::symlink, net::UnixListener};
 
 use gpui_editor_preview::media::{Target, image_target, link_target, load_image};
 use image::{GrayImage, ImageFormat, RgbImage, Rgba, RgbaImage};
@@ -59,21 +58,32 @@ fn reject_workspace_escapes_and_nonregular_files() {
     fs::create_dir(&sibling).unwrap();
     let outside = sibling.join("outside.md");
     fs::write(&outside, []).unwrap();
-    fs::write(root.join("inside.txt"), []).unwrap();
-    symlink(&outside, root.join("escape.md")).unwrap();
-    symlink(&sibling, root.join("escape-dir")).unwrap();
-    symlink("inside.txt", root.join("not-markdown.md")).unwrap();
-    let socket = root.join("socket.md");
-    let _listener = UnixListener::bind(&socket).unwrap();
+    fs::create_dir(root.join("folder.md")).unwrap();
 
-    for destination in [
+    let escapes = [
         "../workspace-other/outside.md",
         "%2e%2e/workspace-other/outside.md",
-        "escape.md",
-        "escape-dir/outside.md",
-        outside.to_str().unwrap(),
-        "socket.md",
-    ] {
+        "folder.md",
+    ];
+    #[cfg(unix)]
+    let escapes = {
+        fs::write(root.join("inside.txt"), []).unwrap();
+        symlink(&outside, root.join("escape.md")).unwrap();
+        symlink(&sibling, root.join("escape-dir")).unwrap();
+        symlink("inside.txt", root.join("not-markdown.md")).unwrap();
+        let socket = root.join("socket.md");
+        let _listener = UnixListener::bind(&socket).unwrap();
+        assert!(link_target("not-markdown.md", None, Some(&root)).is_err());
+        assert!(load_image(&Target::Local(socket.canonicalize().unwrap())).is_err());
+        escapes.into_iter().chain([
+            "escape.md",
+            "escape-dir/outside.md",
+            outside.to_str().unwrap(),
+            "socket.md",
+        ])
+    };
+
+    for destination in escapes {
         assert!(
             link_target(destination, None, Some(&root)).is_err(),
             "{destination}"
@@ -83,10 +93,9 @@ fn reject_workspace_escapes_and_nonregular_files() {
             "{destination}"
         );
     }
-    assert!(link_target("not-markdown.md", None, Some(&root)).is_err());
-    assert!(load_image(&Target::Local(socket.canonicalize().unwrap())).is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn reject_symlinks_inserted_after_resolution() {
     let root = tempdir().unwrap();
@@ -125,6 +134,7 @@ fn classify_web_destinations_without_fetching() {
     assert_eq!(image_target(destination, None, None).unwrap(), image);
 
     let root = tempdir().unwrap();
+    #[cfg(unix)]
     fs::write(root.path().join("mailto:example.md"), []).unwrap();
     for destination in [
         "mailto:example.md",
@@ -189,10 +199,12 @@ fn reject_unsupported_corrupt_and_oversize_images() {
         fs::write(&file, bytes).unwrap();
         assert!(load_image(&target()).is_err());
     }
-    RgbImage::new(1, 1)
-        .save_with_format(&file, ImageFormat::Bmp)
-        .unwrap();
-    assert!(load_image(&target()).is_err());
+    fs::write(&file, b"BM\0\0").unwrap();
+    assert!(
+        load_image(&target())
+            .unwrap_err()
+            .contains("Expected a PNG")
+    );
 
     for (width, height) in [(4097, 1), (2049, 2048)] {
         GrayImage::new(width, height).save(&file).unwrap();

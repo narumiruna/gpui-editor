@@ -138,17 +138,31 @@ fn reports_unreadable_files_and_distinguishes_an_unreadable_root() {
     }
 }
 
+#[test]
+fn does_not_enter_private_recovery_folders() {
+    let folder = tempdir().unwrap();
+    let workspace = Workspace::open(folder.path()).unwrap();
+    let root = workspace.root();
+    fs::create_dir(root.join(".gpui-save-recovery")).unwrap();
+    fs::write(root.join(".gpui-save-recovery/needle.md"), "needle").unwrap();
+    fs::write(root.join("inside.md"), "needle").unwrap();
+
+    let results = workspace.search_markdown("needle", || false).unwrap();
+    assert!(!results.skipped);
+    assert!(!results.truncated);
+    assert_eq!(results.hits.len(), 1);
+    assert_eq!(results.hits[0].path, root.join("inside.md"));
+}
+
 #[cfg(unix)]
 #[test]
-fn does_not_follow_symlinks_or_enter_private_recovery_folders() {
+fn does_not_follow_symlinks() {
     use std::os::unix::fs::symlink;
 
     let folder = tempdir().unwrap();
     let outside = tempdir().unwrap();
     let workspace = Workspace::open(folder.path()).unwrap();
     let root = workspace.root();
-    fs::create_dir(root.join(".gpui-save-recovery")).unwrap();
-    fs::write(root.join(".gpui-save-recovery/needle.md"), "needle").unwrap();
     fs::write(root.join("inside.md"), "needle").unwrap();
     fs::write(outside.path().join("needle.md"), "needle").unwrap();
     symlink(root.join("inside.md"), root.join("needle-link.md")).unwrap();
@@ -163,7 +177,7 @@ fn does_not_follow_symlinks_or_enter_private_recovery_folders() {
     assert_eq!(results.hits[0].path, root.join("inside.md"));
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 #[test]
 fn rejects_a_replaced_workspace_root() {
     let folder = tempdir().unwrap();

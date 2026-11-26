@@ -1,13 +1,17 @@
 //! Window screenshots and clipboard images for Developer Mode attachments.
 
+#[cfg(target_os = "macos")]
 use std::{
     fs::{File, Permissions},
-    io::{BufRead, BufReader, Cursor, Seek},
+    io::BufReader,
     os::unix::fs::PermissionsExt,
     process::{Command, Stdio},
-    sync::Arc,
     thread,
     time::{Duration, Instant},
+};
+use std::{
+    io::{BufRead, Cursor, Seek},
+    sync::Arc,
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -16,7 +20,9 @@ use image::{
     DynamicImage, Frame, ImageDecoder, ImageEncoder, ImageFormat as CodecFormat, ImageReader,
     Limits, RgbaImage, codecs::png::PngEncoder, metadata::Orientation,
 };
+#[cfg(target_os = "macos")]
 use objc2::{MainThreadMarker, msg_send, runtime::AnyObject};
+#[cfg(target_os = "macos")]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 const MAX_INPUT_BYTES: u64 = 32 * 1024 * 1024;
@@ -27,8 +33,12 @@ const SMALL_EDGE: u32 = 800;
 const MAX_BASE64_BYTES: usize = 4 * 1024 * 1024;
 // Padded base64 represents each three input bytes as four ASCII bytes.
 const MAX_PNG_BYTES: usize = MAX_BASE64_BYTES / 4 * 3;
+#[cfg(target_os = "macos")]
 const CAPTURE_FAILED: &str = "Could not capture the editor window. Keep it open and check Screen & System Audio Recording permissions in System Settings, or paste an image instead.";
 const DECODE_LIMIT: &str = "The image exceeds the decoding limits.";
+#[cfg(not(target_os = "macos"))]
+const CAPTURE_UNSUPPORTED: &str =
+    "Window capture is not supported on this platform. Paste an image instead.";
 
 pub struct Picture {
     /// Standard padded base64 of a single PNG, with no data URL prefix.
@@ -37,6 +47,7 @@ pub struct Picture {
 }
 
 /// Get the native ID of the editor window on the UI thread.
+#[cfg(target_os = "macos")]
 pub fn window_id(window: &Window) -> Result<u32, String> {
     let _main = MainThreadMarker::new().ok_or("Window capture requires the macOS main thread.")?;
     let handle = HasWindowHandle::window_handle(window)
@@ -61,7 +72,13 @@ pub fn window_id(window: &Window) -> Result<u32, String> {
         .ok_or_else(|| "The editor window has no valid capture ID.".into())
 }
 
+#[cfg(not(target_os = "macos"))]
+pub fn window_id(_window: &Window) -> Result<u32, String> {
+    Err(CAPTURE_UNSUPPORTED.into())
+}
+
 /// On a background thread, capture only the window identified by `window_id`.
+#[cfg(target_os = "macos")]
 pub fn capture(id: u32) -> Result<Picture, String> {
     if id == 0 {
         return Err("The editor window has no valid capture ID.".into());
@@ -106,6 +123,11 @@ pub fn capture(id: u32) -> Result<Picture, String> {
     let pixels = decode(BufReader::new(file), CodecFormat::Png)?;
     drop(temp);
     picture(pixels)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn capture(_id: u32) -> Result<Picture, String> {
+    Err(CAPTURE_UNSUPPORTED.into())
 }
 
 /// Read one image from GPUI's clipboard on the UI thread, without decoding it.
@@ -198,7 +220,7 @@ fn picture(mut pixels: RgbaImage) -> Result<Picture, String> {
     let data = STANDARD.encode(png);
 
     // GPUI RenderImage uses BGRA. Build it from the exact pixels sent in the PNG.
-    for pixel in pixels.chunks_exact_mut(4) {
+    for pixel in pixels.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     let preview = Arc::new(RenderImage::new([Frame::new(pixels)]));
@@ -291,8 +313,18 @@ mod tests {
         assert!(from_clipboard(clipboard_png(&too_wide)).is_err());
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn rejects_zero_window_id() {
         assert!(capture(0).is_err());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn window_capture_is_explicitly_unsupported() {
+        for id in [0, 1, u32::MAX] {
+            let error = capture(id).err().expect("capture must be unsupported");
+            assert_eq!(error, CAPTURE_UNSUPPORTED);
+        }
     }
 }

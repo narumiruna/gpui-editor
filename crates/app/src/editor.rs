@@ -60,15 +60,15 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("down", Down, Some("Editor")),
         KeyBinding::new("shift-up", SelectUp, Some("Editor")),
         KeyBinding::new("shift-down", SelectDown, Some("Editor")),
-        KeyBinding::new("cmd-a", SelectAll, Some("Editor")),
+        KeyBinding::new("secondary-a", SelectAll, Some("Editor")),
         KeyBinding::new("backspace", Backspace, Some("Editor")),
         KeyBinding::new("delete", Delete, Some("Editor")),
         KeyBinding::new("enter", Newline, Some("Editor")),
-        KeyBinding::new("cmd-c", Copy, Some("Editor")),
-        KeyBinding::new("cmd-x", Cut, Some("Editor")),
-        KeyBinding::new("cmd-v", Paste, Some("Editor")),
-        KeyBinding::new("cmd-z", Undo, Some("Editor")),
-        KeyBinding::new("cmd-shift-z", Redo, Some("Editor")),
+        KeyBinding::new("secondary-c", Copy, Some("Editor")),
+        KeyBinding::new("secondary-x", Cut, Some("Editor")),
+        KeyBinding::new("secondary-v", Paste, Some("Editor")),
+        KeyBinding::new("secondary-z", Undo, Some("Editor")),
+        KeyBinding::new("secondary-shift-z", Redo, Some("Editor")),
     ]);
 }
 
@@ -1242,7 +1242,7 @@ mod tests {
             assert!(e.history.can_undo());
             assert!(!e.history.can_redo());
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| {
             let e = editor.read(cx);
             assert_eq!(e.source(), original);
@@ -1725,9 +1725,9 @@ mod tests {
             assert_eq!(editor.source(), "```\n\n```");
             assert_eq!(editor.selection(), 4..4);
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "``"));
-        cx.simulate_keystrokes("cmd-shift-z");
+        cx.simulate_keystrokes("secondary-shift-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).selection(), 4..4));
         cx.simulate_input("let x = 1;");
         cx.simulate_keystrokes("backspace");
@@ -1763,13 +1763,13 @@ mod tests {
         });
         cx.run_until_parked();
         cx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string("```".into())));
-        cx.simulate_keystrokes("cmd-v");
+        cx.simulate_keystrokes("secondary-v");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "```"));
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| assert!(editor.read(cx).source().is_empty()));
-        cx.simulate_keystrokes("cmd-shift-z backspace");
+        cx.simulate_keystrokes("secondary-shift-z backspace");
         cx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string("`".into())));
-        cx.simulate_keystrokes("cmd-v");
+        cx.simulate_keystrokes("secondary-v");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "```"));
         for text in ["rust", "\n", "let x = 1;", "\n", "`", "`", "`"] {
             cx.simulate_input(text);
@@ -1883,7 +1883,7 @@ mod tests {
         cx.simulate_input("新標題");
         cx.simulate_click(formula, Modifiers::none());
         cx.update(|_, cx| assert!(editor.read(cx).active.is_some()));
-        cx.simulate_keystrokes("cmd-a");
+        cx.simulate_keystrokes("secondary-a");
         cx.simulate_input("y^3");
         cx.update(|_, cx| {
             let editor = editor.read(cx);
@@ -1911,7 +1911,8 @@ mod tests {
         cx.simulate_mouse_up(paragraph, MouseButton::Left, Modifiers::none());
         cx.update(|_, cx| {
             let editor = editor.read(cx);
-            assert!(editor.source()[editor.selection()].contains("\n\n"));
+            let selected = &editor.source()[editor.selection()];
+            assert!(selected.contains("\n\n") || selected.contains("\r\n\r\n"));
         });
     }
 
@@ -1958,9 +1959,9 @@ mod tests {
         });
         cx.simulate_input("字");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "**選取**\n\n# 字**也選取**"));
-        cx.simulate_keystrokes("cmd-z cmd-z cmd-z");
+        cx.simulate_keystrokes("secondary-z secondary-z secondary-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "選取\n\n也選取"));
-        cx.simulate_keystrokes("cmd-shift-z");
+        cx.simulate_keystrokes("secondary-shift-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "**選取**\n\n**也選取**"));
     }
 
