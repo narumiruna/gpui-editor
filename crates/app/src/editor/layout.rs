@@ -10,7 +10,7 @@ use gpui::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::{Editor, ImageEntry, PreviewDiagnostic};
+use super::{Editor, ImageEntry, PreviewDiagnostic, highlight};
 use crate::{
     document::{Section, SectionKind},
     media::{Target, image_target, load_image},
@@ -361,6 +361,65 @@ struct LayoutBuilder<'a> {
     inset: Pixels,
     source_frame: Option<SourceFrame>,
     marked: Option<Range<usize>>,
+    syntax: &'a [highlight::Span],
+}
+
+#[derive(Clone, Copy)]
+struct TextDecorations<'a> {
+    marked: Option<&'a Range<usize>>,
+    syntax: &'a [highlight::Span],
+    theme: Theme,
+}
+
+impl TextDecorations<'_> {
+    fn runs(self, source: Range<usize>, template: &TextRun) -> Vec<TextRun> {
+        let mut runs = Vec::new();
+        let mut push = |range: Range<usize>, color| {
+            let pieces = if let Some(marked) = self
+                .marked
+                .filter(|marked| marked.start < range.end && range.start < marked.end)
+            {
+                let start = range.start.max(marked.start);
+                let end = range.end.min(marked.end);
+                [
+                    (start - range.start, false),
+                    (end - start, true),
+                    (range.end - end, false),
+                ]
+            } else {
+                [(range.len(), false), (0, false), (0, false)]
+            };
+            for (len, marked) in pieces.into_iter().filter(|(len, _)| *len > 0) {
+                let mut run = TextRun {
+                    len,
+                    color,
+                    ..template.clone()
+                };
+                if marked {
+                    run.underline = Some(UnderlineStyle {
+                        color: Some(color),
+                        thickness: px(1.),
+                        wavy: false,
+                    });
+                }
+                runs.push(run);
+            }
+        };
+        let mut at = source.start;
+        let first = self.syntax.partition_point(|span| span.range.end <= at);
+        for span in &self.syntax[first..] {
+            if span.range.start >= source.end {
+                break;
+            }
+            let start = span.range.start.max(at);
+            let end = span.range.end.min(source.end);
+            push(at..start, template.color);
+            push(start..end, span.kind.color(self.theme));
+            at = end;
+        }
+        push(at..source.end, template.color);
+        runs
+    }
 }
 
 impl<'a> LayoutBuilder<'a> {
@@ -374,6 +433,7 @@ impl<'a> LayoutBuilder<'a> {
             inset: px(0.),
             source_frame: None,
             marked,
+            syntax: &[],
         }
     }
 
@@ -536,15 +596,21 @@ impl<'a> LayoutBuilder<'a> {
         let height = px(if face.heading { 42. } else { 26. });
         let window = self.window;
         let marked = self.marked.clone();
+        let decorations = (!atomic).then_some(TextDecorations {
+            marked: marked.as_ref(),
+            syntax: self.syntax,
+            theme: self.theme,
+        });
         let shape = |text: &str, source: Range<usize>| {
-            Self::shape_text(
-                window,
+            let runs = match decorations {
+                Some(decorations) => decorations.runs(source, &template),
+                None => vec![template.clone()],
+            };
+            window.text_system().shape_line(
+                SharedString::from(text.to_owned()),
                 font_size,
-                &template,
-                marked.as_ref(),
-                text,
-                source,
-                atomic,
+                &runs,
+                None,
             )
         };
         let line = shape(text, source.clone());
@@ -641,53 +707,6 @@ impl<'a> LayoutBuilder<'a> {
                 self.wrap_row(source.start + boundaries[start].0);
             }
         }
-    }
-
-    fn shape_text(
-        window: &Window,
-        font_size: Pixels,
-        template: &TextRun,
-        marked: Option<&Range<usize>>,
-        text: &str,
-        source: Range<usize>,
-        atomic: bool,
-    ) -> ShapedLine {
-        let mut template = template.clone();
-        template.len = text.len();
-        let color = template.color;
-        let runs = if let Some(marked) =
-            marked.filter(|m| m.start < source.end && m.end > source.start && !atomic)
-        {
-            let left = marked.start.saturating_sub(source.start);
-            let right = marked.end.min(source.end) - source.start;
-            vec![
-                TextRun {
-                    len: left,
-                    ..template.clone()
-                },
-                TextRun {
-                    len: right - left,
-                    underline: Some(UnderlineStyle {
-                        color: Some(color),
-                        thickness: px(1.),
-                        wavy: false,
-                    }),
-                    ..template.clone()
-                },
-                TextRun {
-                    len: text.len() - right,
-                    ..template
-                },
-            ]
-            .into_iter()
-            .filter(|run| run.len > 0)
-            .collect()
-        } else {
-            vec![template]
-        };
-        window
-            .text_system()
-            .shape_line(SharedString::from(text.to_owned()), font_size, &runs, None)
     }
 
     fn item(
@@ -805,9 +824,14 @@ impl Editor {
         cx: &mut Context<Self>,
         width: Pixels,
     ) -> Layout {
+        let markdown = self.is_markdown();
+        if !markdown {
+            self.request_highlighting(cx);
+        }
         let source = self.history.state().text().as_str();
         let mut builder = LayoutBuilder::new(window, self.marked.clone(), width);
-        if !self.is_markdown() {
+        if !markdown {
+            builder.syntax = self.highlighting.spans();
             builder.add_text(
                 source,
                 0..source.len(),
@@ -1281,6 +1305,46 @@ mod tests {
             assert_eq!(layout.rows[0].end, prefix.len());
             assert_eq!(layout.rows[1].start, prefix.len());
             assert_eq!(layout.step(prefix.len(), false), prefix.len() - 1);
+        });
+    }
+
+    #[gpui::test]
+    fn syntax_colors_clip_to_a_row_and_keep_ime_underline(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|window, cx| Editor::new(String::new(), window, cx));
+        cx.update(|window, _| {
+            let theme = Theme::for_window(window);
+            let template = TextRun {
+                len: 7,
+                color: theme.text.into(),
+                font: window.text_style().font(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            // Width is measured on one set of runs; a wrap can clip that run around `字`.
+            let source = "ab字cd";
+            let decorations = TextDecorations {
+                marked: Some(&(5..7)),
+                syntax: &[highlight::Span {
+                    range: 1..6,
+                    kind: highlight::Kind::String,
+                }],
+                theme,
+            };
+            let runs = decorations.runs(2..source.len(), &template);
+            let string = highlight::Kind::String.color(theme);
+            let actual: Vec<_> = runs
+                .iter()
+                .map(|run| (run.len, run.color, run.underline.is_some()))
+                .collect();
+            assert_eq!(
+                actual,
+                [
+                    (3, string, false),
+                    (1, string, true),
+                    (1, theme.text.into(), true)
+                ]
+            );
         });
     }
 
