@@ -1,6 +1,6 @@
 # GPUI Editor
 
-GPUI Editor is a local Markdown editor for macOS and Windows. It uses GPUI to show formatted text, tables, code blocks, images, links, Mermaid flowcharts, and LaTeX formulas in one editing surface. It saves Markdown without rewriting parts you did not edit.
+GPUI Editor is a local editor for Markdown and UTF-8 plain text on macOS and Windows. It uses GPUI to show formatted text, tables, code blocks, images, links, Mermaid flowcharts, and LaTeX formulas in one editing surface. It saves Markdown without rewriting parts you did not edit.
 
 ## Build and run on macOS
 
@@ -28,7 +28,7 @@ You can also use `just run` if Just is installed. The app uses a native Windows 
 
 The shortcut examples below use macOS key names. On Windows, use **Ctrl** for **Cmd** and **Alt** for **Option**. To open Preferences on Windows, press `Ctrl-,`.
 
-The command takes no path. If there is no workspace to restore, choose **Open Folder…** in the sidebar. Expand folders in the file tree to browse their contents. The tree shows ordinary files and folders without following symlinks. Click a Markdown file or follow a Markdown link within the workspace to open a tab or select its existing tab. **New note** opens a separate blank tab.
+The command takes no path. If there is no workspace to restore, choose **Open Folder…** in the sidebar. Expand folders in the file tree to browse their contents. The tree shows ordinary files and folders without following symlinks. Click a text file in the tree or follow a Markdown link within the workspace to open a tab or select its existing tab. **New note** opens a separate blank Markdown tab.
 
 Drag the divider to resize the sidebar. Use the sidebar chevron, **View → Toggle Sidebar**, or the default `Cmd-/` shortcut to hide or show it without changing its state or the active document tab. When the sidebar is hidden, **Open Folder…** and **New note** move to the editor toolbar. The macOS window controls share the top row; drag an empty part of that row to move the window.
 
@@ -50,10 +50,10 @@ The sidebar starts on **Tree**. Select a tab below the sidebar toolbar to show o
 
 After clicking a sidebar tab, use `Tab` or `Shift-Tab` to move between sidebar controls, `Enter` or `Space` to activate a focused button, and `Esc` to return to the document.
 
-- **Tree:** Expand folders and click a Markdown file to open it. Hover over a Markdown row or give it keyboard focus to pin or unpin the file without opening it.
+- **Tree:** Expand folders and click a file to open it. Hover over a file row or give it keyboard focus to pin or unpin the file without opening it.
 - **Recent:** Reopen one of the 50 most recently opened files. Opening a file again moves it to the top without adding a duplicate. Clicking an already open document tab, restoring a session, and saving a new file for the first time do not count as opens.
 - **Pins:** Reopen pinned files even after closing their document tabs. Hover over a row or give it keyboard focus to remove its pin without closing or deleting the file. **Recent** and **Pins** show workspace-relative paths to distinguish files with the same name.
-- **Outline:** Click a heading to scroll to it in the current document, including an unsaved or untitled draft. This does not move the caret or change the selection.
+- **Outline:** Click a heading to scroll to it in the current Markdown document, including an unsaved or untitled draft. This does not move the caret or change the selection.
 - **Search:** Type a single line and press `Enter` after finishing any input method composition. Search matches the exact text, including letter case, in UTF-8 `.md` filenames and contents saved on disk, not in drafts. Click a filename match to open the file, or a content match to open it and scroll to the match. A stale content match leaves your draft intact and asks you to search again instead of guessing where to jump. Search does not replace text.
 
 The selected sidebar view, tab order, and width stay in the window when you hide the sidebar or switch workspaces. Recent files, pins, and the search query and results stay until you successfully switch to a different workspace. None of these sidebar settings or lists return on restart. Document tabs still restore as described below.
@@ -71,6 +71,12 @@ The selected sidebar view, tab order, and width stay in the window when you hide
 After a normal exit, the next launch opens the last workspace and its saved tabs in their last order, including any changes made by dragging. It skips missing or unreadable files and selects the last selected tab if it can be restored, or the first available tab. If no tabs can be restored, it opens only the workspace. If the workspace is missing, inaccessible, or has been replaced, choose a folder again with **Open Folder…**. A missing or unreadable session record does not prevent manual selection, and the editor never opens the Terminal's current folder automatically.
 
 The editor stores the folder and tab list locally in `~/Library/Application Support/GPUI Editor/session.json` on macOS or `%LOCALAPPDATA%\GPUI Editor\session.json` on Windows, not in the workspace. It does not autosave documents or recover drafts after a crash. Standalone files saved outside a workspace, caret positions, undo history, remote image permissions, Developer Mode, and Pi pairings do not return on restart. If the editor cannot update the session record when closing, it leaves the previous record in place and offers **Keep Window Open** or **Quit Without Updating**.
+
+### Edit plain text
+
+Open existing UTF-8 files such as `.txt`, `.json`, source files, or files without an extension from **Tree**. Files other than `.md` appear as plain text in a monospaced font. They do not use Markdown tools, previews, or code fence completion. Save keeps the filename, the extension, and the line endings you did not edit.
+
+Plain text files are limited to 1 MiB. Files with invalid UTF-8 or control characters other than tab, carriage return, and line feed do not open as plain text.
 
 ### Edit Markdown
 

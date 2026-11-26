@@ -293,13 +293,7 @@ impl Shell {
                     .pl(px(4. + 12. * depth.min(7) as f32))
                     .pr_1()
                     .rounded_md()
-                    .text_color(if active {
-                        theme.accent
-                    } else if kind == EntryKind::File {
-                        theme.muted
-                    } else {
-                        theme.text
-                    })
+                    .text_color(if active { theme.accent } else { theme.text })
                     .when(active, |row| row.bg(theme.selected));
                 row = match kind {
                     EntryKind::Folder => row.child(
@@ -325,19 +319,9 @@ impl Shell {
                     .group("sidebar-document")
                     .child(toolbar::icon(glyph, 15.).text_color(color))
                     .child(div().flex_1().min_w_0().truncate().child(label))
-                    .when(kind == EntryKind::Markdown, |row| {
+                    .when(kind != EntryKind::Folder, |row| {
                         row.child(self.pin_button(path, theme, picker, cx))
                     });
-                if kind == EntryKind::File {
-                    explorer = explorer.child(
-                        row.id(gpui::ElementId::Path(path.to_path_buf().into()))
-                            .tooltip(|_, cx| {
-                                cx.new(|_| toolbar::Tooltip("Only Markdown files can be opened"))
-                                    .into()
-                            }),
-                    );
-                    continue;
-                }
                 let (selector, index, target, description) = match kind {
                     EntryKind::Folder => {
                         let index = folder_index;
@@ -349,7 +333,7 @@ impl Shell {
                             "Workspace folder row",
                         )
                     }
-                    EntryKind::Markdown => {
+                    EntryKind::Markdown | EntryKind::File => {
                         let index = file_index;
                         file_index += 1;
                         (
@@ -359,7 +343,6 @@ impl Shell {
                             "Workspace file row",
                         )
                     }
-                    EntryKind::File => unreachable!(),
                 };
                 let path = path.to_owned();
                 let tip = path
@@ -385,10 +368,9 @@ impl Shell {
                             EntryKind::Folder => {
                                 shell.start(Intent::ExpandFolder(path.clone()), window, cx)
                             }
-                            EntryKind::Markdown => {
+                            EntryKind::Markdown | EntryKind::File => {
                                 shell.start(Intent::Open(path.clone()), window, cx)
                             }
-                            EntryKind::File => {}
                         })),
                     target,
                     description,

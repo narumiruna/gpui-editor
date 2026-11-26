@@ -158,7 +158,14 @@ impl Shell {
         let Some(tab) = self.current() else {
             return el.child(sidebar_hint("Open a document to see its outline.", theme));
         };
-        let headings = tab.editor.read(cx).headings();
+        let editor = tab.editor.read(cx);
+        if !editor.is_markdown() {
+            return el.child(sidebar_hint(
+                "Outline is available for Markdown files.",
+                theme,
+            ));
+        }
+        let headings = editor.headings();
         if headings.is_empty() {
             return el.child(
                 sidebar_hint("This document has no headings.", theme)
