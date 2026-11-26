@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use super::{EntryKind, Stamp, Workspace, classify_entry, file_metadata};
+use super::{EntryKind, Stamp, Workspace, classify_entry, path_stamp};
 
 const MAX_FILE_BYTES: usize = 1024 * 1024;
 const MAX_ENTRIES: usize = 10_000;
@@ -186,7 +186,7 @@ impl Workspace {
 
     fn search_stamp(&self, path: &Path) -> io::Result<Stamp> {
         self.check_direct_path(path)?;
-        Stamp::read(&file_metadata(path)?)
+        path_stamp(path)
     }
 
     fn read_search_source(
@@ -199,11 +199,15 @@ impl Workspace {
         if stamp.len > MAX_FILE_BYTES as u64 {
             return Err(io::Error::other("file exceeds search size limit"));
         }
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(any(target_os = "macos", target_os = "linux", windows))]
         let mut file = super::publication::open_search_file(self, path)?;
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
         let mut file = fs::File::open(path)?;
-        if Stamp::read(&file.metadata()?)? != *stamp {
+        #[cfg(windows)]
+        let opened_stamp = Stamp::read_file(&file)?;
+        #[cfg(not(windows))]
+        let opened_stamp = Stamp::read(&file.metadata()?)?;
+        if opened_stamp != *stamp {
             return Err(super::external_change());
         }
         let mut bytes = Vec::new();

@@ -1,6 +1,6 @@
 # GPUI Editor
 
-GPUI Editor is a local Markdown editor for macOS. It uses GPUI to show formatted text, tables, code blocks, images, links, Mermaid flowcharts, and LaTeX formulas in one editing surface. It saves Markdown without rewriting parts you did not edit.
+GPUI Editor is a local Markdown editor for macOS and Windows. It uses GPUI to show formatted text, tables, code blocks, images, links, Mermaid flowcharts, and LaTeX formulas in one editing surface. It saves Markdown without rewriting parts you did not edit.
 
 ## Build and run on macOS
 
@@ -14,6 +14,20 @@ just run
 
 This builds and starts the app. It uses `/Applications/Xcode.app` by default. If Xcode is installed elsewhere, set `DEVELOPER_DIR` to that installation's `Contents/Developer` directory before running `just run`.
 
+## Build and run on Windows
+
+Install Rust with the MSVC toolchain and Visual Studio Build Tools with **Desktop development with C++**, including a Windows SDK. From the repository root, run:
+
+```sh
+cargo run --locked
+```
+
+You can also use `just run` if Just is installed. The app uses a native Windows title bar. Pi pairing and window capture are not supported on Windows.
+
+## Use the editor
+
+The shortcut examples below use macOS key names. On Windows, use **Ctrl** for **Cmd** and **Alt** for **Option**. To open Preferences on Windows, press `Ctrl-,`.
+
 The command takes no path. If there is no workspace to restore, choose **Open Folder…** in the sidebar. Expand folders in the file tree to browse their contents. The tree shows ordinary files and folders without following symlinks. Click a Markdown file or follow a Markdown link within the workspace to open a tab or select its existing tab. **New note** opens a separate blank tab.
 
 Drag the divider to resize the sidebar. Use the sidebar chevron, **View → Toggle Sidebar**, or the default `Cmd-/` shortcut to hide or show it without changing its state or the active document tab. When the sidebar is hidden, **Open Folder…** and **New note** move to the editor toolbar. The macOS window controls share the top row; drag an empty part of that row to move the window.
@@ -22,7 +36,7 @@ Drag the divider to resize the sidebar. Use the sidebar chevron, **View → Togg
 
 Open **Preferences… → Hotkeys**. Select a shortcut, then press **Cmd** with a letter, number, or punctuation key. You can also hold **Option**, **Control**, or **Shift**. Press `Esc` to cancel recording. A shortcut cannot use a reserved combination or one assigned to another command.
 
-Changes take effect after the editor saves them. The editor keeps them across restarts in `~/Library/Application Support/GPUI Editor/hotkeys.json`. Use **Reset Defaults** to restore all six command shortcuts. The shortcuts for opening Preferences and quitting the editor, and the standard text-editing shortcuts, do not change.
+Changes take effect after the editor saves them. The editor keeps them across restarts in `~/Library/Application Support/GPUI Editor/hotkeys.json` on macOS or `%LOCALAPPDATA%\GPUI Editor\hotkeys.json` on Windows. Use **Reset Defaults** to restore all six command shortcuts. The shortcuts for opening Preferences and quitting the editor, and the standard text-editing shortcuts, do not change.
 
 ### Run commands from the keyboard
 
@@ -56,7 +70,7 @@ The selected sidebar view, tab order, and width stay in the window when you hide
 
 After a normal exit, the next launch opens the last workspace and its saved tabs in their last order, including any changes made by dragging. It skips missing or unreadable files and selects the last selected tab if it can be restored, or the first available tab. If no tabs can be restored, it opens only the workspace. If the workspace is missing, inaccessible, or has been replaced, choose a folder again with **Open Folder…**. A missing or unreadable session record does not prevent manual selection, and the editor never opens the Terminal's current folder automatically.
 
-The editor stores the folder and tab list locally in `~/Library/Application Support/GPUI Editor/session.json`, not in the workspace. It does not autosave documents or recover drafts after a crash. Standalone files saved outside a workspace, caret positions, undo history, remote image permissions, Developer Mode, and Pi pairings do not return on restart. If the editor cannot update the session record when closing, it leaves the previous record in place and offers **Keep Window Open** or **Quit Without Updating**.
+The editor stores the folder and tab list locally in `~/Library/Application Support/GPUI Editor/session.json` on macOS or `%LOCALAPPDATA%\GPUI Editor\session.json` on Windows, not in the workspace. It does not autosave documents or recover drafts after a crash. Standalone files saved outside a workspace, caret positions, undo history, remote image permissions, Developer Mode, and Pi pairings do not return on restart. If the editor cannot update the session record when closing, it leaves the previous record in place and offers **Keep Window Open** or **Quit Without Updating**.
 
 ### Edit Markdown
 
@@ -85,6 +99,8 @@ The app and its internal crates build from source as a workspace. They are not p
 
 ### Developer Mode and Pi
 
+Pi pairing and window capture require macOS.
+
 1. Start GPUI Editor with `just run`. In **GPUI Editor → Preferences…**, turn on **Developer Mode**. A **Select element** button with a target icon appears in the upper-right corner.
 2. Start Pi 1.6.0 or later in this repository. Trust the project if you want Pi to load [its local extension](.pi/extensions/gpui-editor.ts). In Pi, run `/gpui-pair`. If Pi finds more than one editor, choose the one to pair. Verify the code in both apps, then choose **Pair** in GPUI Editor.
 3. Click **Select element**, then click an element such as **Save**, a sidebar row, or the editing surface. Picking does not run the element's usual action. Press `Esc` to leave picking mode.
@@ -96,16 +112,21 @@ With a live pairing, Pi can call `gpui_editor_logs` to read a bounded history of
 
 ## Checks
 
-Install [Bun](https://bun.com/) to run the Pi extension tests.
+Install [Bun](https://bun.com/) to run the Pi extension tests on macOS.
 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
 prek run --all-files
+```
+
+On macOS, also run:
+
+```sh
 bun test ./.pi/tests/gpui-editor.test.ts
 ```
 
-GitHub Actions runs Rust checks with Rust 1.95.0 on Linux and macOS. The Linux job checks the portable document, rendering, and file-handling code; only macOS builds the GPUI application. Automated GPUI tests use a simulated window and do not verify native macOS input, drag behavior, or dialogs. If macOS asks the editor to close during logout or restart, the editor can protect unsaved changes, but the system request must be started again after the editor closes. See the [manual acceptance steps](docs/prd/gpui-editor.md#macos-原生驗收) for the remaining native checks.
+GitHub Actions runs Rust checks with Rust 1.95.0 on Linux, macOS, and Windows. The Linux job checks the portable document, rendering, and file-handling code. The macOS and Windows jobs also build the GPUI application. Automated GPUI tests use a simulated window and do not verify native input, drag behavior, or dialogs. If macOS asks the editor to close during logout or restart, the editor can protect unsaved changes, but the system request must be started again after the editor closes. See the [manual acceptance steps](docs/prd/gpui-editor.md#macos-原生驗收) for the remaining native checks.
 
 [Changenote](https://github.com/changenote/changenote) uses [`.changenote/`](.changenote/) to maintain release notes and a release pull request. The [release workflow](.github/workflows/release.yml) pins both the Action and CLI versions. It uses the optional `PAT_TOKEN` repository secret for Changenote and falls back to the built-in `GITHUB_TOKEN` if the secret is not set. Use a fine-grained personal access token with write access to Contents and Pull requests for this repository if you need release pull requests to trigger CI without manual approval. After a verified release pull request merges, the workflow pushes Git tags and creates GitHub Releases. Changes to the editor do not require a manual release workflow run.

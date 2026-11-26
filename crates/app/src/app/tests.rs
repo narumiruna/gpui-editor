@@ -127,7 +127,7 @@ fn unified_toolbar_formats_and_saves_the_current_document(cx: &mut TestAppContex
     });
     cx.run_until_parked();
     assert!(cx.debug_bounds("Display formula").is_none());
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes("secondary-a");
     click_tool(cx, "Bold");
     cx.update(|_, cx| {
         let current = shell.read(cx).current().unwrap();
@@ -451,7 +451,7 @@ fn marked_text_updates_form_one_undo_step_per_commit(cx: &mut TestAppContext) {
         });
     });
     cx.run_until_parked();
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|window, cx| {
         editor.update(cx, |editor, cx| {
             assert_eq!(editor.source(), format!("中文🙂{code}"));
@@ -464,9 +464,9 @@ fn marked_text_updates_form_one_undo_step_per_commit(cx: &mut TestAppContext) {
     assert_eq!(selection(cx, &editor), 4..4);
 
     for (key, prefix, selected) in [
-        ("cmd-z", "x", 0..1),
-        ("cmd-shift-z", "中文🙂", 4..4),
-        ("cmd-shift-z", "中文🙂完成🎉", 8..8),
+        ("secondary-z", "x", 0..1),
+        ("secondary-shift-z", "中文🙂", 4..4),
+        ("secondary-shift-z", "中文🙂完成🎉", 8..8),
     ] {
         cx.simulate_keystrokes(key);
         cx.update(|window, cx| {
@@ -522,7 +522,7 @@ fn saving_and_reopening_preserves_crlf_rich_and_read_only_blocks(cx: &mut TestAp
     });
     cx.run_until_parked();
     click_preview(cx, &editor, 0);
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes("secondary-a");
     assert_eq!(selection(cx, &editor), 5..17);
     cx.update(|window, cx| {
         editor.update(cx, |editor, cx| {
@@ -538,10 +538,10 @@ fn saving_and_reopening_preserves_crlf_rich_and_read_only_blocks(cx: &mut TestAp
     let code_range = code_start..EXPECTED.encode_utf16().count();
     click_preview(cx, &editor, code_start);
     assert_eq!(selection(cx, &editor), code_range);
-    cx.simulate_keystrokes("cmd-z cmd-a");
+    cx.simulate_keystrokes("secondary-z secondary-a");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), ORIGINAL.replace("原稿", "中文")));
     assert_eq!(selection(cx, &editor), 5..17);
-    cx.simulate_keystrokes("cmd-shift-z cmd-a");
+    cx.simulate_keystrokes("secondary-shift-z secondary-a");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), EXPECTED));
     assert_eq!(selection(cx, &editor), 5..14);
 
@@ -560,7 +560,7 @@ fn saving_and_reopening_preserves_crlf_rich_and_read_only_blocks(cx: &mut TestAp
     });
 
     click_preview(cx, &reopened, 0);
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes("secondary-a");
     assert_eq!(selection(cx, &reopened), 5..14);
     click_preview(cx, &reopened, code_start);
     assert_eq!(selection(cx, &reopened), code_range);
@@ -641,9 +641,14 @@ fn switching_tabs_preserves_drafts_selection_and_undo_and_save_uses_current_tab(
     let (_, second_editor) = replace_current(cx, &shell, "second draft");
     assert_eq!(selection(cx, &second_editor), 12..12);
 
-    // Reopening an alias must select the existing editor, not reload the disk contents.
-    std::os::unix::fs::symlink(&first, fixture.workspace.root().join("alias.md")).unwrap();
-    start(cx, &shell, Intent::Open("alias.md".into()));
+    // Reopening a document must select its existing editor, not reload the disk contents.
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&first, fixture.workspace.root().join("alias.md")).unwrap();
+        start(cx, &shell, Intent::Open("alias.md".into()));
+    }
+    #[cfg(not(unix))]
+    start(cx, &shell, Intent::Open(first.clone()));
     assert!(!cx.has_pending_prompt());
     cx.update(|window, cx| {
         let shell = shell.read(cx);
@@ -662,7 +667,7 @@ fn switching_tabs_preserves_drafts_selection_and_undo_and_save_uses_current_tab(
 
     click_tool(cx, "workspace-file-1");
     assert_eq!(selection(cx, &second_editor), 12..12);
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         assert_eq!(second_editor.read(cx).source(), "second");
         assert_eq!(first_editor.read(cx).source(), "first draft");
@@ -688,12 +693,12 @@ fn nested_tree_preserves_selection_and_expansion_when_sidebar_is_hidden(cx: &mut
         cx.debug_bounds("document-body").unwrap().left(),
         sidebar.right()
     );
-    cx.simulate_keystrokes("cmd-/");
+    cx.simulate_keystrokes("secondary-/");
     cx.run_until_parked();
     cx.update(|_, cx| assert!(!shell.read(cx).sidebar.visible));
     assert_eq!(cx.debug_bounds("document-body").unwrap().left(), px(0.));
     assert!(cx.debug_bounds("Show Sidebar").is_some());
-    cx.simulate_keystrokes("cmd-/");
+    cx.simulate_keystrokes("secondary-/");
     cx.run_until_parked();
     cx.update(|_, cx| assert!(shell.read(cx).sidebar.visible));
     assert_eq!(
@@ -735,15 +740,15 @@ fn command_palette_filters_and_runs_only_the_selected_command(cx: &mut TestAppCo
     cx.update(|_, cx| {
         editor::bind_keys(cx);
         cx.bind_keys([
-            KeyBinding::new("cmd-p", OpenPalette, None),
-            KeyBinding::new("cmd-n", NewDocument, None),
-            KeyBinding::new("cmd-s", SaveDocument, None),
-            KeyBinding::new("cmd-w", Close, None),
+            KeyBinding::new("secondary-p", OpenPalette, None),
+            KeyBinding::new("secondary-n", NewDocument, None),
+            KeyBinding::new("secondary-s", SaveDocument, None),
+            KeyBinding::new("secondary-w", Close, None),
         ]);
     });
     cx.simulate_resize(size(px(560.), px(360.)));
     fixture.open(cx, &shell);
-    cx.simulate_keystrokes("cmd-p cmd-w");
+    cx.simulate_keystrokes("secondary-p secondary-w");
     assert!(cx.debug_bounds("command-palette").is_some());
     cx.simulate_input("save");
     cx.simulate_keystrokes("enter");
@@ -757,7 +762,7 @@ fn command_palette_filters_and_runs_only_the_selected_command(cx: &mut TestAppCo
     let (_, other_editor) = replace_current(cx, &shell, "Other draft");
     start(cx, &shell, Intent::Open(note.clone()));
     let (id, editor) = replace_current(cx, &shell, "Draft");
-    cx.simulate_keystrokes("cmd-p cmd-n cmd-s");
+    cx.simulate_keystrokes("secondary-p secondary-n secondary-s");
     cx.simulate_input("no matching command");
     assert!(cx.debug_bounds("palette-empty").is_some());
     cx.simulate_keystrokes("enter escape");
@@ -770,7 +775,7 @@ fn command_palette_filters_and_runs_only_the_selected_command(cx: &mut TestAppCo
         assert_eq!(editor.read(cx).source(), "Draft");
     });
     assert_eq!(fs::read_to_string(&note).unwrap(), "Original");
-    cx.simulate_keystrokes("cmd-p");
+    cx.simulate_keystrokes("secondary-p");
     cx.simulate_input("SAVE");
     cx.simulate_keystrokes("enter");
     assert_eq!(fs::read_to_string(&note).unwrap(), "Draft");
@@ -784,8 +789,8 @@ fn command_palette_filters_and_runs_only_the_selected_command(cx: &mut TestAppCo
 #[gpui::test]
 fn command_palette_uses_arrow_keys_and_restores_previous_editor_focus(cx: &mut TestAppContext) {
     let (shell, cx) = cx.add_window_view(Shell::new);
-    cx.update(|_, cx| cx.bind_keys([KeyBinding::new("cmd-p", OpenPalette, None)]));
-    cx.simulate_keystrokes("cmd-p down enter");
+    cx.update(|_, cx| cx.bind_keys([KeyBinding::new("secondary-p", OpenPalette, None)]));
+    cx.simulate_keystrokes("secondary-p down enter");
     cx.update(|window, cx| {
         let shell = shell.read(cx);
         assert!(shell.palette.is_none());
@@ -793,7 +798,7 @@ fn command_palette_uses_arrow_keys_and_restores_previous_editor_focus(cx: &mut T
         assert!(editor.focus_handle(cx).is_focused(window));
     });
     cx.simulate_input("Draft");
-    cx.simulate_keystrokes("cmd-p");
+    cx.simulate_keystrokes("secondary-p");
     cx.simulate_input("toggle sidebar");
     cx.simulate_keystrokes("enter");
     cx.simulate_input(" text");
@@ -814,11 +819,11 @@ fn command_palette_returns_to_sidebar_search_without_running_a_click_behind_it(
     let fixture = Fixture::new();
     let note = fixture.document("note.md", "keyword");
     let (shell, cx) = cx.add_window_view(Shell::new);
-    cx.update(|_, cx| cx.bind_keys([KeyBinding::new("cmd-p", OpenPalette, None)]));
+    cx.update(|_, cx| cx.bind_keys([KeyBinding::new("secondary-p", OpenPalette, None)]));
     fixture.open(cx, &shell);
     click_tool(cx, "sidebar-tab-Search");
     cx.simulate_input("key");
-    cx.simulate_keystrokes("cmd-p");
+    cx.simulate_keystrokes("secondary-p");
     let background = cx.debug_bounds("New note").unwrap().center();
     cx.simulate_click(background, Modifiers::none());
     cx.run_until_parked();
@@ -838,11 +843,11 @@ fn command_palette_returns_to_sidebar_search_without_running_a_click_behind_it(
 fn command_palette_waits_for_ime_and_reuses_the_first_save_picker(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let (shell, cx) = cx.add_window_view(Shell::new);
-    cx.update(|_, cx| cx.bind_keys([KeyBinding::new("cmd-p", OpenPalette, None)]));
+    cx.update(|_, cx| cx.bind_keys([KeyBinding::new("secondary-p", OpenPalette, None)]));
     fixture.open(cx, &shell);
     start(cx, &shell, Intent::New);
     replace_current(cx, &shell, "Draft");
-    cx.simulate_keystrokes("cmd-p");
+    cx.simulate_keystrokes("secondary-p");
     let field = cx.update(|window, cx| {
         let field = shell.read(cx).palette.as_ref().unwrap().text.clone();
         assert!(field.read(cx).focus_handle(cx).is_focused(window));
@@ -870,7 +875,7 @@ fn command_palette_waits_for_ime_and_reuses_the_first_save_picker(cx: &mut TestA
         assert!(current.path().is_none());
         assert_eq!(current.editor.read(cx).source(), "Draft");
     });
-    cx.simulate_keystrokes("cmd-p");
+    cx.simulate_keystrokes("secondary-p");
     cx.simulate_input("save");
     cx.simulate_keystrokes("enter");
     let target = fixture.workspace.root().join("saved.md");
@@ -1170,7 +1175,7 @@ fn sidebar_search_opens_filename_and_content_results_without_overwriting_drafts(
     click_tool(cx, "search-result-2");
     cx.update(|_, cx| assert_eq!(shell.read(cx).selected, Some(id)));
     click_tool(cx, "sidebar-tab-Search");
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes("secondary-a");
     cx.simulate_input("absent");
     cx.update(|_, cx| assert_eq!(shell.read(cx).sidebar.search.idle_query(), Some("absent")));
     cx.simulate_keystrokes("enter");
@@ -1250,7 +1255,7 @@ fn switching_tabs_keeps_the_editor_in_inline_source_mode(cx: &mut TestAppContext
     start(cx, &shell, Intent::New);
     click_tool(cx, tab_selector("tab", id));
     assert_eq!(selection(cx, &editor), 7..7);
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes("secondary-a");
     let end = cx.update(|_, cx| editor.read(cx).source().len());
     assert!(end > 7);
     // In the link source editor, Select All selects only the link, not the text before it.
@@ -1298,13 +1303,13 @@ fn two_untitled_tabs_are_independent_and_first_save_reuses_the_sidebar_document(
 }
 
 #[gpui::test]
-fn clicking_an_inactive_close_button_does_not_select_it_and_cmd_w_uses_neighbors(
+fn clicking_an_inactive_close_button_does_not_select_it_and_close_uses_neighbors(
     cx: &mut TestAppContext,
 ) {
     let fixture = Fixture::new();
     let (shell, cx) = cx.add_window_view(Shell::new);
     cx.simulate_resize(size(px(1040.), px(720.)));
-    cx.update(|_, cx| cx.bind_keys([KeyBinding::new("cmd-w", Close, None)]));
+    cx.update(|_, cx| cx.bind_keys([KeyBinding::new("secondary-w", Close, None)]));
     fixture.open(cx, &shell);
     let ids: Vec<_> = ["a.md", "b.md", "c.md", "d.md"]
         .into_iter()
@@ -1326,7 +1331,7 @@ fn clicking_an_inactive_close_button_does_not_select_it_and_cmd_w_uses_neighbors
         (ids[2], Some(ids[0])),
         (ids[0], None),
     ] {
-        cx.simulate_keystrokes("cmd-w");
+        cx.simulate_keystrokes("secondary-w");
         cx.update(|window, cx| {
             let shell = shell.read(cx);
             assert!(shell.tab(closed).is_none());
@@ -1342,7 +1347,7 @@ fn clicking_an_inactive_close_button_does_not_select_it_and_cmd_w_uses_neighbors
         assert_eq!(shell.workspace.as_ref(), Some(&fixture.workspace));
         assert_eq!(cx.windows().len(), 1);
     });
-    cx.simulate_keystrokes("cmd-w");
+    cx.simulate_keystrokes("secondary-w");
     cx.cx.read(|cx| assert!(cx.windows().is_empty()));
 }
 
@@ -1699,6 +1704,7 @@ fn pending_restore_cannot_replace_a_new_note_or_block_exit(app: &mut TestAppCont
     }
 }
 
+#[cfg(unix)]
 #[gpui::test]
 fn session_write_failure_can_keep_the_window_open_or_exit_without_updating(
     cx: &mut TestAppContext,

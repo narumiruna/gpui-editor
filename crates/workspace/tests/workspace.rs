@@ -63,7 +63,7 @@ fn workspace_tree_omits_symlinks_and_does_not_list_paths_through_them() {
     assert_eq!(entries[0].path, workspace.root().join("real"));
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 #[test]
 fn a_replaced_workspace_requires_reopening_before_listing_or_opening_documents() {
     let folder = tempdir().unwrap();
@@ -72,6 +72,8 @@ fn a_replaced_workspace_requires_reopening_before_listing_or_opening_documents()
     fs::create_dir(&root).unwrap();
     fs::write(root.join(path), "original").unwrap();
     let workspace = Workspace::open(&root).unwrap();
+    let identity = workspace.root_identity();
+    let mut document = workspace.read_document(path).unwrap();
 
     fs::rename(&root, folder.path().join("moved")).unwrap();
     fs::create_dir(&root).unwrap();
@@ -80,11 +82,19 @@ fn a_replaced_workspace_requires_reopening_before_listing_or_opening_documents()
         workspace.markdown_files().unwrap_err(),
         workspace.directory_entries(workspace.root()).unwrap_err(),
         workspace.read_document(path).unwrap_err(),
+        document.save("draft").unwrap_err(),
     ] {
-        assert!(error.to_string().contains("workspace folder has moved"));
+        assert!(error.to_string().contains("folder has moved"), "{error}");
     }
 
+    assert_eq!(workspace.root_identity(), identity);
+    assert_eq!(document.source(), "original");
+    assert_eq!(
+        fs::read_to_string(folder.path().join("moved").join(path)).unwrap(),
+        "original"
+    );
     let reopened = Workspace::open(&root).unwrap();
+    assert_ne!(reopened.root_identity(), identity);
     assert_eq!(
         reopened.markdown_files().unwrap(),
         [reopened.root().join(path)]
@@ -152,6 +162,22 @@ fn new_document_never_overwrites_existing_path() {
     let error = DocumentFile::create(Some(&workspace), &path, "draft".into()).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::AlreadyExists);
     assert_eq!(fs::read_to_string(&path).unwrap(), "keep me");
+    assert_eq!(fs::read_dir(workspace.root()).unwrap().count(), 1);
+}
+
+#[test]
+fn new_document_never_overwrites_an_existing_directory() {
+    let folder = tempdir().unwrap();
+    let workspace = Workspace::open(folder.path()).unwrap();
+    let path = workspace.root().join("exists.md");
+    fs::create_dir(&path).unwrap();
+    fs::write(path.join("keep.txt"), "keep me").unwrap();
+
+    assert!(DocumentFile::create(Some(&workspace), &path, "draft".into()).is_err());
+    assert_eq!(
+        fs::read_to_string(path.join("keep.txt")).unwrap(),
+        "keep me"
+    );
     assert_eq!(fs::read_dir(workspace.root()).unwrap().count(), 1);
 }
 
@@ -253,7 +279,7 @@ fn read_only_file_is_not_replaced() {
     assert_eq!(fs::read_to_string(&path).unwrap(), "old");
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 #[test]
 fn saves_reject_a_replaced_parent_for_opened_and_created_documents() {
     let folder = tempdir().unwrap();

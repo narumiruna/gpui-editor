@@ -3,10 +3,14 @@
 use std::{
     fs::{self, OpenOptions},
     io::{Cursor, Read},
-    os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     time::Duration,
 };
+
+#[cfg(target_os = "macos")]
+use std::os::unix::fs::OpenOptionsExt;
+#[cfg(target_os = "windows")]
+use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 
 use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, Limits};
 use url::Url;
@@ -17,6 +21,15 @@ const MAX_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_SIDE: u32 = 4096;
 const MAX_PIXELS: u64 = 4 * 1024 * 1024;
 const MAX_DECODE_BYTES: u64 = 64 * 1024 * 1024;
+
+#[cfg(target_os = "windows")]
+const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+#[cfg(target_os = "windows")]
+const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+#[cfg(target_os = "windows")]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+#[cfg(target_os = "windows")]
+const FILE_SHARE_READ: u32 = 1;
 
 /// A destination that the editor can open. Local paths from the target functions
 /// are absolute and canonical (symlinks are resolved).
@@ -161,6 +174,10 @@ fn local_path(destination: &str) -> Result<PathBuf, String> {
     if path.starts_with("//") || path.contains('\\') || path.contains(char::is_control) {
         return Err("Invalid local path".into());
     }
+    #[cfg(target_os = "windows")]
+    if path.contains(':') || Path::new(&path).has_root() {
+        return Err("Windows local targets must be relative paths without stream names".into());
+    }
     Ok(path.into())
 }
 
@@ -199,17 +216,22 @@ pub fn load_image(target: &Target) -> Result<Raster, String> {
 }
 
 fn read_local_image(path: &Path) -> Result<Vec<u8>, String> {
-    // Darwin <sys/fcntl.h>. Do not follow symlinks introduced after resolution,
-    // even in parent directories, or block opening a FIFO swapped into place.
-    const O_NOFOLLOW_ANY: i32 = 0x2000_0000;
-    const O_NONBLOCK: i32 = 0x0004;
     if !path.is_absolute() {
         return Err("Expected a resolved local image path".into());
     }
     check_byte_count(regular_file(path)?.len())?;
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(O_NOFOLLOW_ANY | O_NONBLOCK)
+    #[cfg(target_os = "windows")]
+    let _directories = pin_image_directories(path)?;
+    let mut options = OpenOptions::new();
+    options.read(true);
+    // Darwin O_NOFOLLOW_ANY and O_NONBLOCK reject replaced symlinks and FIFOs.
+    #[cfg(target_os = "macos")]
+    options.custom_flags(0x2000_0000 | 0x0004);
+    #[cfg(target_os = "windows")]
+    options
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .share_mode(FILE_SHARE_READ);
+    let file = options
         .open(path)
         .map_err(|error| format!("Open image: {error}"))?;
     let metadata = file
@@ -218,8 +240,33 @@ fn read_local_image(path: &Path) -> Result<Vec<u8>, String> {
     if !metadata.is_file() {
         return Err("Local image must be a regular file".into());
     }
+    #[cfg(target_os = "windows")]
+    if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err("Local image must not be a reparse point".into());
+    }
     check_byte_count(metadata.len())?;
     read_bounded(file)
+}
+
+#[cfg(target_os = "windows")]
+fn pin_image_directories(path: &Path) -> Result<Vec<fs::File>, String> {
+    let ancestors: Vec<_> = path.ancestors().skip(1).collect();
+    let mut directories = Vec::new();
+    for directory in ancestors.into_iter().rev() {
+        // BACKUP_SEMANTICS opens directories; deny write/delete sharing until the read ends.
+        let file = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(directory)
+            .map_err(|error| format!("Open image directory: {error}"))?;
+        let metadata = file.metadata().map_err(|error| error.to_string())?;
+        if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err("Local image directory must not be a reparse point".into());
+        }
+        directories.push(file);
+    }
+    Ok(directories)
 }
 
 fn fetch_image(url: &Url) -> Result<Vec<u8>, String> {
