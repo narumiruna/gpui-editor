@@ -175,10 +175,6 @@ impl Shell {
                     })
                     .detach();
                 }
-                #[cfg(target_os = "windows")]
-                Err(error) if error.kind() == std::io::ErrorKind::Unsupported => {
-                    dev.notice = Some("Pi pairing is not supported on Windows.".into());
-                }
                 Err(_) => dev.notice = Some("Could not start the local pairing service.".into()),
             }
         }

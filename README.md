@@ -22,7 +22,7 @@ Install Rust with the MSVC toolchain and Visual Studio Build Tools with **Deskto
 cargo run --locked
 ```
 
-You can also use `just run` if Just is installed. The app uses a native Windows title bar. Pi pairing and window capture are not supported on Windows.
+You can also use `just run` if Just is installed. The app uses a native Windows title bar. Pi pairing works on Windows, but window capture does not.
 
 ## Use the editor
 
@@ -100,12 +100,12 @@ The app and its internal crates build from source as a workspace. They are not p
 
 ### Developer Mode and Pi
 
-Pi pairing and window capture require macOS.
+Pi pairing works on macOS and Windows. Run GPUI Editor and Pi on the same computer under the same OS account. On Windows, run Pi in Windows, not in WSL. Window capture is available only on macOS.
 
-1. Start GPUI Editor with `just run`. In **GPUI Editor → Preferences…**, turn on **Developer Mode**. A **Select element** button with a target icon appears in the upper-right corner.
+1. Start GPUI Editor. In **Preferences…** (`Cmd-,` on macOS or `Ctrl-,` on Windows), turn on **Developer Mode**. A **Select element** button with a target icon appears in the upper-right corner.
 2. Start Pi 1.6.0 or later in this repository. Trust the project if you want Pi to load [its local extension](.pi/extensions/gpui-editor.ts). In Pi, run `/gpui-pair`. If Pi finds more than one editor, choose the one to pair. Verify the code in both apps, then choose **Pair** in GPUI Editor.
 3. Click **Select element**, then click an element such as **Save**, a sidebar row, or the editing surface. Picking does not run the element's usual action. Press `Esc` to leave picking mode.
-4. Write your feedback. Choose **Capture Window** to attach a screenshot of GPUI Editor, or **Paste Image** to attach a PNG, JPEG, or TIFF image from the clipboard. If macOS denies Screen & System Audio Recording, use **Paste Image** or send text only. Review attachments before choosing **Send to Pi**. An image requires an image-capable Pi model.
+4. Write your feedback. On macOS, choose **Capture Window** to attach a screenshot of GPUI Editor. On either platform, choose **Paste Image** to attach a PNG, JPEG, or TIFF image from the clipboard, or send text only. Review attachments before choosing **Send to Pi**. An image requires an image-capable Pi model.
 
 Feedback goes to the paired session as a user message. If Pi is busy, it follows the current task. Pi may save feedback in its session history or send it to its model provider. You cannot edit the draft while it waits for a receipt. A receipt confirms only that the extension handed feedback to Pi. If Pi rejects the feedback or the connection drops before the receipt, the draft becomes editable again. After a dropped connection, check Pi before resending.
 
@@ -113,7 +113,7 @@ With a live pairing, Pi can call `gpui_editor_logs` to read a bounded history of
 
 ## Checks
 
-Install [Bun](https://bun.com/) to run the Pi extension tests on macOS.
+Install [Bun](https://bun.com/) to run the Pi extension tests on macOS or Windows.
 
 ```sh
 cargo fmt --all -- --check
@@ -122,7 +122,7 @@ cargo test --locked --all-targets
 prek run --all-files
 ```
 
-On macOS, also run:
+On macOS and Windows, also run:
 
 ```sh
 bun test ./.pi/tests/gpui-editor.test.ts
