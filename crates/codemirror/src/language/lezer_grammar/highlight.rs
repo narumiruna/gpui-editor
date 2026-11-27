@@ -114,18 +114,33 @@ pub(super) fn collect(nodes: &[Node]) -> Vec<HighlightSpan<'static>> {
 mod tests {
     use crate::Text;
 
-    use super::{super::{LezerDocument, parser, stock_node_types}, *};
+    use super::{
+        super::{LezerDocument, parser, stock_node_types},
+        *,
+    };
 
     #[test]
     fn local_fallback_keeps_stock_highlights_without_verified_terms() {
         let source = r#"@top Main { "字" }"#;
-        let properties = [style_tags([("Grammar/...", vec![HighlightTag::new("custom-root")])]).unwrap()];
+        let properties =
+            [style_tags([("Grammar/...", vec![HighlightTag::new("custom-root")])]).unwrap()];
         let configured = LezerDocument::from_nodes(Text::new(source), parser::parse(source), None)
             .with_node_types(stock_node_types().extend(&properties));
-        assert!(configured.nodes().skip(1).all(|node| node.node_type().is_none()));
+        assert!(
+            configured
+                .nodes()
+                .skip(1)
+                .all(|node| node.node_type().is_none())
+        );
         let start = source.find('"').unwrap();
         let end = source.rfind('"').unwrap() + 1;
         let spans: Vec<_> = configured.highlights(start..end).unwrap().collect();
-        assert_eq!(spans, [HighlightSpan { range: start..end, tags: &tags()[3] }]);
+        assert_eq!(
+            spans,
+            [HighlightSpan {
+                range: start..end,
+                tags: &tags()[3]
+            }]
+        );
     }
 }

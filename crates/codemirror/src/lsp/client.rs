@@ -97,6 +97,7 @@ impl LspClient {
         Ok(messages)
     }
 
+    #[cfg(unix)]
     pub(super) fn take_lifecycle(&mut self) -> Vec<Value> {
         std::mem::take(&mut self.state.borrow_mut().lifecycle)
     }

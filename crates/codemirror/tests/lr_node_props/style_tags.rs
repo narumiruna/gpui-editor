@@ -180,4 +180,3 @@ fn lr_style_paths_spans_and_edits_match_pinned_parsers() {
         }
     }
 }
-
