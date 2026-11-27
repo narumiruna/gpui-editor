@@ -39,10 +39,12 @@ pub(super) fn paint(
         }) {
             return None;
         }
-        editor
-            .markdown()
-            .plan_replacement(offset..offset, "", editor.active.as_ref())
-            .ok()?;
+        if editor.is_markdown() {
+            editor
+                .markdown()
+                .plan_replacement(offset..offset, "", editor.active.as_ref())
+                .ok()?;
+        }
         Some(LayerRect {
             left: bounds.left().into(),
             top: bounds.top().into(),

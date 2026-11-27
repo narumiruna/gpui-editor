@@ -1,19 +1,47 @@
-//! Native traffic lights and dragging, embedded in the existing top row.
+//! Native title bar and window controls.
 
-use gpui::{Div, MouseButton, Pixels, Window, div, prelude::*, px};
+use gpui::{Div, Pixels, TitlebarOptions, Window, div, px};
+#[cfg(target_os = "macos")]
+use gpui::{MouseButton, point, prelude::*};
+#[cfg(target_os = "macos")]
 use objc2::{class, msg_send, rc::Retained, runtime::AnyObject};
+#[cfg(target_os = "macos")]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 pub(super) const TOP_ROW_HEIGHT: Pixels = px(36.);
 
+#[cfg(target_os = "macos")]
+pub(super) fn titlebar() -> TitlebarOptions {
+    TitlebarOptions {
+        title: None,
+        appears_transparent: true,
+        traffic_light_position: Some(point(px(10.), px(12.))),
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn titlebar() -> TitlebarOptions {
+    TitlebarOptions {
+        title: Some("GPUI Editor".into()),
+        appears_transparent: false,
+        traffic_light_position: None,
+    }
+}
+
 pub(super) fn controls_width(window: &Window) -> Pixels {
-    if window.is_fullscreen() {
+    if !cfg!(target_os = "macos") || window.is_fullscreen() {
         px(0.)
     } else {
         px(78.)
     }
 }
 
+#[cfg(target_os = "windows")]
+pub(super) fn drag_region() -> Div {
+    div()
+}
+
+#[cfg(target_os = "macos")]
 pub(super) fn drag_region() -> Div {
     div().on_mouse_down(MouseButton::Left, |event, window, _| {
         let Ok(handle) = window.window_handle() else {

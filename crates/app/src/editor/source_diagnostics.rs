@@ -128,6 +128,7 @@ impl Editor {
         marks
     }
 
+    #[cfg(target_os = "macos")]
     fn source_lsp_diagnostic_marks(&self) -> impl Iterator<Item = LocatedDiagnostic> + '_ {
         self.source_lsp_diagnostics()
             .iter()
@@ -135,6 +136,11 @@ impl Editor {
                 range: diagnostic.range.clone(),
                 diagnostic: Arc::new(diagnostic.clone()),
             })
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn source_lsp_diagnostic_marks(&self) -> impl Iterator<Item = LocatedDiagnostic> {
+        std::iter::empty()
     }
 
     pub(super) fn source_diagnostic_paint_marks(&self) -> Vec<LocatedDiagnostic> {

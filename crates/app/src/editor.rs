@@ -1,12 +1,18 @@
 //! One GPUI input surface backed by offsets in the Markdown source.
 
-use std::{collections::HashMap, ops::Range, path::PathBuf, time::Duration};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    ops::Range,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 use crate::{
     app::developer::FieldColors,
     document::{Heading, Markdown, Section, SectionKind},
     theme::Theme,
-    workspace::Workspace,
+    workspace::{Workspace, is_markdown},
 };
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, Context, CursorStyle, ElementInputHandler,
@@ -31,12 +37,14 @@ use gpui_editor_codemirror::{
     },
 };
 
+#[cfg(target_os = "macos")]
 pub(crate) mod announcements;
 mod commands;
 mod document_find;
 mod draw_selection;
 mod drop_cursor;
 mod goto_line;
+mod highlight;
 mod layout;
 mod merge_review;
 #[cfg(test)]
@@ -52,6 +60,7 @@ mod source_diagnostics;
 mod source_fence;
 mod source_folds;
 mod source_keys;
+#[cfg(target_os = "macos")]
 pub mod source_lsp;
 mod source_markdown;
 mod source_multi;
@@ -131,17 +140,17 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-alt-down", AddSourceCursorBelow, Some("Editor")),
         KeyBinding::new("shift-pageup", SelectSourcePageUp, Some("Editor")),
         KeyBinding::new("shift-pagedown", SelectSourcePageDown, Some("Editor")),
-        KeyBinding::new("cmd-a", SelectAll, Some("Editor")),
+        KeyBinding::new("secondary-a", SelectAll, Some("Editor")),
         KeyBinding::new("backspace", Backspace, Some("Editor")),
         KeyBinding::new("delete", Delete, Some("Editor")),
         KeyBinding::new("enter", Newline, Some("Editor")),
         KeyBinding::new("cmd-enter", InsertSourceBlankLine, Some("Editor")),
         KeyBinding::new("cmd-/", ToggleSourceComment, Some("Editor")),
-        KeyBinding::new("cmd-c", Copy, Some("Editor")),
-        KeyBinding::new("cmd-x", Cut, Some("Editor")),
-        KeyBinding::new("cmd-v", Paste, Some("Editor")),
-        KeyBinding::new("cmd-z", Undo, Some("Editor")),
-        KeyBinding::new("cmd-shift-z", Redo, Some("Editor")),
+        KeyBinding::new("secondary-c", Copy, Some("Editor")),
+        KeyBinding::new("secondary-x", Cut, Some("Editor")),
+        KeyBinding::new("secondary-v", Paste, Some("Editor")),
+        KeyBinding::new("secondary-z", Undo, Some("Editor")),
+        KeyBinding::new("secondary-shift-z", Redo, Some("Editor")),
         KeyBinding::new("cmd-u", UndoSelection, Some("Editor")),
         KeyBinding::new("cmd-shift-u", RedoSelection, Some("Editor")),
     ]);
@@ -149,19 +158,25 @@ pub fn bind_keys(cx: &mut App) {
     goto_line::bind_keys(cx);
     source_completion::bind_keys(cx);
     source_diagnostics::bind_keys(cx);
+    #[cfg(target_os = "macos")]
     source_lsp::bind_keys(cx);
     merge_review::bind_keys(cx);
 }
 
+const TYPING_PAUSE: Duration = Duration::from_secs(1);
+
 pub struct Editor {
     focus: FocusHandle,
     view: EditorView<Option<Section>>,
+    last_typed_at: Option<Instant>,
     find: Option<FindPanel>,
     goto_line: Option<GotoLinePanel>,
     completion: Option<SourceCompletion>,
     source_collab: Option<source_collab::SourceCollab>,
     diagnostics: SourceDiagnostics,
+    #[cfg(target_os = "macos")]
     source_lsp: Option<source_lsp::SourceLsp>,
+    #[cfg(target_os = "macos")]
     reference_panel_ui: source_lsp::ReferencePanelUi,
     source_tooltip: Option<source_tooltip::SourceTooltip>,
     #[cfg(test)]
@@ -178,6 +193,7 @@ pub struct Editor {
     selecting: bool,
     rectangle: Option<(RectangularSelection, Pixels, bool)>,
     layout: Option<Layout>,
+    highlighting: highlight::Highlighting,
     input_enabled: bool,
     scroll: ScrollHandle,
     end_scroll_padding: EndScrollPadding,
@@ -284,18 +300,22 @@ impl Editor {
         cx.observe_keystrokes(Self::observe_editor_key).detach();
         let mut view = EditorView::new(state);
         let caret_blink = draw_selection::CaretBlink::install(&mut view, cx);
+        #[cfg(target_os = "macos")]
         if let Some(plugin) = announcements::AnnouncementPlugin::new(window, cx) {
             view.add_plugin(plugin);
         }
         Ok(Self {
             focus,
             view,
+            last_typed_at: None,
             find: None,
             goto_line: None,
             completion: None,
             source_collab,
             diagnostics: SourceDiagnostics::new(cx.focus_handle()),
+            #[cfg(target_os = "macos")]
             source_lsp: None,
+            #[cfg(target_os = "macos")]
             reference_panel_ui: source_lsp::ReferencePanelUi::new(cx),
             source_tooltip: None,
             #[cfg(test)]
@@ -311,6 +331,7 @@ impl Editor {
             selecting: false,
             rectangle: None,
             layout: None,
+            highlighting: highlight::Highlighting::default(),
             input_enabled: true,
             scroll: ScrollHandle::new(),
             end_scroll_padding: EndScrollPadding::default(),
@@ -360,6 +381,10 @@ impl Editor {
         self.view.state().text().as_str()
     }
 
+    pub(crate) fn is_markdown(&self) -> bool {
+        self.path.as_deref().is_none_or(is_markdown)
+    }
+
     fn markdown(&self) -> Markdown<'_> {
         Markdown::new(self.source())
     }
@@ -370,7 +395,11 @@ impl Editor {
     }
 
     pub(crate) fn headings(&self) -> Vec<Heading> {
-        self.markdown().headings()
+        if self.is_markdown() {
+            self.markdown().headings()
+        } else {
+            Vec::new()
+        }
     }
 
     /// Scroll to a UTF-8 byte offset without moving the caret or taking focus.
@@ -392,6 +421,9 @@ impl Editor {
     }
 
     pub fn set_path(&mut self, path: Option<PathBuf>, workspace: Option<Workspace>) {
+        if self.path != path {
+            self.highlighting.invalidate();
+        }
         self.path = path;
         self.workspace = workspace;
         self.images.clear();
@@ -417,6 +449,7 @@ impl Editor {
             goto_line.set_editable(enabled, cx);
         }
         if !enabled {
+            self.finish_typing();
             self.selecting = false;
             self.completion = None;
             self.dismiss_keyboard_diagnostic_hover();
@@ -439,6 +472,7 @@ impl Editor {
     }
 
     fn set_selection(&mut self, anchor: usize, head: usize) {
+        self.finish_typing();
         self.completion = None;
         self.view
             .set_selection(EditorSelection::single(anchor, head))
@@ -452,6 +486,7 @@ impl Editor {
         event: &'static str,
         cx: &mut Context<Self>,
     ) {
+        self.finish_typing();
         if self.is_composing() {
             self.set_selection(anchor, head);
             self.finish_composition();
@@ -477,6 +512,7 @@ impl Editor {
         active: Option<Section>,
         cx: &mut Context<Self>,
     ) {
+        self.finish_typing();
         self.completion = None;
         let elapsed = cx
             .background_executor()
@@ -507,7 +543,14 @@ impl Editor {
         }
     }
 
+    fn finish_typing(&mut self) {
+        if self.last_typed_at.take().is_some() {
+            self.view.end_group();
+        }
+    }
+
     fn finish_composition(&mut self) {
+        self.last_typed_at = None;
         self.marked = None;
         self.view.end_group();
     }
@@ -516,6 +559,7 @@ impl Editor {
         self.clear_source_tooltip();
         self.rectangle = None;
         self.completion = None;
+        self.highlighting.invalidate();
         self.layout = None;
         if self
             .active
@@ -534,6 +578,7 @@ impl Editor {
         if !self.input_enabled {
             return;
         }
+        self.finish_typing();
         let revision = self.view.revision();
         let active = if redo {
             self.view.redo()
@@ -549,6 +594,7 @@ impl Editor {
         if !self.input_enabled || self.is_composing() {
             return;
         }
+        self.finish_typing();
         let revision = self.view.revision();
         let active = self.active.clone();
         let restored = if redo {
@@ -576,6 +622,41 @@ impl Editor {
         self.finish_composition();
         self.invalidate_edit_layout();
         cx.notify();
+    }
+
+    fn type_text(&mut self, range: Range<usize>, text: &str, cx: &mut Context<Self>) -> bool {
+        if self.is_composing()
+            || self.has_multiple_selections()
+            || !range.is_empty()
+            || range != self.selection()
+            || text.is_empty()
+            || text.contains(['\r', '\n'])
+        {
+            return self.replace(range, text, cx);
+        }
+        let now = cx.background_executor().now();
+        if self
+            .last_typed_at
+            .is_none_or(|previous| now.duration_since(previous) >= TYPING_PAUSE)
+        {
+            self.view.start_group();
+        }
+        let applied = self
+            .replace_with(
+                EditScope::Active,
+                range,
+                text,
+                std::convert::identity,
+                |_, _, _| {},
+                cx,
+            )
+            .is_some();
+        if applied {
+            self.last_typed_at = Some(now);
+        } else {
+            self.finish_composition();
+        }
+        applied
     }
 
     fn propose_native_input(
@@ -616,6 +697,7 @@ impl Editor {
         effect: StateEffect,
         cx: &mut Context<Self>,
     ) -> Option<ChangeDesc> {
+        self.finish_typing();
         let old_len = self.source().len();
         let mut desc = None;
         self.replace_with(
@@ -646,6 +728,7 @@ impl Editor {
         finish: impl FnOnce(&str, &mut SelectionRange, &mut Option<Section>),
         cx: &mut Context<Self>,
     ) -> bool {
+        self.finish_typing();
         if self
             .replace_with(scope, range, text, std::convert::identity, finish, cx)
             .is_none()
@@ -672,8 +755,23 @@ impl Editor {
             EditScope::Active => self.active.as_ref(),
             EditScope::Document => None,
         };
-        let Ok((range, inserted)) = self.markdown().plan_replacement(range, text, active) else {
-            self.message = Some("Cannot edit this Markdown range".into());
+        let markdown = self.is_markdown();
+        let planned = if markdown {
+            self.markdown().plan_replacement(range, text, active).ok()
+        } else {
+            self.source()
+                .get(range.clone())
+                .map(|_| (range, Cow::Borrowed(text)))
+        };
+        let Some((range, inserted)) = planned else {
+            self.message = Some(
+                if markdown {
+                    "Cannot edit this Markdown range"
+                } else {
+                    "Cannot edit this text range"
+                }
+                .into(),
+            );
             cx.notify();
             return None;
         };
@@ -781,6 +879,7 @@ impl Editor {
             };
             transaction = corrected;
         }
+        self.finish_typing();
         let check = preserve_markdown_edit(&transaction, receipt);
         let Ok(active) = self
             .view
@@ -933,13 +1032,18 @@ impl Editor {
         if selection.is_empty() {
             if let Some(layout) = &self.layout {
                 let mut at = self.cursor();
-                if self.active.is_none() {
+                if self.active.is_none() && self.is_markdown() {
                     let inline: Vec<_> = self
                         .markdown()
                         .sections()
                         .into_iter()
-                        .filter(|section| {
-                            matches!(section.kind, SectionKind::Strong | SectionKind::Emphasis)
+                        .filter(|section| match section.kind {
+                            SectionKind::Strong | SectionKind::Emphasis => true,
+                            SectionKind::InlineCode => {
+                                self.cursor() <= section.source.start
+                                    || self.cursor() >= section.source.end
+                            }
+                            _ => false,
                         })
                         .collect();
                     // Skip hidden delimiters in the rendered view, not in source edit mode.
@@ -1190,6 +1294,23 @@ fn to_utf16(text: &str, range: Range<usize>) -> Range<usize> {
     text[..range.start].encode_utf16().count()..text[..range.end].encode_utf16().count()
 }
 
+#[cfg(not(target_os = "macos"))]
+impl Editor {
+    fn type_with_source_lsp_signature(
+        &mut self,
+        _: &str,
+        _: &Window,
+        cx: &mut Context<Self>,
+        edit: impl FnOnce(&mut Self, &mut Context<Self>) -> bool,
+    ) {
+        self.edit_with_source_completion("input.type", edit, cx);
+    }
+
+    fn dismiss_source_lsp_tooltips(&mut self) -> bool {
+        false
+    }
+}
+
 impl EntityInputHandler for Editor {
     fn text_for_range(
         &mut self,
@@ -1281,7 +1402,7 @@ impl EntityInputHandler for Editor {
                 || editor.type_source_percent_brace(&range, text, cx)
                 || editor.type_source_bracket(&range, text, cx)
                 || editor.type_source_indent(&range, text, cx)
-                || editor.replace(range, text, cx)
+                || editor.type_text(range, text, cx)
         };
         if may_complete {
             self.type_with_source_lsp_signature(text, window, cx, edit);
@@ -1307,6 +1428,7 @@ impl EntityInputHandler for Editor {
             .unwrap_or_else(|| self.selection());
         let starting = self.marked.is_none();
         if starting {
+            self.finish_typing();
             let lsp = self.dismiss_source_lsp_tooltips();
             if self.clear_source_tooltip() || lsp {
                 cx.notify();
@@ -1413,12 +1535,13 @@ impl Render for Editor {
             }
             return self.render_merge_review(window, cx).into_any_element();
         }
+        #[cfg(target_os = "macos")]
         self.retain_source_lsp_diagnostics();
         self.sync_source_diagnostics(cx);
         let editor = cx.entity();
         // The Shell can change the body width without resizing the window. Use
         // the space GPUI assigned us before laying out the scrollable document.
-        div()
+        let element = div()
             .flex()
             .flex_col()
             .size_full()
@@ -1438,9 +1561,10 @@ impl Render for Editor {
                 .flex_1()
                 .min_h_0()
                 .w_full(),
-            )
-            .children(self.render_source_lsp_references(window, cx))
-            .into_any_element()
+            );
+        #[cfg(target_os = "macos")]
+        let element = element.children(self.render_source_lsp_references(window, cx));
+        element.into_any_element()
     }
 }
 
@@ -1467,6 +1591,8 @@ impl Editor {
         }
         let wrap_width = wrap_width(viewport.width);
         let (layout, isolation_cache) = self.shape_for_paint(window, cx, wrap_width);
+        #[cfg(not(target_os = "macos"))]
+        let _ = isolation_cache;
         let drop_cursor_revision = self.view.revision();
         let theme = layout.theme;
         let dark = theme.view.is_some_and(|style| style.dark);
@@ -1497,7 +1623,7 @@ impl Editor {
             .max(viewport.height - (top_padding + end_padding.unwrap_or(top_padding)));
         let editor = cx.entity();
         let overlay_editor = editor.clone();
-        div()
+        let element = div()
             .id("editor")
             .size_full()
             .bg(theme.surface)
@@ -1572,7 +1698,9 @@ impl Editor {
                 if !editor.request_source_completion(true, cx) {
                     cx.propagate();
                 }
-            }))
+            }));
+        #[cfg(target_os = "macos")]
+        let element = element
             .on_action(
                 cx.listener(|editor, _: &source_lsp::ShowSignatureHelp, window, cx| {
                     if window.is_window_active()
@@ -1602,7 +1730,8 @@ impl Editor {
                         cx.propagate();
                     }
                 }),
-            )
+            );
+        element
             .on_action(cx.listener(|editor, _: &CloseCompletion, _, cx| {
                 let dismissed = if editor.is_composing() {
                     false
@@ -1825,6 +1954,7 @@ impl Editor {
                     ),
                           window,
                           cx| {
+                        #[cfg(target_os = "macos")]
                         layout.prepare_isolated_paint(isolation_cache.as_ref(), window, cx);
                         let e = editor.read(cx);
                         let selection = e.selection();
@@ -1989,6 +2119,7 @@ impl Editor {
                                     ItemPaint::Text(line) => {
                                         let _ = line.paint(top, row.height, window, cx);
                                     }
+                                    #[cfg(target_os = "macos")]
                                     ItemPaint::Isolated(native) => native.paint(top, window),
                                     ItemPaint::Fold(line) => {
                                         let _ = line.paint(top, row.height, window, cx);
@@ -2154,18 +2285,18 @@ impl Editor {
                 prefer_above: false,
             })
         });
-        (
-            hover,
-            overlay
-                .or_else(|| self.source_diagnostic_tooltip(layout, viewport, window))
-                .or_else(|| {
-                    if completion_visible {
-                        None
-                    } else {
-                        self.source_lsp_tooltip(layout, viewport, window, caret)
-                    }
-                }),
-        )
+        let overlay = overlay.or_else(|| self.source_diagnostic_tooltip(layout, viewport, window));
+        #[cfg(target_os = "macos")]
+        let overlay = overlay.or_else(|| {
+            if completion_visible {
+                None
+            } else {
+                self.source_lsp_tooltip(layout, viewport, window, caret)
+            }
+        });
+        #[cfg(not(target_os = "macos"))]
+        let _ = completion_visible;
+        (hover, overlay)
     }
 }
 
@@ -2469,9 +2600,9 @@ mod tests {
                 assert_eq!(e.cursor(), start + 2);
             });
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), original));
-        cx.simulate_keystrokes("cmd-shift-z");
+        cx.simulate_keystrokes("secondary-shift-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), paired));
         cx.simulate_keystrokes("backspace");
         cx.update(|_, cx| {
@@ -2555,7 +2686,7 @@ mod tests {
             assert_eq!(e.source(), original.replace("世界", ""));
             assert_eq!(e.active.as_ref().unwrap().kind, SectionKind::FrontMatter);
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| {
             let e = editor.read(cx);
             assert_eq!(e.source(), original);
@@ -2629,7 +2760,7 @@ mod tests {
             assert!(e.view.can_undo());
             assert!(!e.view.can_redo());
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| {
             let e = editor.read(cx);
             assert_eq!(e.source(), original);
@@ -2983,6 +3114,74 @@ mod tests {
     }
 
     #[gpui::test]
+    fn inline_code_hides_delimiters_until_the_caret_enters_and_keeps_the_source(
+        cx: &mut TestAppContext,
+    ) {
+        let source = "Before `ls -la` after";
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source.into(), window, cx));
+        cx.update(|window, cx| {
+            bind_keys(cx);
+            window.focus(&editor.read(cx).focus);
+        });
+        cx.run_until_parked();
+        let code = 8..14;
+        let visible = |e: &Editor, expected: &str| {
+            let layout = e.layout.as_ref().unwrap();
+            assert!(layout.source_frame.is_none());
+            assert!(layout.rows.iter().flat_map(|row| &row.items).any(
+                |item| matches!(&item.paint, ItemPaint::Text(line) if line.text.as_ref() == expected)
+            ));
+        };
+        let hit = cx.update(|_, cx| {
+            let e = editor.read(cx);
+            visible(e, "ls -la");
+            let layout = e.layout.as_ref().unwrap();
+            layout.bounds_at(code.start + 1, false).unwrap().center()
+        });
+        cx.simulate_click(hit, Modifiers::none());
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert_eq!(e.cursor(), code.start + 1);
+            visible(e, "`ls -la`");
+        });
+        cx.simulate_input("X");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "Before `lXs -la` after"));
+        cx.simulate_keystrokes("secondary-z");
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert_eq!(e.source(), source);
+            assert_eq!(e.cursor(), code.start + 1);
+        });
+        cx.simulate_keystrokes("left left");
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert_eq!(e.cursor(), code.start - 1);
+            visible(e, "ls -la");
+        });
+        cx.simulate_keystrokes("right");
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert_eq!(e.cursor(), code.start);
+            visible(e, "`ls -la`");
+        });
+    }
+
+    #[gpui::test]
+    fn deleting_next_to_inline_code_skips_hidden_backticks(cx: &mut TestAppContext) {
+        let (editor, cx) =
+            cx.add_window_view(|window, cx| Editor::new("`x` followed".into(), window, cx));
+        cx.update(|window, cx| {
+            bind_keys(cx);
+            window.focus(&editor.read(cx).focus);
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("delete");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), " followed"));
+        cx.simulate_keystrokes("secondary-z right backspace");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "x` followed"));
+    }
+
+    #[gpui::test]
     fn backspace_in_source_mode_deletes_a_visible_marker(cx: &mut TestAppContext) {
         let (editor, cx) = cx.add_window_view(|window, cx| {
             Editor::new("[**xy**](https://example.com)".into(), window, cx)
@@ -3095,6 +3294,27 @@ mod tests {
     }
 
     #[gpui::test]
+    fn typing_backticks_in_plain_text_does_not_complete_a_fence(cx: &mut TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            let mut editor = Editor::new(String::new(), window, cx);
+            editor.set_path(Some("script.txt".into()), None);
+            editor
+        });
+        cx.update(|window, cx| {
+            bind_keys(cx);
+            window.focus(&editor.read(cx).focus);
+        });
+        cx.run_until_parked();
+        cx.simulate_input("```");
+        cx.update(|_, cx| {
+            assert_eq!(editor.read(cx).source(), "```");
+            assert_eq!(editor.read(cx).cursor(), 3);
+        });
+        cx.simulate_keystrokes("secondary-z");
+        cx.update(|_, cx| assert!(editor.read(cx).source().is_empty()));
+    }
+
+    #[gpui::test]
     fn typing_an_opening_code_fence_leaves_the_caret_on_an_editable_blank_line(
         cx: &mut TestAppContext,
     ) {
@@ -3112,9 +3332,11 @@ mod tests {
             assert_eq!(editor.source(), "```\n\n```");
             assert_eq!(editor.selection(), 4..4);
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "``"));
-        cx.simulate_keystrokes("cmd-shift-z");
+        cx.simulate_keystrokes("secondary-z");
+        cx.update(|_, cx| assert!(editor.read(cx).source().is_empty()));
+        cx.simulate_keystrokes("secondary-shift-z secondary-shift-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).selection(), 4..4));
         cx.simulate_input("let x = 1;");
         cx.simulate_keystrokes("backspace");
@@ -3150,13 +3372,13 @@ mod tests {
         });
         cx.run_until_parked();
         cx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string("```".into())));
-        cx.simulate_keystrokes("cmd-v");
+        cx.simulate_keystrokes("secondary-v");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "```"));
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| assert!(editor.read(cx).source().is_empty()));
-        cx.simulate_keystrokes("cmd-shift-z backspace");
+        cx.simulate_keystrokes("secondary-shift-z backspace");
         cx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string("`".into())));
-        cx.simulate_keystrokes("cmd-v");
+        cx.simulate_keystrokes("secondary-v");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "```"));
         for text in ["rust", "\n", "let x = 1;", "\n", "`", "`", "`"] {
             cx.simulate_input(text);
@@ -3270,7 +3492,7 @@ mod tests {
         cx.simulate_input("新標題");
         cx.simulate_click(formula, Modifiers::none());
         cx.update(|_, cx| assert!(editor.read(cx).active.is_some()));
-        cx.simulate_keystrokes("cmd-a");
+        cx.simulate_keystrokes("secondary-a");
         cx.simulate_input("y^3");
         cx.update(|_, cx| {
             let editor = editor.read(cx);
@@ -3298,7 +3520,8 @@ mod tests {
         cx.simulate_mouse_up(paragraph, MouseButton::Left, Modifiers::none());
         cx.update(|_, cx| {
             let editor = editor.read(cx);
-            assert!(editor.source()[editor.selection()].contains("\n\n"));
+            let selected = &editor.source()[editor.selection()];
+            assert!(selected.contains("\n\n") || selected.contains("\r\n\r\n"));
         });
     }
 
@@ -3330,6 +3553,102 @@ mod tests {
     }
 
     #[gpui::test]
+    fn typing_undo_groups_adjacent_input_until_a_pause(cx: &mut TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(String::new(), window, cx));
+        let executor = cx.update(|window, cx| {
+            bind_keys(cx);
+            window.focus(&editor.read(cx).focus);
+            cx.background_executor().clone()
+        });
+        cx.run_until_parked();
+        cx.simulate_input("ab");
+        executor.advance_clock(Duration::from_millis(750));
+        cx.simulate_input("好");
+        executor.advance_clock(Duration::from_millis(750));
+        cx.simulate_input("d");
+        executor.advance_clock(Duration::from_secs(1));
+        cx.simulate_input("ef");
+        cx.simulate_keystrokes("secondary-z");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "ab好d"));
+        cx.simulate_keystrokes("secondary-z");
+        cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            assert!(editor.source().is_empty());
+            assert_eq!(editor.selection(), 0..0);
+        });
+        cx.simulate_keystrokes("secondary-shift-z secondary-shift-z");
+        cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            assert_eq!(editor.source(), "ab好def");
+            assert_eq!(editor.selection(), 8..8);
+        });
+    }
+
+    #[gpui::test]
+    fn typing_undo_separates_navigation_paste_newlines_and_deletion(cx: &mut TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(String::new(), window, cx));
+        cx.update(|window, cx| {
+            bind_keys(cx);
+            window.focus(&editor.read(cx).focus);
+            cx.write_to_clipboard(ClipboardItem::new_string("XY".into()));
+        });
+        cx.run_until_parked();
+        cx.simulate_input("ab");
+        cx.simulate_keystrokes("left right");
+        cx.simulate_input("cd");
+        cx.simulate_keystrokes("secondary-v");
+        cx.simulate_input("ef");
+        cx.simulate_keystrokes("enter");
+        cx.simulate_input("gh");
+        cx.simulate_keystrokes("backspace");
+        cx.simulate_input("ij");
+        for source in [
+            "abcdXYef\ng",
+            "abcdXYef\ngh",
+            "abcdXYef\n",
+            "abcdXYef",
+            "abcdXY",
+            "abcd",
+            "ab",
+            "",
+        ] {
+            cx.simulate_keystrokes("secondary-z");
+            cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source));
+        }
+    }
+
+    #[gpui::test]
+    fn typing_undo_keeps_ime_composition_separate(cx: &mut TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(String::new(), window, cx));
+        let executor = cx.update(|window, cx| {
+            bind_keys(cx);
+            window.focus(&editor.read(cx).focus);
+            cx.background_executor().clone()
+        });
+        cx.run_until_parked();
+        cx.simulate_input("ab");
+        cx.update(|window, cx| {
+            editor.update(cx, |e, cx| {
+                e.replace_and_mark_text_in_range(None, "n", None, window, cx);
+            });
+        });
+        executor.advance_clock(Duration::from_secs(2));
+        cx.update(|window, cx| {
+            editor.update(cx, |e, cx| {
+                e.replace_and_mark_text_in_range(None, "ni", None, window, cx);
+                e.replace_text_in_range(None, "你", window, cx);
+                assert_eq!(e.source(), "ab你");
+                assert!(!e.is_composing());
+            });
+        });
+        cx.simulate_input("cd");
+        for source in ["ab你", "ab", ""] {
+            cx.simulate_keystrokes("secondary-z");
+            cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source));
+        }
+    }
+
+    #[gpui::test]
     fn uses_one_undo_history_for_formatting_and_typing(cx: &mut TestAppContext) {
         let (editor, cx) =
             cx.add_window_view(|window, cx| Editor::new("選取\n\n也選取".into(), window, cx));
@@ -3345,9 +3664,9 @@ mod tests {
         });
         cx.simulate_input("字");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "**選取**\n\n# 字**也選取**"));
-        cx.simulate_keystrokes("cmd-z cmd-z cmd-z");
+        cx.simulate_keystrokes("secondary-z secondary-z secondary-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "選取\n\n也選取"));
-        cx.simulate_keystrokes("cmd-shift-z");
+        cx.simulate_keystrokes("secondary-shift-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "**選取**\n\n**也選取**"));
     }
 

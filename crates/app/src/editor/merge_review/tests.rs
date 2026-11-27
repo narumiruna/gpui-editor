@@ -445,7 +445,7 @@ fn review_restores_a_single_chunk_and_undo_reopens_its_difference(cx: &mut TestA
         assert_eq!(editor.merge_review.as_ref().unwrap().chunks.len(), 1);
         assert!(editor.view.can_undo());
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.run_until_parked();
     cx.update(|_, cx| {
         let editor = editor.read(cx);

@@ -18,7 +18,7 @@ fn pasting_a_destination_keeps_the_selected_text_and_undo(cx: &mut TestAppContex
             window.focus(&editor.focus);
         });
     });
-    cx.simulate_keystrokes("cmd-v");
+    cx.simulate_keystrokes("secondary-v");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(
@@ -28,7 +28,7 @@ fn pasting_a_destination_keeps_the_selected_text_and_undo(cx: &mut TestAppContex
         assert_eq!(editor.cursor(), from + 1);
         assert_eq!(editor.anchor(), to + 1);
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source);
@@ -65,7 +65,7 @@ fn link_paste_wraps_only_the_primary_selection(cx: &mut TestAppContext) {
             window.focus(&editor.focus);
         });
     });
-    cx.simulate_keystrokes("cmd-v");
+    cx.simulate_keystrokes("secondary-v");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         let expected = "猫 [β😀](https://example.test/) end\r\n";
@@ -76,7 +76,7 @@ fn link_paste_wraps_only_the_primary_selection(cx: &mut TestAppContext) {
         );
         assert_eq!(editor.view.undo_depth(), 1);
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source);
@@ -101,13 +101,13 @@ fn an_empty_primary_range_uses_normal_multi_range_paste(cx: &mut TestAppContext)
             window.focus(&editor.focus);
         });
     });
-    cx.simulate_keystrokes("cmd-v");
+    cx.simulate_keystrokes("secondary-v");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), "www.example.test www.example.testtwo");
         assert_eq!(editor.view.undo_depth(), 1);
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source);
@@ -141,14 +141,14 @@ fn markdown_link_paste_uses_the_filtered_destination(cx: &mut TestAppContext) {
             window.focus(&editor.focus);
         });
     });
-    cx.simulate_keystrokes("cmd-v");
+    cx.simulate_keystrokes("secondary-v");
     cx.update(|_, cx| {
         assert_eq!(
             editor.read(cx).source(),
             "a [guide](https://example.test)\r\n"
         )
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source));
 }
 
@@ -165,9 +165,9 @@ fn pasting_plain_text_or_into_protected_syntax_does_not_make_a_link(cx: &mut Tes
             window.focus(&editor.focus);
         });
     });
-    cx.simulate_keystrokes("cmd-v");
+    cx.simulate_keystrokes("secondary-v");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source.replace("guide", "plain")));
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         cx.write_to_clipboard(ClipboardItem::new_string("https://example.test".into()));
         editor.update(cx, |editor, _| {
@@ -175,7 +175,7 @@ fn pasting_plain_text_or_into_protected_syntax_does_not_make_a_link(cx: &mut Tes
             editor.set_selection(start, start + 5);
         });
     });
-    cx.simulate_keystrokes("cmd-v");
+    cx.simulate_keystrokes("secondary-v");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source);
@@ -200,7 +200,7 @@ fn enter_continues_a_bullet_without_normalizing_line_endings(cx: &mut TestAppCon
         assert_eq!(editor.source(), "- one\r\n- \r\n- two");
         assert_eq!(editor.cursor(), 9);
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source));
 }
 
@@ -252,7 +252,7 @@ fn markup_keys_follow_lone_cr_lines_without_rewriting_them(cx: &mut TestAppConte
             assert_eq!(editor.cursor(), caret, "{key}");
             assert_eq!(editor.view.undo_depth(), usize::from(source != expected));
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| {
             let editor = editor.read(cx);
             assert_eq!(editor.source(), source);
@@ -304,7 +304,7 @@ fn two_markdown_carets_continue_or_remove_markup_in_one_undo_step(cx: &mut TestA
             assert_eq!(editor.view.state().selection().ranges().len(), 2);
             assert_eq!(editor.view.state().selection().main_index(), 1);
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| {
             let editor = editor.read(cx);
             assert_eq!(editor.source(), source);
@@ -367,7 +367,7 @@ fn configured_markdown_routes_keys_and_paste_without_changing_protection(cx: &mu
                 format!("{prefix}{}", &source[boundary..])
             );
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| {
             editor.update(cx, |editor, _| {
                 assert_eq!(editor.source(), source);
@@ -379,7 +379,7 @@ fn configured_markdown_routes_keys_and_paste_without_changing_protection(cx: &mu
             let changed = if enabled { "  犬" } else { "犬" };
             assert_eq!(editor.read(cx).source(), source.replace("- 犬", changed));
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| {
             cx.write_to_clipboard(ClipboardItem::new_string("https://example.test/".into()));
             editor.update(cx, |editor, _| {
@@ -387,7 +387,7 @@ fn configured_markdown_routes_keys_and_paste_without_changing_protection(cx: &mu
                 editor.set_selection(label, label + "label".len());
             });
         });
-        cx.simulate_keystrokes("cmd-v");
+        cx.simulate_keystrokes("secondary-v");
         cx.update(|_, cx| {
             let inserted = if enabled {
                 "[label](https://example.test/)"
@@ -396,7 +396,7 @@ fn configured_markdown_routes_keys_and_paste_without_changing_protection(cx: &mu
             };
             assert_eq!(editor.read(cx).source(), source.replace("label", inserted));
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| {
             editor.update(cx, |editor, _| {
                 assert_eq!(editor.source(), source);
@@ -404,7 +404,7 @@ fn configured_markdown_routes_keys_and_paste_without_changing_protection(cx: &mu
                 editor.set_selection(from, from + 1);
             });
         });
-        cx.simulate_keystrokes("cmd-v enter backspace");
+        cx.simulate_keystrokes("secondary-v enter backspace");
         cx.update(|_, cx| {
             let editor = editor.read(cx);
             assert_eq!(editor.source(), source);
@@ -429,6 +429,6 @@ fn backspace_removes_the_first_bullet_marker_in_one_edit(cx: &mut TestAppContext
         assert_eq!(editor.source(), "one");
         assert_eq!(editor.cursor(), 0);
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "- one"));
 }

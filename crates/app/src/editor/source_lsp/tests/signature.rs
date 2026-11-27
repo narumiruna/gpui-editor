@@ -175,13 +175,13 @@ fn signature_characters_follow_accepted_typing_and_sync_order(cx: &mut TestAppCo
         assert_eq!(editor.cursor(), WORD + 3);
         cx.write_to_clipboard(gpui::ClipboardItem::new_string("(".into()));
     });
-    cx.simulate_keystrokes("cmd-v");
+    cx.simulate_keystrokes("secondary-v");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert!(editor.source().contains(",(,(id"));
         assert!(idle(editor));
     });
-    cx.simulate_keystrokes("cmd-z cmd-shift-z");
+    cx.simulate_keystrokes("secondary-z secondary-shift-z");
     cx.update(|window, cx| {
         editor.update(cx, |editor, cx| {
             assert!(editor.source().contains(",(,(id"));

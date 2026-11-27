@@ -193,7 +193,7 @@ fn configured_markdown_parsers_apply_to_previews_and_editable_fences(cx: &mut Te
         assert_eq!(editor.source(), source.replace("name =", "# name ="));
         assert_eq!(editor.view.undo_depth(), 1);
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         editor.update(cx, |editor, cx| {
             assert_eq!(editor.source(), source);

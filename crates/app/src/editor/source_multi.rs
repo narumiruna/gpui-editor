@@ -228,7 +228,14 @@ impl Editor {
             self.apply_prose_transaction_with_receipt(transaction, receipt, cx)
         };
         if !result {
-            self.message = Some("Cannot edit all selected Markdown ranges".into());
+            self.message = Some(
+                if self.is_markdown() {
+                    "Cannot edit all selected Markdown ranges"
+                } else {
+                    "Cannot edit all selected text ranges"
+                }
+                .into(),
+            );
             cx.notify();
         }
         result

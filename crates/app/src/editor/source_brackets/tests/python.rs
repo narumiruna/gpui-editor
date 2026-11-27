@@ -66,7 +66,7 @@ fn python_quote_input_matches_pinned_editor_state(cx: &mut TestAppContext) {
             previous = step;
         }
         for previous in undo.into_iter().rev() {
-            cx.simulate_keystrokes("cmd-z");
+            cx.simulate_keystrokes("secondary-z");
             cx.update(|_, cx| check(editor.read(cx), previous));
         }
         cx.update(|_, cx| assert!(!editor.read(cx).view.can_undo(), "{}", case.name));
@@ -104,7 +104,7 @@ fn python_quote_input_preserves_composition_and_protected_fences(cx: &mut TestAp
             assert_eq!(editor.cursor(), position + 1);
         });
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source);

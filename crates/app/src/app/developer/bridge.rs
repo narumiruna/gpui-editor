@@ -1,42 +1,24 @@
-//! Local Developer Mode transport. Only the worker thread does socket I/O.
+//! Local Developer Mode protocol. Only the worker thread does socket I/O.
 
 use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
-    ffi::OsStr,
-    fs::{self, DirBuilder, Permissions},
     io::{self, BufRead, BufReader, Write},
-    os::{
-        fd::AsRawFd,
-        unix::{
-            ffi::OsStrExt,
-            fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt},
-            net::{UnixListener, UnixStream},
-        },
-    },
-    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread::{self, Thread},
     time::{Duration, Instant},
 };
 
-const VERSION: u32 = 1;
+#[cfg(target_os = "macos")]
+#[path = "bridge/macos.rs"]
+mod platform;
+#[cfg(target_os = "windows")]
+#[path = "bridge/windows.rs"]
+mod platform;
+
+use platform::{Listener, Stream};
+
 const MAX_FRAME: usize = 6 * 1024 * 1024;
-const MAX_EVENTS: usize = 32;
-const MAX_LOGS: usize = 128;
-const MAX_LOG_BYTES: usize = 512;
-const POLL_INTERVAL: Duration = Duration::from_millis(10);
-const IO_TIMEOUT: Duration = Duration::from_secs(5);
-const CONSENT_TIMEOUT: Duration = Duration::from_secs(60);
-const RECEIPT_TIMEOUT: Duration = Duration::from_secs(30);
-const BUSY: &[u8] = b"{\"type\":\"rejected\",\"message\":\"Editor is busy\"}\n";
-
-type SharedState = Mutex<State>;
-
-pub(super) struct Bridge {
-    state: Arc<SharedState>,
-    worker: Thread,
-}
 
 #[derive(Debug)]
 pub(super) enum Event {
@@ -73,33 +55,39 @@ pub(super) struct Attachment {
     pub data: String,
 }
 
+const VERSION: u32 = 1;
+const MAX_EVENTS: usize = 32;
+const MAX_LOGS: usize = 128;
+const MAX_LOG_BYTES: usize = 512;
+const POLL_INTERVAL: Duration = Duration::from_millis(10);
+const IO_TIMEOUT: Duration = Duration::from_secs(5);
+const CONSENT_TIMEOUT: Duration = Duration::from_secs(60);
+const RECEIPT_TIMEOUT: Duration = Duration::from_secs(30);
+const BUSY: &[u8] = b"{\"type\":\"rejected\",\"message\":\"Editor is busy\"}\n";
+
+type SharedState = Mutex<State>;
+
+pub(super) struct Bridge {
+    state: Arc<SharedState>,
+    worker: Thread,
+}
+
 impl Bridge {
     pub(super) fn start() -> io::Result<Self> {
-        Self::listen(&discovery_base(&darwin_temp_dir()?)?)
+        Self::spawn(Listener::start()?)
     }
 
-    pub(super) fn listen(base: &Path) -> io::Result<Self> {
-        let instance = tempfile::Builder::new()
-            .prefix("i-")
-            .permissions(Permissions::from_mode(0o700))
-            .tempdir_in(base)?;
-        check_private(instance.path(), false)?;
-        let path = instance.path().join("s");
-        // Darwin's 104-byte sun_path must also fit the terminating NUL.
-        if path.as_os_str().as_bytes().len() >= 104 {
-            return Err(invalid("Developer socket path is too long"));
-        }
-        let listener = UnixListener::bind(&path)?;
-        fs::set_permissions(&path, Permissions::from_mode(0o600))?;
-        check_private(&path, true)?;
-        listener.set_nonblocking(true)?;
+    #[cfg(test)]
+    pub(super) fn listen(base: &std::path::Path) -> io::Result<Self> {
+        Self::spawn(Listener::listen(base)?)
+    }
 
+    fn spawn(listener: Listener) -> io::Result<Self> {
         let state = Arc::new(Mutex::new(State::default()));
         let worker_state = state.clone();
         let worker = thread::Builder::new()
             .name("developer-bridge".into())
             .spawn(move || {
-                let _instance = instance;
                 serve(listener, &worker_state);
             })?
             .thread()
@@ -213,70 +201,6 @@ impl Drop for Bridge {
     }
 }
 
-fn darwin_temp_dir() -> io::Result<PathBuf> {
-    let mut buffer = [0_u8; libc::PATH_MAX as usize];
-    // SAFETY: confstr writes at most buffer.len() bytes to this writable buffer.
-    let size = unsafe {
-        libc::confstr(
-            libc::_CS_DARWIN_USER_TEMP_DIR,
-            buffer.as_mut_ptr().cast(),
-            buffer.len(),
-        )
-    };
-    if !(2..=buffer.len()).contains(&size) || buffer[size - 1] != 0 {
-        return Err(invalid("Cannot locate the Darwin user temporary directory"));
-    }
-    let path = Path::new(OsStr::from_bytes(&buffer[..size - 1]));
-    if !path.is_absolute() {
-        return Err(invalid("Darwin user temporary directory is not absolute"));
-    }
-    // Strip the trailing slash before checking that the final component is not
-    // a symlink. Canonicalize system aliases such as /var for discovery.
-    let path: PathBuf = path.components().collect();
-    check_private(&path, false)?;
-    path.canonicalize()
-}
-
-fn discovery_base(temp: &Path) -> io::Result<PathBuf> {
-    check_private(temp, false)?;
-    let base = temp.join("gpui-pi");
-    match DirBuilder::new().mode(0o700).create(&base) {
-        Ok(()) => (),
-        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => (),
-        Err(err) => return Err(err),
-    }
-    check_private(&base, false)?;
-    Ok(base)
-}
-
-fn check_private(path: &Path, socket: bool) -> io::Result<()> {
-    let meta = fs::symlink_metadata(path)?;
-    let (correct_type, mode) = if socket {
-        (meta.file_type().is_socket(), 0o600)
-    } else {
-        (meta.is_dir(), 0o700)
-    };
-    if !correct_type || meta.uid() != effective_uid() || meta.mode() & 0o7777 != mode {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "Unsafe Developer Mode discovery directory or socket",
-        ));
-    }
-    Ok(())
-}
-
-fn effective_uid() -> libc::uid_t {
-    // SAFETY: geteuid takes no arguments and has no memory preconditions.
-    unsafe { libc::geteuid() }
-}
-
-fn same_user(socket: &UnixStream) -> bool {
-    let (mut uid, mut gid) = (0, 0);
-    // SAFETY: the descriptor stays open for this call, and both outputs are writable.
-    let result = unsafe { libc::getpeereid(socket.as_raw_fd(), &mut uid, &mut gid) };
-    result == 0 && uid == effective_uid()
-}
-
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 enum ClientMessage {
@@ -346,7 +270,7 @@ enum FeedbackSlot {
     Awaiting(u32),
 }
 
-fn serve(listener: UnixListener, shared: &SharedState) {
+fn serve(mut listener: Listener, shared: &SharedState) {
     let mut next_peer = 0_u64;
     let mut connection: Option<Connection> = None;
     'serve: while !shared.lock().unwrap().stopped {
@@ -364,16 +288,13 @@ fn serve(listener: UnixListener, shared: &SharedState) {
         }
         // Limit accepts per iteration so busy clients cannot starve the active one.
         for _ in 0..8 {
-            let (mut socket, _) = match listener.accept() {
+            let mut socket = match listener.accept() {
                 Ok(accepted) => accepted,
                 Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
                 Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
                 Err(_) => break 'serve,
             };
             progress = true;
-            if !same_user(&socket) || socket.set_nonblocking(true).is_err() {
-                continue;
-            }
             let mut state = shared.lock().unwrap();
             if state.stopped {
                 break 'serve;
@@ -419,7 +340,7 @@ fn disconnect(shared: &SharedState) {
 }
 
 struct Connection {
-    input: BufReader<UnixStream>,
+    input: BufReader<Stream>,
     frame: Vec<u8>,
     frame_deadline: Option<Instant>,
     pair_deadline: Instant,
@@ -455,7 +376,7 @@ enum Input {
 }
 
 impl Connection {
-    fn new(socket: UnixStream) -> Self {
+    fn new(socket: Stream) -> Self {
         Self {
             input: BufReader::new(socket),
             frame: Vec::new(),
@@ -663,7 +584,7 @@ impl Connection {
         let end = (output.written + 64 * 1024).min(output.bytes.len());
         match self
             .input
-            .get_ref()
+            .get_mut()
             .write(&output.bytes[output.written..end])
         {
             Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
@@ -745,7 +666,7 @@ fn valid_base64(data: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/'))
 }
 
-fn encode(message: &ServerMessage) -> io::Result<Vec<u8>> {
+fn encode(message: &impl Serialize) -> io::Result<Vec<u8>> {
     #[derive(Default)]
     struct Capped(Vec<u8>);
 
@@ -774,52 +695,75 @@ fn invalid(message: &'static str) -> io::Error {
 }
 
 #[cfg(test)]
+pub(super) fn test_directory() -> io::Result<tempfile::TempDir> {
+    platform::test_directory()
+}
+
+#[cfg(test)]
+pub(super) struct TestClient(Stream);
+
+#[cfg(test)]
+impl TestClient {
+    pub(super) fn connect(base: &std::path::Path) -> io::Result<BufReader<Self>> {
+        Self::retry(|| platform::test_client(base)).map(|stream| BufReader::new(Self(stream)))
+    }
+
+    fn retry<T>(mut operation: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match operation() {
+                Err(error)
+                    if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline =>
+                {
+                    thread::sleep(POLL_INTERVAL);
+                }
+                result => return result,
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+impl std::io::Read for TestClient {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        Self::retry(|| self.0.read(buf))
+    }
+}
+
+#[cfg(test)]
+impl Write for TestClient {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        Self::retry(|| self.0.write(buf))
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::{Value, json};
-    use std::os::unix::fs::symlink;
 
     const PAIR: &[u8] = b"{\"type\":\"pair\",\"version\":1,\"project\":\"/test\",\"session\":\"practice\",\"code\":\"012345\"}\n";
     const TEST_TIMEOUT: Duration = Duration::from_secs(3);
 
     struct Fixture {
         bridge: Bridge,
-        path: PathBuf,
-        _temp: tempfile::TempDir,
+        temp: tempfile::TempDir,
     }
 
     impl Fixture {
         fn new() -> Self {
-            let temp = sandbox();
-            let base = discovery_base(temp.path()).unwrap();
-            let bridge = Bridge::listen(&base).unwrap();
-            let path = fs::read_dir(&base)
-                .unwrap()
-                .next()
-                .unwrap()
-                .unwrap()
-                .path()
-                .join("s");
-            Self {
-                bridge,
-                path,
-                _temp: temp,
-            }
+            let temp = platform::test_directory().unwrap();
+            let bridge = Bridge::listen(temp.path()).unwrap();
+            Self { bridge, temp }
         }
 
-        fn connect(&self) -> BufReader<UnixStream> {
-            let stream = UnixStream::connect(&self.path).unwrap();
-            stream.set_read_timeout(Some(TEST_TIMEOUT)).unwrap();
-            stream.set_write_timeout(Some(TEST_TIMEOUT)).unwrap();
-            BufReader::new(stream)
+        fn connect(&self) -> BufReader<TestClient> {
+            TestClient::connect(self.temp.path()).unwrap()
         }
-    }
-
-    fn sandbox() -> tempfile::TempDir {
-        tempfile::Builder::new()
-            .permissions(Permissions::from_mode(0o700))
-            .tempdir_in(darwin_temp_dir().unwrap())
-            .unwrap()
     }
 
     fn wait_until<T>(mut poll: impl FnMut() -> Option<T>) -> T {
@@ -833,18 +777,18 @@ mod tests {
         }
     }
 
-    fn read_message(socket: &mut BufReader<UnixStream>) -> Value {
+    fn read_message(socket: &mut BufReader<TestClient>) -> Value {
         let mut line = String::new();
         socket.read_line(&mut line).unwrap();
         assert!(line.ends_with('\n'), "missing server frame: {line:?}");
         serde_json::from_str(&line).unwrap()
     }
 
-    fn write_message(socket: &mut BufReader<UnixStream>, value: Value) {
+    fn write_message(socket: &mut BufReader<TestClient>, value: Value) {
         writeln!(socket.get_mut(), "{value}").unwrap();
     }
 
-    fn pair(fixture: &Fixture, socket: &mut BufReader<UnixStream>) -> u64 {
+    fn pair(fixture: &Fixture, socket: &mut BufReader<TestClient>) -> u64 {
         socket.get_mut().write_all(&PAIR[..24]).unwrap();
         socket.get_mut().write_all(&PAIR[24..]).unwrap();
         match wait_until(|| fixture.bridge.try_event()) {
@@ -864,7 +808,7 @@ mod tests {
         }
     }
 
-    fn approve(fixture: &Fixture, socket: &mut BufReader<UnixStream>, id: u64) {
+    fn approve(fixture: &Fixture, socket: &mut BufReader<TestClient>, id: u64) {
         fixture.bridge.decide(id, true);
         assert_eq!(
             read_message(socket),
@@ -884,30 +828,34 @@ mod tests {
     }
 
     #[test]
-    fn discovery_rejects_symlinks_and_bad_modes_and_removes_only_its_instance() {
+    fn feedback_can_exceed_the_transport_buffer() {
         let fixture = Fixture::new();
-        let instance = fixture.path.parent().unwrap().to_path_buf();
-        let base = instance.parent().unwrap();
-        check_private(&instance, false).unwrap();
-        check_private(&fixture.path, true).unwrap();
-        let sibling = tempfile::tempdir_in(base).unwrap();
-        let other = sandbox();
-        let link = other.path().join("gpui-pi");
-        symlink(base, &link).unwrap();
-        assert_eq!(
-            discovery_base(other.path()).unwrap_err().kind(),
-            io::ErrorKind::PermissionDenied
+        let mut socket = fixture.connect();
+        let id = pair(&fixture, &mut socket);
+        approve(&fixture, &mut socket, id);
+
+        let data = "A".repeat(256 * 1024);
+        let feedback = fixture
+            .bridge
+            .send_feedback(
+                target(),
+                "large attachment".into(),
+                Some(Attachment {
+                    mime_type: "image/png".into(),
+                    data: data.clone(),
+                }),
+            )
+            .unwrap();
+        let reply = read_message(&mut socket);
+        assert_eq!(reply["id"], feedback);
+        assert!(reply["image"]["data"].as_str() == Some(data.as_str()));
+        write_message(
+            &mut socket,
+            json!({"type": "receipt", "id": feedback, "accepted": true}),
         );
-        fs::remove_file(&link).unwrap();
-        fs::create_dir(&link).unwrap();
-        fs::set_permissions(&link, Permissions::from_mode(0o755)).unwrap();
-        assert_eq!(
-            discovery_base(other.path()).unwrap_err().kind(),
-            io::ErrorKind::PermissionDenied
+        assert!(
+            matches!(wait_until(|| fixture.bridge.try_event()), Event::Receipt { id, accepted: true, .. } if id == feedback)
         );
-        drop(fixture.bridge);
-        wait_until(|| (!instance.exists()).then_some(()));
-        assert!(sibling.path().is_dir());
     }
 
     #[test]
@@ -1038,21 +986,34 @@ mod tests {
     fn pairing_rejects_malformed_utf8_version_and_oversized_identity() {
         let fixture = Fixture::new();
         for bad in [
-            b"{\"type\":\"pair\",\"version\":1,\"project\":\"/test\",\"session\":\"practice\",\"code\":\"012345\",\"ignored\":\"\xff\"}\n".to_vec(),
-            format!("{}\n", json!({"type": "pair", "version": 2, "project": "x", "session": "x", "code": "123456"})).into_bytes(),
-            format!("{}\n", json!({"type": "pair", "version": 1, "project": "é".repeat(257), "session": "x", "code": "123456"})).into_bytes(),
-            format!("{}\n", json!({"type": "pair", "version": 1, "project": "x", "session": "x", "code": "12345a"})).into_bytes(),
-        ] {
-            let mut socket = fixture.connect();
-            socket.get_mut().write_all(&bad).unwrap();
-            assert_eq!(read_message(&mut socket)["type"], "rejected");
-        }
+        b"{\"type\":\"pair\",\"version\":1,\"project\":\"/test\",\"session\":\"practice\",\"code\":\"012345\",\"ignored\":\"\xff\"}\n".to_vec(),
+        format!("{}\n", json!({"type": "pair", "version": 2, "project": "x", "session": "x", "code": "123456"})).into_bytes(),
+        format!("{}\n", json!({"type": "pair", "version": 1, "project": "é".repeat(257), "session": "x", "code": "123456"})).into_bytes(),
+        format!("{}\n", json!({"type": "pair", "version": 1, "project": "x", "session": "x", "code": "12345a"})).into_bytes(),
+    ] {
+        let mut socket = fixture.connect();
+        socket.get_mut().write_all(&bad).unwrap();
+        assert_eq!(read_message(&mut socket)["type"], "rejected");
+    }
         assert!(fixture.bridge.try_event().is_none());
     }
 
     #[test]
-    fn frame_limit_includes_lf_for_reads_and_writes() {
-        let (mut sender, socket) = UnixStream::pair().unwrap();
+    fn frame_limit_includes_lf_for_writes() {
+        let mut message = json!({"text": ""});
+        let empty_size = encode(&message).unwrap().len();
+        message["text"] = "a".repeat(MAX_FRAME - empty_size).into();
+        let frame = encode(&message).unwrap();
+        assert_eq!(frame.len(), MAX_FRAME);
+        assert_eq!(frame.last(), Some(&b'\n'));
+        message["text"] = "a".repeat(MAX_FRAME - empty_size + 1).into();
+        assert!(encode(&message).is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn frame_limit_includes_lf_for_reads() {
+        let (mut sender, socket) = Stream::pair().unwrap();
         let mut connection = Connection::new(socket);
         connection
             .frame
@@ -1068,27 +1029,5 @@ mod tests {
         assert!(
             matches!(connection.read_input(), Err(err) if err.kind() == io::ErrorKind::InvalidData)
         );
-
-        let mut feedback = Feedback {
-            id: 0,
-            target: target(),
-            text: String::new(),
-            image: None,
-        };
-        let empty_size = encode(&ServerMessage::Feedback(feedback)).unwrap().len();
-        feedback = Feedback {
-            id: 0,
-            target: target(),
-            text: "a".repeat(MAX_FRAME - empty_size),
-            image: None,
-        };
-        let mut message = ServerMessage::Feedback(feedback);
-        let frame = encode(&message).unwrap();
-        assert_eq!(frame.len(), MAX_FRAME);
-        assert_eq!(frame.last(), Some(&b'\n'));
-        if let ServerMessage::Feedback(feedback) = &mut message {
-            feedback.text.push('b');
-        }
-        assert!(encode(&message).is_err());
     }
 }

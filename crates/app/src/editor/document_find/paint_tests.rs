@@ -30,7 +30,7 @@ fn one_dark_panel_inputs_reconfigure_in_the_find_frame(cx: &mut TestAppContext) 
     let replace_button = cx.debug_bounds("document-find-show-replacement").unwrap();
     cx.simulate_click(replace_button.center(), Modifiers::none());
     cx.simulate_input(" $& ");
-    cx.simulate_keystrokes("cmd-f cmd-a");
+    cx.simulate_keystrokes("cmd-f secondary-a");
     cx.run_until_parked();
     let ids = ["document-find-input", "document-replacement-input"];
     let bounds = ids.map(|id| cx.debug_bounds(id).unwrap());

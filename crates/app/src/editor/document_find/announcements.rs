@@ -106,7 +106,7 @@ fn replace_all_announces_match_count_on_the_edit_not_on_undo(cx: &mut TestAppCon
         assert_eq!(editor.source(), "😀 \r\n");
         assert_eq!(editor.view.undo_depth(), 1);
     });
-    cx.simulate_keystrokes("escape cmd-z");
+    cx.simulate_keystrokes("escape secondary-z");
     cx.run_until_parked();
     cx.update(|_, cx| {
         let editor = editor.read(cx);

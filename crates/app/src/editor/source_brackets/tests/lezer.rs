@@ -102,7 +102,7 @@ fn lezer_quote_input_matches_pinned_editor_state(cx: &mut TestAppContext) {
             cx.simulate_input(typed);
             cx.update(|_, cx| check(editor.read(cx), snapshot));
         }
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| {
             let editor = editor.read(cx);
             check(editor, &case.before);
@@ -179,7 +179,7 @@ fn lezer_bracket_hits_follow_pointer_edit_undo_and_ime(cx: &mut TestAppContext) 
             );
         });
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|window, cx| {
         editor.update(cx, |editor, cx| {
             assert_eq!(editor.source(), source);
@@ -205,7 +205,7 @@ fn lezer_bracket_hits_follow_pointer_edit_undo_and_ime(cx: &mut TestAppContext) 
             assert_eq!(editor.source(), composed);
         });
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source);

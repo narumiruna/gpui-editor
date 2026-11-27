@@ -28,14 +28,16 @@ flowchart TD
 - Use two full-height columns. Put the sidebar on the left and give the editor the remaining width. Separate the columns with one subtle divider. Do not add a title row, global toolbar, workspace information bar, or bottom status bar.
 - Keep the sidebar toolbar and tab row fixed above the active view. Start with **Tree**, **Recent**, **Pins**, **Outline**, and **Search** in that order, with **Tree** selected. Show one view at a time and give each view its own scroll position. Use the accent to mark selection. At the minimum sidebar width of `184 px`, keep all five tabs available as icons with name tooltips; show text when space allows. Show a prompt when the active view has no content.
 - Show an insertion line when dragging a sidebar tab. Change the order only on drop in the sidebar tab row. Preserve the active sidebar view, and do not switch, save, or reorder document tabs.
-- In **Tree**, use chevrons and indentation for folders and highlight the active file. Show the pin or unpin control on Markdown rows only on hover or keyboard focus; apply the same rule to the remove control in **Pins**. Using those controls must not open, close, or delete a document.
+- In **Tree**, use chevrons and indentation for folders and highlight the active file. Show the pin or unpin control on file rows only on hover or keyboard focus; apply the same rule to the remove control in **Pins**. Using those controls must not open, close, or delete a document.
 - Resize the sidebar by dragging the divider. Hiding the sidebar must retain its width, selected view, tab order, view state, and the selected document. Show the reopen control in the document tab row.
 - Start the editor pane with horizontally scrollable tabs, followed by one row of editing tools. Use an accent to identify the selected tab and a marker for unsaved edits. Keep secondary tools in **More tools** and label icon-only controls on hover. At narrow widths, scroll the tool row rather than wrapping it.
+- Show Markdown tools only in Markdown tabs. Display plain text in a monospaced font. For recognized code and configuration files, use syntax colors that match the editor appearance. Do not change the text or open a separate preview.
 - Reorder document tabs only when a document tab is dropped in its own row. Show an insertion line and scroll the row near its edges when more tabs are available. Cancel a drop outside the row; keep sidebar and document drags separate. Move tabs by stable identity without replacing their editors, switching the selected document, saving, or changing drafts, selections, or undo history. Record the new order of saved workspace tabs on normal exit using the existing session format.
 - When editing a rendered item's source, show a short type label such as `<mermaid>` above the editable text and a subtle border around both. Remove the label and border when the item returns to preview. Do not include them in the Markdown.
+- Keep inline code in the paragraph. Use a monospaced font. Show its Markdown delimiters when the caret enters the span, without opening a source frame.
 - Give the document the remaining height. Wrap prose to the available width. Keep scrolling independent of the sidebar and top controls. Wide read-only previews can scroll horizontally within the document viewport. When a native extension enables scroll-past-end, add space below the document without adding lines or changing the selection.
-- Use colors from the window's appearance. An installed editor theme can override the editor's colors without changing the window. Keep the sidebar slightly tinted, the editor surface neutral, and the accent consistent between selection states.
-- Keep macOS close, minimize, and zoom controls in the existing top row. Leave an unobstructed drag area in that row. The controls must not obscure sidebar buttons or tabs.
+- Use colors from the window's appearance by default. An installed editor theme can override the editor's colors without changing the window. Keep the sidebar slightly tinted, the editor surface neutral, and the accent consistent between selection states.
+- Keep macOS close, minimize, and zoom controls in the existing top row. Leave an unobstructed drag area in that row. The controls must not obscure sidebar buttons or tabs. On Windows, use the native title bar.
 - Show a configured placeholder only in an empty document. It does not change document text, caret hits, or scroll bounds.
 
 ## Selection History
@@ -55,13 +57,15 @@ flowchart TD
 
 - In an editable draft with a native completion source, offer completions after typing or when the user presses `Ctrl-Space`. Use the source for the language at the caret, including embedded HTML, JavaScript, and CSS. Limit edits to the code body. Do not change either fence, read-only previews, or nearby prose.
   - In an SQL draft, check the registered schema for that dialect before the stock keyword source. In an XML draft, use the installed schema with the existing tag and entity source. Discard stale results when a registration changes. Do not query a database or look up an external schema.
-- A host can request plain text choices from an attached trusted language server. Do not change the native completion list. Apply only the item the host chooses, after checking that all edits stay in the current editable fence and preserve protected Markdown. Apply it in one undo step. Do not run server commands or interpret documentation.
+- On macOS, a host can request plain text choices from an attached trusted language server. Do not change the native completion list. Apply only the item the host chooses, after checking that all edits stay in the current editable fence and preserve protected Markdown. Apply it in one undo step. Do not run server commands or interpret documentation.
 - Show available options next to the visible caret. Use the arrow keys or page keys to select an option. Click an option or press `Enter` to insert it in one undo step. Close the list with `Esc`. Close the list on a change of focus, cursor movement, or input method composition.
 - When the source or selected option specifies a commit character, apply the option before inserting that character through the normal input path. A rejected completion does not consume the key.
 - After inserting a snippet, select the first field. Use `Tab` and `Shift-Tab` to move between fields. Show linked selections and apply their edits together. End the session on `Esc`, on a selection outside the active field, or before input method composition.
 - Use `Shift-Option-M` to turn Tab focus mode on or off. In this mode, `Tab` and `Shift-Tab` move focus to another control instead of moving to a snippet field. An unhandled `Esc` lets Tab move focus for two seconds. Another non-modifier key ends this temporary mode.
 
 ## Diagnostics in Source Editing
+
+Language server actions in this section are available on macOS.
 
 - Run configured diagnostic providers for an editable code fence. With no configured provider, run stock JSON diagnostics after typing stops. Mark problems in the fence body. On hover, show the first message that passes the tooltip filters. The filters do not change markers or panel entries. Do not show marks or apply fixes in the fence markers, read-only previews, or nearby prose. Hide results during input method composition and discard stale results.
 - Open the temporary Diagnostics panel from **More tools** or with `Cmd-Shift-M`. Use `F8` and `Shift-F8` to move between diagnostics. In the focused editor, show the first filtered message at the destination without waiting for the pointer. Close that message on `Esc`, an edit, a move outside the selected diagnostic, or loss of focus. Select a panel row to reveal its source. Close the panel with `Esc` or **Close** and return focus to the editor.
@@ -80,7 +84,7 @@ flowchart TD
 
 ## Accessibility Announcements
 
-- Send accepted Find, Replace, selection deletion, and explicit fold announcements to AppKit as low-priority plain text. Keep the message order. Do not move focus or change the document. Do not post messages from a closed or inactive window.
+- On macOS, send accepted Find, Replace, selection deletion, and explicit fold announcements to AppKit as low-priority plain text. Keep the message order. Do not move focus or change the document. Do not post messages from a closed or inactive window.
 
 ## Code Folding in Source Editing
 
@@ -119,7 +123,7 @@ flowchart TD
 
 - Open Find with `Cmd-F` in the editor. Show a temporary panel above the document body. Keep the query and options with their document tab. Do not change the sidebar search.
 - Search the current draft. Mark matches in the visible source ranges and distinguish the selected match. When a native view theme is installed, use its selected-match color for every exact selected range. Draw the themed outline outside the fill without changing the text layout. Keep selected-text match paint except where it overlaps a Find hit. Use installed selection-match options for cursor words, word boundaries, and match limits, even when the editor loses focus. Hide configured marks while a workspace operation disables input. With no such option installed, paint the stock marks only when the editor has focus. Select and reveal a match without moving focus out of the panel. Close the panel with `Esc` and return focus to the editor.
-- Show replacement controls only when requested. Apply the existing Markdown edit rules. **Replace All** must make no edit if any match is read-only, and one undo step if the edit succeeds.
+- Show replacement controls only when requested. In Markdown tabs, apply the existing Markdown edit rules. **Replace All** must make no edit if any match is read-only, and one undo step if the edit succeeds.
 - Use `Cmd-D` to select the word or add its next occurrence. Use `Cmd-Shift-L` to select all matches of the selected text, or select **Select all matches** in Find to use the query. Preserve the primary range when adding an occurrence. In an editable code fence, use the language at each match for whole-word Find and occurrence selection.
 - Apply multi-range edits atomically. If any range cannot be edited, leave the draft and clipboard unchanged. Distribute clipboard lines when there is one line per range. With only carets inside an editable code fence, copy each distinct body line once. A linewise cut must keep both fences and their separators. Paste matching linewise text above the target lines. `Esc` returns to the primary range. Keep only the primary range when input method composition starts.
 - Use `Cmd-Option-G` to open **Go to line**. Accept absolute and relative lines, percentages, and optional columns. Select and center a valid target without changing text. Close on `Esc`.

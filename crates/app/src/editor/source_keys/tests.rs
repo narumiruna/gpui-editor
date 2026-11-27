@@ -90,7 +90,7 @@ fn syntax_indent_keys_use_projected_source_lines_and_keep_bytes(cx: &mut TestApp
             );
             assert_eq!(editor.view.undo_depth(), 1);
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| {
             let editor = editor.read(cx);
             assert_eq!(editor.source(), source);
@@ -141,7 +141,7 @@ fn typing_a_go_closer_reindents_a_lone_cr_line_without_changing_the_fence(cx: &m
         assert_eq!(editor.cursor(), caret - 3);
         assert_eq!(editor.view.undo_depth(), 1);
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source);
@@ -175,7 +175,7 @@ fn source_line_keys_do_not_move_or_duplicate_the_fences(cx: &mut TestAppContext)
             source.replace("first\r\n字", "字\r\nfirst\r\nfirst")
         )
     });
-    cx.simulate_keystrokes("cmd-z cmd-z");
+    cx.simulate_keystrokes("secondary-z secondary-z");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source));
 }
 
@@ -239,7 +239,7 @@ fn projected_line_keys_follow_display_rows_and_keep_raw_fence_bytes(cx: &mut Tes
             );
             assert_eq!(editor.view.undo_depth(), 1);
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| {
             let editor = editor.read(cx);
             assert_eq!(editor.source(), draft);
@@ -250,7 +250,7 @@ fn projected_line_keys_follow_display_rows_and_keep_raw_fence_bytes(cx: &mut Tes
             );
             assert!(!editor.view.can_undo());
         });
-        cx.simulate_keystrokes("cmd-shift-z");
+        cx.simulate_keystrokes("secondary-shift-z");
         cx.update(|_, cx| {
             let editor = editor.read(cx);
             assert_eq!(editor.source(), updated);
@@ -298,7 +298,7 @@ fn projected_line_keys_keep_multiple_ranges_in_the_fence(cx: &mut TestAppContext
         assert_eq!(editor.view.state().selection(), &moved);
         assert_eq!(editor.view.undo_depth(), 1);
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), draft);
@@ -400,7 +400,7 @@ fn enter_uses_syntax_and_crlf_in_a_single_line_fence(cx: &mut TestAppContext) {
         assert_eq!(editor.source(), "```json\r\n{\r\n  \r\n}\r\n```\r\n");
         assert_eq!(editor.cursor(), start + 5);
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source));
 }
 
@@ -458,7 +458,7 @@ fn wast_and_lezer_enter_match_the_pinned_delimiter_gap_command(cx: &mut TestAppC
             );
             assert_eq!(editor.view.undo_depth(), 1);
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| {
             let editor = editor.read(cx);
             assert_eq!(editor.source(), source);
@@ -483,7 +483,7 @@ fn blank_line_uses_end_of_source_line_and_keeps_the_fences(cx: &mut TestAppConte
         assert_eq!(editor.source(), source.replace("{\r\n", "{\r\n  \r\n"));
         assert_eq!(editor.cursor(), source.find('{').unwrap() + 5);
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source));
 }
 
@@ -507,7 +507,7 @@ fn indent_shortcut_changes_only_selected_source_lines(cx: &mut TestAppContext) {
             source.replace("\"字\"", "  \"字\"")
         );
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source));
 }
 
@@ -551,9 +551,9 @@ fn toggle_comment_uses_the_native_fence_language_and_undo(cx: &mut TestAppContex
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), end));
         cx.simulate_keystrokes("cmd-/");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), original));
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), end));
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), original));
     }
 }
@@ -956,7 +956,7 @@ fn select_and_indent_follow_the_displayed_lone_cr_lines(cx: &mut TestAppContext)
         );
         assert_eq!(editor.view.undo_depth(), 1);
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), draft);
@@ -992,7 +992,7 @@ fn indent_keys_use_the_configured_unit_and_preserve_crlf(cx: &mut TestAppContext
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "```txt\r\n\t猫\r\nnext\r\n```"));
     cx.simulate_keystrokes("cmd-[");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), draft));
-    cx.simulate_keystrokes("cmd-z cmd-z");
+    cx.simulate_keystrokes("secondary-z secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), draft);
@@ -1026,7 +1026,7 @@ fn delete_to_visual_row_edges_stays_inside_the_fence(cx: &mut TestAppContext) {
         assert_eq!(editor.source(), expected);
         assert_eq!(editor.cursor(), start);
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.run_until_parked();
     let end = cx.update(|_, cx| {
         let editor = editor.read(cx);
@@ -1045,7 +1045,7 @@ fn delete_to_visual_row_edges_stays_inside_the_fence(cx: &mut TestAppContext) {
     assert!(end > head);
     expected.replace_range(head..end, "");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), expected));
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| editor.update(cx, |editor, cx| editor.move_to(body, false, cx)));
     cx.run_until_parked();
     cx.simulate_keystrokes("cmd-backspace");
@@ -1224,7 +1224,7 @@ fn typing_reindents_a_mounted_language_in_one_undo_step(cx: &mut TestAppContext)
             assert_eq!(editor.cursor(), start - 5);
         });
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source);
@@ -1259,7 +1259,7 @@ fn typing_a_closer_reindents_a_lone_cr_line_without_changing_the_fence(cx: &mut 
                 assert_eq!(editor.cursor(), start - 3);
             });
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| {
             let editor = editor.read(cx);
             assert_eq!(editor.source(), source);
@@ -1319,7 +1319,7 @@ fn source_syntax_reuses_the_active_draft_after_typing_and_undo(cx: &mut TestAppC
             );
         });
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         editor.update(cx, |editor, _| {
             assert_eq!(editor.source(), &input);

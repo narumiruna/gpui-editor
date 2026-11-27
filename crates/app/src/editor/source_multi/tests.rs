@@ -42,7 +42,7 @@ fn linewise_clipboard_preserves_fence_separators_and_undo(cx: &mut TestAppContex
             window.focus(&editor.focus);
         });
     });
-    cx.simulate_keystrokes("cmd-x");
+    cx.simulate_keystrokes("secondary-x");
     cx.update(|_, cx| {
         assert_eq!(
             cx.read_from_clipboard().unwrap().text().as_deref(),
@@ -53,13 +53,13 @@ fn linewise_clipboard_preserves_fence_separators_and_undo(cx: &mut TestAppContex
             editor.move_to(editor.source().find("q {}").unwrap() + 1, false, cx);
         });
     });
-    cx.simulate_keystrokes("cmd-v");
+    cx.simulate_keystrokes("secondary-v");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source);
         assert_eq!(editor.cursor(), source.find("q {}").unwrap() + 1);
     });
-    cx.simulate_keystrokes("cmd-x");
+    cx.simulate_keystrokes("secondary-x");
     cx.update(|_, cx| {
         assert_eq!(
             cx.read_from_clipboard().unwrap().text().as_deref(),
@@ -67,7 +67,7 @@ fn linewise_clipboard_preserves_fence_separators_and_undo(cx: &mut TestAppContex
         );
         assert_eq!(editor.read(cx).source(), source.replace("q {}", ""));
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         use gpui_editor_codemirror::transaction_filter;
 
@@ -92,7 +92,7 @@ fn linewise_clipboard_preserves_fence_separators_and_undo(cx: &mut TestAppContex
                 .unwrap();
         });
     });
-    cx.simulate_keystrokes("cmd-x");
+    cx.simulate_keystrokes("secondary-x");
     cx.update(|_, cx| {
         assert_eq!(
             cx.read_from_clipboard().unwrap().text().as_deref(),
@@ -127,7 +127,7 @@ fn linewise_clipboard_uses_displayed_lone_cr_breaks(cx: &mut TestAppContext) {
             window.focus(&editor.focus);
         });
     });
-    cx.simulate_keystrokes("cmd-x");
+    cx.simulate_keystrokes("secondary-x");
     cx.update(|_, cx| {
         assert_eq!(
             cx.read_from_clipboard().unwrap().text().as_deref(),
@@ -137,16 +137,16 @@ fn linewise_clipboard_uses_displayed_lone_cr_breaks(cx: &mut TestAppContext) {
         assert_eq!(editor.source(), source.replace(removed, ""));
         assert_eq!(editor.view.undo_depth(), 1);
     });
-    cx.simulate_keystrokes("cmd-v");
+    cx.simulate_keystrokes("secondary-v");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         // The new line uses the host clipboard separator. Existing breaks are untouched.
         assert_eq!(editor.source(), source.replace(removed, "  \"猫\",\r\n"));
         assert_eq!(editor.view.undo_depth(), 2);
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source.replace(removed, "")));
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source);
@@ -196,7 +196,7 @@ fn clipboard_filters_keep_crlf_and_do_not_copy_empty_ranges(cx: &mut TestAppCont
             window.focus(&editor.focus);
         });
     });
-    cx.simulate_keystrokes("cmd-c");
+    cx.simulate_keystrokes("secondary-c");
     cx.update(|_, cx| {
         assert_eq!(
             cx.read_from_clipboard().unwrap().text().unwrap(),
@@ -208,12 +208,12 @@ fn clipboard_filters_keep_crlf_and_do_not_copy_empty_ranges(cx: &mut TestAppCont
         });
         cx.write_to_clipboard(ClipboardItem::new_string("first|second".into()));
     });
-    cx.simulate_keystrokes("cmd-v");
+    cx.simulate_keystrokes("secondary-v");
     cx.update(|_, cx| {
         assert_eq!(editor.read(cx).source(), "first\r\n\r\nsecond");
         assert_eq!(editor.read(cx).view.undo_depth(), 1);
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source);
@@ -287,7 +287,7 @@ fn handled_input_can_edit_prose_but_cannot_bypass_markdown_rules(cx: &mut TestAp
         assert_eq!(editor.cursor(), 1);
         assert_eq!(editor.view.undo_depth(), 1);
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     for input in ["p", "x", "q", "w"] {
         cx.simulate_input(input);
         cx.update(|_, cx| {
@@ -309,7 +309,7 @@ fn handled_input_can_edit_prose_but_cannot_bypass_markdown_rules(cx: &mut TestAp
             assert!(!editor.is_composing());
         })
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), format!("y{source}")));
 }
 
@@ -330,7 +330,7 @@ fn next_occurrence_keeps_the_primary_and_pastes_one_line_per_range(cx: &mut Test
         assert_eq!(editor.source(), source);
         assert!(!editor.view.can_undo());
     });
-    cx.simulate_keystrokes("cmd-c");
+    cx.simulate_keystrokes("secondary-c");
     cx.update(|_, cx| {
         assert_eq!(
             cx.read_from_clipboard().unwrap().text().unwrap(),
@@ -338,14 +338,14 @@ fn next_occurrence_keeps_the_primary_and_pastes_one_line_per_range(cx: &mut Test
         );
         cx.write_to_clipboard(ClipboardItem::new_string("first\r\nsecond".into()));
     });
-    cx.simulate_keystrokes("cmd-v");
+    cx.simulate_keystrokes("secondary-v");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), "first 猫咪\r\n\r\nsecond\r\n");
         assert_eq!(ranges(editor).len(), 2);
         assert!(ranges(editor).iter().all(Range::is_empty));
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source);
@@ -407,7 +407,7 @@ fn a_read_only_match_blocks_the_entire_edit_and_cut(cx: &mut TestAppContext) {
         assert_eq!(ranges(editor.read(cx)).len(), 3);
         cx.write_to_clipboard(ClipboardItem::new_string("keep".into()));
     });
-    cx.simulate_keystrokes("cmd-x backspace");
+    cx.simulate_keystrokes("secondary-x backspace");
     cx.simulate_input("X");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
@@ -443,6 +443,6 @@ fn find_selects_all_matches_then_focuses_the_editor(cx: &mut TestAppContext) {
     });
     cx.simulate_input("Z");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "Z and Z"));
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "alpha and alpha"));
 }

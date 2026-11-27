@@ -160,7 +160,7 @@ fn typed_qualified_sql_maps_the_quoted_range_and_undo_preserves_markdown(cx: &mu
             );
             assert_eq!(editor.cursor(), quoted + label.len());
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), typed));
     }
 }
@@ -329,7 +329,7 @@ fn clicking_an_unquoted_option_uses_dialect_quotes_and_rejects_edits_to_markdown
             }
         });
         if !reject {
-            cx.simulate_keystrokes("cmd-z");
+            cx.simulate_keystrokes("secondary-z");
             cx.update(|_, cx| assert_eq!(editor.read(cx).source(), draft));
         }
     }

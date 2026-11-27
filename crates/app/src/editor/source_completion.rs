@@ -956,7 +956,7 @@ mod tests {
                     assert_eq!(editor.view.undo_depth(), 1);
                 });
             });
-            cx.simulate_keystrokes("cmd-z");
+            cx.simulate_keystrokes("secondary-z");
             cx.update(|_, cx| {
                 let editor = editor.read(cx);
                 assert_eq!(editor.source(), source, "{language}");
@@ -1119,7 +1119,7 @@ mod tests {
                     assert_eq!(editor.source(), applied);
                 });
             }
-            cx.simulate_keystrokes("cmd-z");
+            cx.simulate_keystrokes("secondary-z");
             cx.update(|_, cx| assert_eq!(editor.read(cx).source(), draft));
         }
     }
@@ -1185,7 +1185,7 @@ mod tests {
                     assert_eq!(&editor.source()[editor.selection()], selection);
                 })
             });
-            cx.simulate_keystrokes("cmd-z");
+            cx.simulate_keystrokes("secondary-z");
             cx.update(|_, cx| assert_eq!(editor.read(cx).source(), draft));
         }
     }
@@ -1227,9 +1227,9 @@ mod tests {
                 editor.source().find("    \r\n").unwrap() + 4
             );
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), inserted));
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| {
             let editor = editor.read(cx);
             assert_eq!(editor.source(), draft);
@@ -1343,7 +1343,7 @@ mod tests {
                     }
                 });
             });
-            cx.simulate_keystrokes("cmd-z");
+            cx.simulate_keystrokes("secondary-z");
             cx.update(|_, cx| {
                 let editor = editor.read(cx);
                 assert_eq!(editor.source(), source);
@@ -1377,7 +1377,7 @@ mod tests {
                 assert_eq!(editor.source(), draft.replace("</it>", "</item>"));
             });
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), draft));
     }
 
@@ -1440,7 +1440,7 @@ mod tests {
                 assert_eq!(editor.cursor(), start + 5);
             });
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| {
             let editor = editor.read(cx);
             assert_eq!(editor.source(), source);
@@ -1499,7 +1499,7 @@ mod tests {
             assert_eq!(editor.source(), CSS.replacen("col", "color: ", 1));
             assert!(editor.completion.is_none());
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), CSS));
     }
 
@@ -1618,7 +1618,7 @@ mod tests {
                     "{info}"
                 )
             });
-            cx.simulate_keystrokes("cmd-z");
+            cx.simulate_keystrokes("secondary-z");
             cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source, "{info}"));
         }
     }
@@ -1658,7 +1658,7 @@ mod tests {
         }
         cx.simulate_keystrokes("enter");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source.replace("<but", "<button")));
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source));
     }
 
@@ -1723,7 +1723,7 @@ mod tests {
             );
             assert!(editor.completion.is_none());
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), CSS));
     }
 

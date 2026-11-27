@@ -1,7 +1,6 @@
 use std::{
     fs,
     io::{BufRead, BufReader, Write},
-    os::unix::net::UnixStream,
     thread,
     time::Instant,
 };
@@ -13,7 +12,7 @@ use gpui::{
 
 use serde_json::{Value, json};
 
-use super::*;
+use super::{bridge::TestClient, *};
 use crate::workspace::Workspace;
 
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
@@ -29,6 +28,10 @@ fn enable(cx: &mut VisualTestContext, shell: &Entity<Shell>) {
         shell.update(cx, |shell, cx| shell.developer_preferences(window, cx));
     });
     click(cx, "Developer Mode: Off");
+    cx.update(|_, cx| {
+        let developer = &shell.read(cx).developer;
+        assert!(developer.bridge.is_some(), "{:?}", developer.notice);
+    });
     click(cx, "Done");
 }
 
@@ -196,11 +199,61 @@ fn a_disconnected_draft_survives_until_explicitly_canceled(cx: &mut TestAppConte
     cx.update(|_, cx| assert!(shell.read(cx).developer.draft.is_none()));
 }
 
-fn send(client: &mut BufReader<UnixStream>, value: Value) {
+#[gpui::test]
+fn clipboard_picture_can_be_added_and_removed_without_window_capture(cx: &mut TestAppContext) {
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    enable(cx, &shell);
+    paired(cx, &shell);
+    click(cx, "developer-picker");
+    click(cx, "New note");
+    click(cx, "Capture Window");
+    cx.update(|_, cx| {
+        let draft = shell.read(cx).developer.draft.as_ref().unwrap();
+        assert!(draft.notice.is_some());
+        assert!(!draft.loading);
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(
+            draft.notice.as_deref(),
+            Some("Window capture is not supported on this platform. Paste an image instead.")
+        );
+    });
+
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(1, 1, image::Rgba([15, 30, 45, 255]))
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    let image = gpui::Image::from_bytes(gpui::ImageFormat::Png, png.into_inner());
+    cx.cx
+        .write_to_clipboard(gpui::ClipboardItem::new_image(&image));
+    click(cx, "Paste Image");
+    cx.update(|_, cx| {
+        let draft = shell.read(cx).developer.draft.as_ref().unwrap();
+        let picture = draft.picture.as_ref().unwrap();
+        assert!(picture.data.starts_with("iVBORw0K"));
+        assert_eq!(picture.preview.as_bytes(0).unwrap(), &[45, 30, 15, 255]);
+        assert!(draft.notice.is_none());
+        assert!(!draft.loading);
+    });
+    click(cx, "Remove Image");
+    cx.update(|_, cx| {
+        assert!(
+            shell
+                .read(cx)
+                .developer
+                .draft
+                .as_ref()
+                .unwrap()
+                .picture
+                .is_none()
+        );
+    });
+}
+
+fn send(client: &mut BufReader<TestClient>, value: Value) {
     writeln!(client.get_mut(), "{value}").unwrap();
 }
 
-fn receive(client: &mut BufReader<UnixStream>) -> Value {
+fn receive(client: &mut BufReader<TestClient>) -> Value {
     let mut line = String::new();
     client.read_line(&mut line).unwrap();
     serde_json::from_str(&line).unwrap()
@@ -231,20 +284,10 @@ fn apply_event(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
 }
 
 #[gpui::test]
-fn only_explicit_send_delivers_feedback_to_the_approved_socket(cx: &mut TestAppContext) {
-    let directory = tempfile::tempdir_in("/tmp").unwrap();
+fn only_explicit_send_delivers_feedback_to_the_approved_peer(cx: &mut TestAppContext) {
+    let directory = bridge::test_directory().unwrap();
     let bridge = Bridge::listen(directory.path()).unwrap();
-    let instance = fs::read_dir(directory.path())
-        .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path();
-    let socket = UnixStream::connect(instance.join("s")).unwrap();
-    socket
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .unwrap();
-    let mut client = BufReader::new(socket);
+    let mut client = TestClient::connect(directory.path()).unwrap();
     let (shell, cx) = cx.add_window_view(Shell::new);
     cx.update(|_, cx| {
         shell.update(cx, |shell, cx| {
@@ -317,7 +360,7 @@ fn only_explicit_send_delivers_feedback_to_the_approved_socket(cx: &mut TestAppC
     click(cx, "Send to Pi");
     let feedback = receive(&mut client);
     cx.simulate_input("not in the sent snapshot");
-    cx.simulate_keystrokes("cmd-a backspace cmd-v");
+    cx.simulate_keystrokes("secondary-a backspace secondary-v");
     cx.update(|window, cx| {
         let text = shell
             .read(cx)
@@ -350,7 +393,7 @@ fn only_explicit_send_delivers_feedback_to_the_approved_socket(cx: &mut TestAppC
         json!({"type":"receipt", "id":feedback["id"], "accepted":false}),
     );
     apply_event(&shell, cx);
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes("secondary-a");
     cx.simulate_input("edited after rejection");
     click(cx, "Send to Pi");
     let feedback = receive(&mut client);
@@ -375,7 +418,7 @@ fn only_explicit_send_delivers_feedback_to_the_approved_socket(cx: &mut TestAppC
     assert_eq!(receive(&mut client)["text"], "draft before disconnect");
     cx.update(|window, cx| shell.update(cx, |shell, cx| shell.unpair(window, cx)));
     assert_eq!(client.read_line(&mut String::new()).unwrap(), 0);
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes("secondary-a");
     cx.simulate_input("edited after disconnect");
     cx.update(|_, cx| {
         let draft = shell.read(cx).developer.draft.as_ref().unwrap();

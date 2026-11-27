@@ -2,10 +2,16 @@
 
 use std::{
     collections::HashMap,
-    ffi::OsStr,
     io::{self, Write as _},
-    os::unix::ffi::OsStrExt as _,
-    path::{Component, Path},
+    path::{Component, Path, PathBuf},
+};
+
+#[cfg(unix)]
+use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
+#[cfg(windows)]
+use std::{
+    ffi::OsString,
+    os::windows::ffi::{OsStrExt as _, OsStringExt as _},
 };
 
 use serde::{Deserialize, Serialize};
@@ -26,7 +32,7 @@ pub(super) struct Session {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct SavedWorkspace {
-    // JSON byte arrays preserve paths that cannot be represented as UTF-8 strings.
+    // Store native path bytes: Unix bytes on macOS and UTF-16LE on Windows.
     root: Vec<u8>,
     identity: (u64, u64),
     tabs: Vec<Vec<u8>>,
@@ -53,14 +59,14 @@ impl Session {
             workspace: workspace.map(|workspace| {
                 let relative = |path: &Path| {
                     let path = path.strip_prefix(workspace.root()).ok()?;
-                    is_relative_document_path(path).then(|| path.as_os_str().as_bytes().to_vec())
+                    is_relative_document_path(path).then(|| path_bytes(path))
                 };
                 let tabs: Vec<_> = paths.filter_map(relative).collect();
                 let selected = selected
                     .and_then(relative)
                     .filter(|path| tabs.contains(path));
                 SavedWorkspace {
-                    root: workspace.root().as_os_str().as_bytes().to_vec(),
+                    root: path_bytes(workspace.root()),
                     identity: workspace.root_identity(),
                     tabs,
                     selected,
@@ -91,11 +97,11 @@ pub(super) fn restore(path: &Path) -> io::Result<Option<Restored>> {
     let Some(saved) = session.workspace else {
         return Ok(None);
     };
-    let root = path_from_bytes(&saved.root);
+    let root = path_from_bytes(&saved.root)?;
     if !root.is_absolute() {
         return Err(invalid_data("the saved workspace path is not absolute"));
     }
-    let workspace = Workspace::open(root)?;
+    let workspace = Workspace::open(&root)?;
     if workspace.root() != root || workspace.root_identity() != saved.identity {
         return Err(io::Error::other(
             "the saved workspace folder has moved or changed",
@@ -106,11 +112,13 @@ pub(super) fn restore(path: &Path) -> io::Result<Option<Restored>> {
     let mut indices = HashMap::new();
     let mut selected = None;
     for relative in &saved.tabs {
-        let path = path_from_bytes(relative);
-        if !is_relative_document_path(path) {
+        let Ok(path) = path_from_bytes(relative) else {
+            continue;
+        };
+        if !is_relative_document_path(&path) {
             continue;
         }
-        if let Ok(document) = workspace.read_document(path) {
+        if let Ok(document) = workspace.read_document(&path) {
             let index = *indices
                 .entry(document.path().to_owned())
                 .or_insert_with(|| {
@@ -133,8 +141,32 @@ pub(super) fn restore(path: &Path) -> io::Result<Option<Restored>> {
     }))
 }
 
-fn path_from_bytes(bytes: &[u8]) -> &Path {
-    Path::new(OsStr::from_bytes(bytes))
+#[cfg(unix)]
+fn path_from_bytes(bytes: &[u8]) -> io::Result<PathBuf> {
+    Ok(PathBuf::from(OsStr::from_bytes(bytes)))
+}
+
+#[cfg(unix)]
+fn path_bytes(path: &Path) -> Vec<u8> {
+    path.as_os_str().as_bytes().to_vec()
+}
+
+#[cfg(windows)]
+fn path_bytes(path: &Path) -> Vec<u8> {
+    path.as_os_str()
+        .encode_wide()
+        .flat_map(u16::to_le_bytes)
+        .collect()
+}
+
+#[cfg(windows)]
+fn path_from_bytes(bytes: &[u8]) -> io::Result<PathBuf> {
+    let (units, remaining) = bytes.as_chunks::<2>();
+    if !remaining.is_empty() {
+        return Err(invalid_data("invalid saved path encoding"));
+    }
+    let wide: Vec<_> = units.iter().copied().map(u16::from_le_bytes).collect();
+    Ok(PathBuf::from(OsString::from_wide(&wide)))
 }
 
 fn is_relative_document_path(path: &Path) -> bool {
@@ -150,11 +182,10 @@ fn invalid_data(message: &str) -> io::Error {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        fs,
-        os::unix::fs::{PermissionsExt as _, symlink},
-        path::PathBuf,
-    };
+    use std::fs;
+
+    #[cfg(unix)]
+    use std::os::unix::fs::{PermissionsExt as _, symlink};
 
     use serde_json::json;
 
@@ -209,29 +240,32 @@ mod tests {
             json!({
                 "version": 1,
                 "workspace": {
-                    "root": fixture.workspace.root().as_os_str().as_bytes(),
+                    "root": path_bytes(fixture.workspace.root()),
                     "identity": fixture.workspace.root_identity(),
-                    "tabs": [b"z.md", b"a.md"],
-                    "selected": b"a.md",
+                    "tabs": [path_bytes(Path::new("z.md")), path_bytes(Path::new("a.md"))],
+                    "selected": path_bytes(Path::new("a.md")),
                 },
             }),
         );
-        assert_eq!(
-            fs::metadata(fixture.session_path.parent().unwrap())
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o7777,
-            0o700,
-        );
-        assert_eq!(
-            fs::metadata(&fixture.session_path)
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o7777,
-            0o600
-        );
+        #[cfg(unix)]
+        {
+            assert_eq!(
+                fs::metadata(fixture.session_path.parent().unwrap())
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o7777,
+                0o700,
+            );
+            assert_eq!(
+                fs::metadata(&fixture.session_path)
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o7777,
+                0o600
+            );
+        }
 
         fs::write(&second, "updated on disk").unwrap();
         let restored = restore(&fixture.session_path).unwrap().unwrap();
@@ -279,7 +313,7 @@ mod tests {
     fn skips_missing_invalid_external_and_duplicate_tabs_and_falls_back() {
         let fixture = Fixture::new();
         let first = fixture.document("first.md", "first");
-        let last = fixture.document("last.md", "last");
+        let last = fixture.document("last.txt", "last");
         let missing = fixture.document("missing.md", "missing");
         let bad = fixture.workspace.root().join("bad.md");
         fs::write(&bad, [0xff]).unwrap();
@@ -287,28 +321,16 @@ mod tests {
         fs::create_dir(&folder).unwrap();
         let outside = fixture.temp.path().join("outside.md");
         fs::write(&outside, "outside").unwrap();
-        let external_link = fixture.workspace.root().join("external.md");
-        symlink(&outside, &external_link).unwrap();
-        let duplicate_link = fixture.workspace.root().join("alias.md");
-        symlink(&first, &duplicate_link).unwrap();
         let mut session = Session::capture(
             Some(&fixture.workspace),
-            [
-                &missing,
-                &first,
-                &duplicate_link,
-                &bad,
-                &folder,
-                &external_link,
-                &last,
-            ]
-            .into_iter()
-            .map(PathBuf::as_path),
+            [&missing, &first, &first, &bad, &folder, &last]
+                .into_iter()
+                .map(PathBuf::as_path),
             Some(&missing),
         );
         let tabs = &mut session.workspace.as_mut().unwrap().tabs;
-        tabs.insert(0, b"../outside.md".to_vec());
-        tabs.insert(0, outside.as_os_str().as_bytes().to_vec());
+        tabs.insert(0, path_bytes(Path::new("../outside.md")));
+        tabs.insert(0, path_bytes(&outside));
         fs::remove_file(&missing).unwrap();
         session.write(&fixture.session_path).unwrap();
 
@@ -321,13 +343,6 @@ mod tests {
         assert_eq!(
             fixture
                 .workspace
-                .resolve_document(Path::new("alias.md"))
-                .unwrap(),
-            first
-        );
-        assert_eq!(
-            fixture
-                .workspace
                 .resolve_document(Path::new("bad.md"))
                 .unwrap(),
             bad
@@ -337,6 +352,39 @@ mod tests {
                 .workspace
                 .resolve_document(Path::new("folder.md"))
                 .is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skips_external_symlinks_and_deduplicates_internal_symlinks() {
+        let fixture = Fixture::new();
+        let first = fixture.document("first.md", "first");
+        let outside = fixture.temp.path().join("outside.md");
+        fs::write(&outside, "outside").unwrap();
+        let external_link = fixture.workspace.root().join("external.md");
+        symlink(&outside, &external_link).unwrap();
+        let duplicate_link = fixture.workspace.root().join("alias.md");
+        symlink(&first, &duplicate_link).unwrap();
+        Session::capture(
+            Some(&fixture.workspace),
+            [&first, &external_link, &duplicate_link]
+                .into_iter()
+                .map(PathBuf::as_path),
+            Some(&duplicate_link),
+        )
+        .write(&fixture.session_path)
+        .unwrap();
+        let restored = restore(&fixture.session_path).unwrap().unwrap();
+        assert_eq!(restored.documents.len(), 1);
+        assert_eq!(restored.documents[0].path(), first);
+        assert_eq!(restored.selected, Some(0));
+        assert_eq!(
+            fixture
+                .workspace
+                .resolve_document(Path::new("alias.md"))
+                .unwrap(),
+            first
         );
         assert!(
             fixture
@@ -371,11 +419,15 @@ mod tests {
         assert!(restore(&fixture.session_path).is_err());
     }
 
+    #[cfg(unix)]
     #[test]
     fn round_trips_non_utf8_path_bytes_without_requiring_a_filesystem_that_accepts_them() {
         let fixture = Fixture::new();
         let relative = b"one\xff/two\xfe.md";
-        let file = fixture.workspace.root().join(path_from_bytes(relative));
+        let file = fixture
+            .workspace
+            .root()
+            .join(path_from_bytes(relative).unwrap());
         let session = Session::capture(
             Some(&fixture.workspace),
             std::iter::once(file.as_path()),
@@ -386,10 +438,113 @@ mod tests {
             serde_json::from_slice(&fs::read(&fixture.session_path).unwrap()).unwrap();
         let workspace = saved.workspace.unwrap();
         assert_eq!(
-            path_from_bytes(&workspace.tabs[0]),
-            path_from_bytes(relative)
+            path_from_bytes(&workspace.tabs[0]).unwrap(),
+            path_from_bytes(relative).unwrap()
         );
         assert_eq!(workspace.selected.as_deref(), Some(relative.as_slice()));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn round_trips_native_unicode_workspace_and_document_paths() {
+        let mut fixture = Fixture::new();
+        let root = fixture.workspace.root().join("資料-é-📝");
+        fs::create_dir(&root).unwrap();
+        fixture.workspace = Workspace::open(&root).unwrap();
+        let file = fixture.document("日本語-é-📝.md", "note");
+        Session::capture(
+            Some(&fixture.workspace),
+            std::iter::once(file.as_path()),
+            Some(&file),
+        )
+        .write(&fixture.session_path)
+        .unwrap();
+        let restored = restore(&fixture.session_path).unwrap().unwrap();
+        assert_eq!(restored.workspace, fixture.workspace);
+        assert_eq!(restored.documents[0].path(), file);
+        assert_eq!(restored.selected, Some(0));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn round_trips_unpaired_utf16_surrogates_as_path_bytes() {
+        let fixture = Fixture::new();
+        let relative = PathBuf::from(OsString::from_wide(&[
+            0xd800, 0x5c, 0xdc00, 0x2d, 0xd83d, 0xdcc4, 0x2e, 0x6d, 0x64,
+        ]));
+        let file = fixture.workspace.root().join(&relative);
+        Session::capture(
+            Some(&fixture.workspace),
+            std::iter::once(file.as_path()),
+            Some(&file),
+        )
+        .write(&fixture.session_path)
+        .unwrap();
+        let saved: Session =
+            serde_json::from_slice(&fs::read(&fixture.session_path).unwrap()).unwrap();
+        let workspace = saved.workspace.unwrap();
+        assert_eq!(path_from_bytes(&workspace.tabs[0]).unwrap(), relative);
+        assert_eq!(&workspace.tabs[0][..2], &0xd800_u16.to_le_bytes());
+        assert_eq!(workspace.selected.as_ref(), Some(&workspace.tabs[0]));
+        assert_eq!(
+            path_from_bytes(&workspace.root).unwrap(),
+            fixture.workspace.root()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_invalid_windows_path_encoding() {
+        let fixture = Fixture::new();
+        let file = fixture.document("a.md", "note");
+        let mut session = Session::capture(
+            Some(&fixture.workspace),
+            std::iter::once(file.as_path()),
+            Some(&file),
+        );
+        session
+            .workspace
+            .as_mut()
+            .unwrap()
+            .tabs
+            .insert(0, vec![0xff]);
+        session.write(&fixture.session_path).unwrap();
+        let restored = restore(&fixture.session_path).unwrap().unwrap();
+        assert_eq!(restored.documents.len(), 1);
+        assert_eq!(restored.documents[0].path(), file);
+
+        session.workspace.as_mut().unwrap().root = b"\xff".to_vec();
+        session.write(&fixture.session_path).unwrap();
+        assert_eq!(
+            restore(&fixture.session_path).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn repeated_writes_replace_the_record_without_leaving_staging_files() {
+        let fixture = Fixture::new();
+        let first = fixture.document("first.md", "first");
+        let second = fixture.document("second.md", "second");
+        for selected in [&first, &second, &first] {
+            Session::capture(
+                Some(&fixture.workspace),
+                std::iter::once(selected.as_path()),
+                Some(selected),
+            )
+            .write(&fixture.session_path)
+            .unwrap();
+            let restored = restore(&fixture.session_path).unwrap().unwrap();
+            assert_eq!(restored.documents.len(), 1);
+            assert_eq!(restored.documents[0].path(), selected);
+            assert_eq!(restored.selected, Some(0));
+            assert_eq!(
+                fs::read_dir(fixture.session_path.parent().unwrap())
+                    .unwrap()
+                    .count(),
+                1
+            );
+        }
     }
 
     #[test]

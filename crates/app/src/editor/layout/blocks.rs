@@ -20,7 +20,7 @@ use crate::{
     theme::Theme,
 };
 
-use super::{apply_highlight, code_highlights};
+use super::{CODE_FONT_FAMILY, apply_highlight, code_highlights};
 
 const PADDING: f32 = 12.;
 const MARGIN: f32 = 4.;
@@ -66,7 +66,7 @@ impl BlockLayout {
     ) -> Self {
         let style = window.text_style();
         let mut font = style.font();
-        font.family = "Menlo".into();
+        font.family = CODE_FONT_FAMILY.into();
         let document = fence_parser_in(state, language.unwrap_or("")).and_then(|parser| {
             parser
                 .parse(Text::new(body), StreamSettings::default())

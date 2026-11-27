@@ -107,7 +107,7 @@ fn json_diagnostics_debounce_point_at_source_and_do_not_change_undo(cx: &mut Tes
         assert!(editor.source_diagnostic_marks().is_empty());
         assert_eq!(editor.source(), BAD.replacen(',', "", 1));
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source(), BAD));
     executor.advance_clock(DEFAULT_LINT_DELAY);
     cx.run_until_parked();
@@ -468,7 +468,7 @@ fn check_scoped_script_fix(cx: &mut TestAppContext, line_break: &str) {
             assert_eq!(editor.source(), source.replacen("bad", "good", 1));
         })
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source);

@@ -105,7 +105,7 @@ fn xml_schema_typing_reuses_the_quoted_range_and_undo_restores_exact_bytes(
         assert_eq!(editor.cursor(), start + "\"ordered value\"".len());
         assert_eq!(editor.view.undo_depth(), undo_before + 1);
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| assert_eq!(editor.read(cx).source().as_bytes(), typed.as_bytes()));
 }
 
@@ -242,7 +242,7 @@ fn predefined_entities_stay_available_with_or_without_an_xml_schema(cx: &mut Tes
             assert_eq!(editor.cursor(), head + 2);
             assert_eq!(editor.view.undo_depth(), 1);
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), draft));
     }
 }

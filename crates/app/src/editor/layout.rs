@@ -1,7 +1,8 @@
+#[cfg(target_os = "macos")]
+use std::rc::Rc;
 use std::{
     collections::{HashMap, HashSet},
     ops::Range,
-    rc::Rc,
     sync::Arc,
 };
 
@@ -10,24 +11,26 @@ use gpui::{
     SharedString, StrikethroughStyle, TextRun, UnderlineStyle, Window, fill, point, px, quad, rgba,
     size,
 };
+#[cfg(target_os = "macos")]
+use gpui_editor_codemirror::view::bidi::BidiIsolate;
 use gpui_editor_codemirror::{
     Assoc, EditorSelection, EditorState, SelectionRange, Text,
     language::{
-        HighlightContext, HighlightProperties, HighlightSpan, HighlightTag, StreamSettings,
+        Color, HighlightContext, HighlightProperties, HighlightSpan, HighlightTag, StreamSettings,
         TextDecoration, highlighting_for_context,
     },
     language_data::SupportedDocument,
     theme_one_dark::highlight_configuration,
     view::{
         ScrollBlock, ViewHighlight,
-        bidi::{BidiIsolate, Direction, move_visually},
+        bidi::{Direction, move_visually},
         gutters::highlight_active_line_gutter_enabled,
         placeholder_projection,
     },
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::{Editor, ImageEntry, PreviewDiagnostic};
+use super::{Editor, ImageEntry, PreviewDiagnostic, highlight};
 use crate::{
     document::{Section, SectionKind},
     media::{Target, image_target, load_image},
@@ -41,13 +44,24 @@ mod active_line_tests;
 mod bidi;
 mod blocks;
 mod gutter;
+#[cfg(target_os = "macos")]
 mod isolation;
+#[cfg(target_os = "macos")]
 mod textkit;
 
 use bidi::BidiRow;
 use blocks::BlockLayout;
 use gutter::SourceGutter;
+#[cfg(target_os = "macos")]
 use isolation::{BodyCache, CachedBody, IsolatedRow};
+#[cfg(not(target_os = "macos"))]
+type BodyCache = std::convert::Infallible;
+
+pub(super) const CODE_FONT_FAMILY: &str = if cfg!(target_os = "windows") {
+    "Consolas"
+} else {
+    "Menlo"
+};
 
 #[derive(Clone, Copy, Default)]
 struct Face {
@@ -55,6 +69,7 @@ struct Face {
     bold: bool,
     italic: bool,
     muted: bool,
+    code: bool,
 }
 
 #[derive(Clone)]
@@ -284,6 +299,7 @@ pub(super) struct Row {
 
 impl Row {
     fn position_at(&self, x: Pixels) -> (usize, bool) {
+        #[cfg(target_os = "macos")]
         if let Some(hit) = self.isolated_hit(x, self.height / 2.) {
             return (hit.head(), self.soft_end && hit.head() == self.end);
         }
@@ -295,6 +311,7 @@ impl Row {
         (offset, self.soft_end && offset == self.end)
     }
 
+    #[cfg(target_os = "macos")]
     fn isolated_item(&self) -> Option<(&Item, &IsolatedRow)> {
         let [item] = self.items.as_slice() else {
             return None;
@@ -305,6 +322,7 @@ impl Row {
         Some((item, native))
     }
 
+    #[cfg(target_os = "macos")]
     fn isolated_hit(&self, x: Pixels, y: Pixels) -> Option<SelectionRange> {
         let (item, native) = self.isolated_item()?;
         if x < item.left || !(px(0.)..self.height).contains(&y) {
@@ -314,6 +332,7 @@ impl Row {
     }
 
     fn caret_at(&self, x: Pixels) -> SelectionRange {
+        #[cfg(target_os = "macos")]
         if let Some(hit) = self.isolated_hit(x, self.height / 2.) {
             return hit;
         }
@@ -358,6 +377,7 @@ pub(super) struct Item {
 
 pub(super) enum ItemPaint {
     Text(Box<ShapedLine>),
+    #[cfg(target_os = "macos")]
     Isolated(Rc<IsolatedRow>),
     Fold(Box<ShapedLine>),
     Graphic(Graphic),
@@ -380,6 +400,7 @@ impl Item {
             return self.source.start + bidi.hit(x).head();
         }
         match &self.paint {
+            #[cfg(target_os = "macos")]
             ItemPaint::Isolated(native) => native
                 .hit(point(x, native.height() / 2.))
                 .map_or(self.source.start, SelectionRange::head),
@@ -415,6 +436,7 @@ impl Item {
         }
         self.left
             + match &self.paint {
+                #[cfg(target_os = "macos")]
                 ItemPaint::Isolated(native) => native.x_at(offset, None),
                 ItemPaint::Text(line) if !self.atomic => line.x_for_index(
                     offset.clamp(self.source.start, self.source.end) - self.source.start,
@@ -430,14 +452,27 @@ impl Item {
     }
 
     pub(super) fn is_text(&self) -> bool {
-        matches!(self.paint, ItemPaint::Text(_) | ItemPaint::Isolated(_))
+        #[cfg(target_os = "macos")]
+        if matches!(self.paint, ItemPaint::Isolated(_)) {
+            return true;
+        }
+        matches!(self.paint, ItemPaint::Text(_))
+    }
+
+    fn uses_bidi_carets(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        if matches!(self.paint, ItemPaint::Isolated(_)) {
+            return true;
+        }
+        self.bidi.is_some()
     }
 
     pub(super) fn selection_source(&self) -> Range<usize> {
-        match &self.paint {
-            ItemPaint::Isolated(native) => native.selection_source(),
-            _ => self.source.clone(),
+        #[cfg(target_os = "macos")]
+        if let ItemPaint::Isolated(native) = &self.paint {
+            return native.selection_source();
         }
+        self.source.clone()
     }
 
     /// Horizontal intervals of a selected source range. Bidi runs can put
@@ -448,19 +483,19 @@ impl Item {
     ) -> impl Iterator<Item = Range<Pixels>> + use<> {
         let start = source.start.max(self.source.start);
         let end = source.end.min(self.source.end);
-        let (plain, bidi) = if let ItemPaint::Isolated(native) = &self.paint {
-            (None, native.x_spans(source))
-        } else if start >= end {
-            (None, Vec::new())
-        } else if let Some(bidi) = &self.bidi {
-            (
+        let (plain, bidi) = match (&self.paint, &self.bidi) {
+            #[cfg(target_os = "macos")]
+            (ItemPaint::Isolated(native), _) => (None, native.x_spans(source)),
+            _ if start >= end => (None, Vec::new()),
+            (_, Some(bidi)) => (
                 None,
                 bidi.selection_spans(start - self.source.start..end - self.source.start),
-            )
-        } else {
-            let x = self.x(start);
-            let y = self.x(end);
-            (Some(x.min(y)..x.max(y)), Vec::new())
+            ),
+            _ => {
+                let x = self.x(start);
+                let y = self.x(end);
+                (Some(x.min(y)..x.max(y)), Vec::new())
+            }
         };
         let left = self.left;
         plain.into_iter().chain(
@@ -471,6 +506,7 @@ impl Item {
 
     fn stops(&self) -> Vec<usize> {
         match &self.paint {
+            #[cfg(target_os = "macos")]
             ItemPaint::Isolated(native) => native.logical_stops(),
             ItemPaint::Text(line) if !self.atomic => line
                 .text
@@ -575,6 +611,9 @@ impl Layout {
             }
         }
         let row = self.row_at(position);
+        #[cfg(not(target_os = "macos"))]
+        let (offset, upstream) = row.position_at(local.x);
+        #[cfg(target_os = "macos")]
         let (offset, upstream) = row.isolated_hit(local.x, local.y - row.y).map_or_else(
             || row.position_at(local.x),
             |hit| (hit.head(), row.soft_end && hit.head() == row.end),
@@ -612,12 +651,13 @@ impl Layout {
     }
 
     pub(super) fn bidi_hit_at(&self, position: Point<Pixels>) -> Option<SelectionRange> {
-        let row = self.row_at(position);
-        let local = position - self.origin;
-        if self.source_frame_contains(position)
-            && let Some(hit) = row.isolated_hit(local.x, local.y - row.y)
-        {
-            return Some(hit);
+        #[cfg(target_os = "macos")]
+        if self.source_frame_contains(position) {
+            let row = self.row_at(position);
+            let local = position - self.origin;
+            if let Some(hit) = row.isolated_hit(local.x, local.y - row.y) {
+                return Some(hit);
+            }
         }
         let item = self.item_at(position)?;
         let hit = item
@@ -635,8 +675,7 @@ impl Layout {
     pub(super) fn uses_bidi_carets(&self, head: usize) -> bool {
         self.row_index(head, false).is_some_and(|row| {
             self.rows[row].items.iter().any(|item| {
-                (item.bidi.is_some() || matches!(item.paint, ItemPaint::Isolated(_)))
-                    && (item.source.start..=item.source.end).contains(&head)
+                item.uses_bidi_carets() && (item.source.start..=item.source.end).contains(&head)
             })
         })
     }
@@ -651,6 +690,7 @@ impl Layout {
         let [item] = row.items.as_slice() else {
             return None;
         };
+        #[cfg(target_os = "macos")]
         if let ItemPaint::Isolated(native) = &item.paint
             && !native.has_visual_motion()
         {
@@ -671,11 +711,18 @@ impl Layout {
         if line.range != item.source {
             return None;
         }
-        if let ItemPaint::Isolated(native) = &item.paint {
+        #[cfg(target_os = "macos")]
+        let use_gpui = if let ItemPaint::Isolated(native) = &item.paint {
             if let Some(step) = native.visual_step(text, start, forward) {
                 return Some(step);
             }
+            false
         } else {
+            true
+        };
+        #[cfg(not(target_os = "macos"))]
+        let use_gpui = true;
+        if use_gpui {
             let bidi = item.bidi.as_ref()?;
             bidi.x_at(
                 start.head() - line.range.start,
@@ -727,16 +774,20 @@ impl Layout {
         range: SelectionRange,
         upstream: bool,
     ) -> Option<Bounds<Pixels>> {
-        let mut index = self.row_index(range.head(), upstream)?;
-        if let Some(assoc) = range.assoc()
+        let index = self.row_index(range.head(), upstream)?;
+        #[cfg(target_os = "macos")]
+        let index = if let Some(assoc) = range.assoc()
             && (assoc == Assoc::Before) != upstream
             && let Some(other) = self.row_index(range.head(), !upstream)
             && index != other
             && self.rows[index.min(other)].isolated_item().is_some()
         {
-            index = other;
-        }
+            other
+        } else {
+            index
+        };
         let row = &self.rows[index];
+        #[cfg(target_os = "macos")]
         if let Some((item, native)) = row.isolated_item() {
             return Some(Bounds::new(
                 self.origin + point(item.left + native.x_at(range.head(), range.assoc()), row.y),
@@ -829,6 +880,7 @@ impl Layout {
         });
         // A programmatic selection can address the middle of CRLF even
         // though no pointer or keyboard stop can. Keep it on the break's row.
+        #[cfg(target_os = "macos")]
         if let Some(previous) = index.checked_sub(1) {
             let row = &self.rows[previous];
             if row.end < offset && offset <= row.hidden_end && row.isolated_item().is_some() {
@@ -1016,6 +1068,7 @@ struct LayoutBuilder<'a> {
     inset: Pixels,
     source_frame: Option<SourceFrame>,
     marked: Option<Range<usize>>,
+    #[cfg(target_os = "macos")]
     isolation_cache: Option<BodyCache>,
 }
 
@@ -1036,6 +1089,7 @@ impl<'a> LayoutBuilder<'a> {
             inset: px(0.),
             source_frame: None,
             marked,
+            #[cfg(target_os = "macos")]
             isolation_cache: None,
         }
     }
@@ -1132,6 +1186,9 @@ impl<'a> LayoutBuilder<'a> {
         let body_text = body_lines
             .filter(|_| gutter.is_some())
             .map_or(&source[body.clone()], Text::as_str);
+        #[cfg(not(target_os = "macos"))]
+        let isolated = false;
+        #[cfg(target_os = "macos")]
         let isolated = gutter.is_some()
             && projection.folds.is_empty()
             && self.marked.is_none()
@@ -1264,6 +1321,9 @@ impl<'a> LayoutBuilder<'a> {
         self.resume_after_source_frame(source.start);
         let style = self.window.text_style();
         let mut font = style.font();
+        if face.code {
+            font.family = CODE_FONT_FAMILY.into();
+        }
         if face.heading || face.bold {
             font.weight = FontWeight::BOLD;
         }
@@ -1571,6 +1631,25 @@ fn apply_highlight(run: &mut TextRun, style: HighlightProperties) {
     }
 }
 
+fn plain_text_highlights(
+    spans: &[highlight::Span],
+    theme: Theme,
+) -> Vec<(Range<usize>, HighlightProperties)> {
+    spans
+        .iter()
+        .map(|span| {
+            let foreground = Color::from_rgba32(span.kind.color(theme).into());
+            (
+                span.range.clone(),
+                HighlightProperties {
+                    foreground: Some(foreground),
+                    ..Default::default()
+                },
+            )
+        })
+        .collect()
+}
+
 fn text_runs(
     template: &TextRun,
     source: Range<usize>,
@@ -1648,6 +1727,9 @@ impl Editor {
     }
 
     fn projected_sections(&self) -> Vec<Section> {
+        if !self.is_markdown() {
+            return Vec::new();
+        }
         let mut sections = self.markdown().sections();
         if let Some(active) = &self.active {
             sections.retain(|section| section.source != active.source);
@@ -1728,23 +1810,52 @@ impl Editor {
         width: Pixels,
         for_paint: bool,
     ) -> (Layout, Option<BodyCache>) {
+        if !self.is_markdown() {
+            self.request_highlighting(cx);
+            let state = self.view.state();
+            let source = state.text().as_str();
+            let theme = Theme::for_editor(window, state);
+            let highlights = plain_text_highlights(self.highlighting.spans(), theme);
+            let mut builder = LayoutBuilder::new(window, theme, self.marked.clone(), width);
+            builder.highlights = &highlights;
+            builder.add_text(
+                source,
+                0..source.len(),
+                Face {
+                    code: true,
+                    ..Face::default()
+                },
+            );
+            let placeholders = builder.shape_placeholders(state);
+            return (builder.build(placeholders), None);
+        }
         let scale = window.scale_factor();
         let highlights = self.source_highlights();
         let body_lines = self.source_body_line_projection();
         let folds = self.source_fold_ranges();
+        #[cfg(target_os = "macos")]
         let isolates = if folds.is_empty() {
             self.source_isolates()
         } else {
             None
         };
+        #[cfg(target_os = "macos")]
         let isolation_cache = (for_paint && isolates.is_some())
             .then(|| CachedBody::for_window(cx.entity_id(), window, cx));
+        #[cfg(not(target_os = "macos"))]
+        let isolation_cache = {
+            let _ = for_paint;
+            None
+        };
         let state = self.view.state();
         let source = state.text().as_str();
         let theme = Theme::for_editor(window, state);
         let mut builder = LayoutBuilder::new(window, theme, self.marked.clone(), width);
         builder.highlights = &highlights;
-        builder.isolation_cache = isolation_cache.clone();
+        #[cfg(target_os = "macos")]
+        {
+            builder.isolation_cache = isolation_cache.clone();
+        }
         let sections = self.projected_sections();
         let visible_previews = self.preview_sections(&sections);
         let mut previews = std::collections::HashMap::new();
@@ -1872,8 +1983,12 @@ impl Editor {
             gutter_body,
             editable_fence_body,
             body_lines,
+            #[cfg(target_os = "macos")]
             isolates,
             folds,
+            inline_caret: (self.focus.is_focused(window)
+                && (self.selection().is_empty() || self.is_composing()))
+            .then(|| self.cursor()),
             previews,
         };
         projection.add(&mut builder, 0..source.len(), &sections, Face::default(), 0);
@@ -1992,8 +2107,10 @@ struct Projection<'a> {
     gutter_body: Option<Range<usize>>,
     editable_fence_body: Option<Range<usize>>,
     body_lines: Option<Text>,
+    #[cfg(target_os = "macos")]
     isolates: Option<Vec<BidiIsolate>>,
     folds: Vec<Range<usize>>,
+    inline_caret: Option<usize>,
     previews: std::collections::HashMap<usize, Result<Graphic, &'static str>>,
 }
 
@@ -2070,6 +2187,21 @@ impl Projection<'_> {
                                 builder.row.end.max(section.content.end + same_line.len());
                         }
                         self.finish_line(builder, section.content.end, section);
+                    }
+                    K::InlineCode => {
+                        let face = Face { code: true, ..face };
+                        if self.inline_caret.is_some_and(|caret| {
+                            section.source.start < caret && caret < section.source.end
+                        }) {
+                            builder.add_text(text, section.source.clone(), face);
+                        } else {
+                            if let Some(code) = &section.inline_code {
+                                builder.text(code, section.content.clone(), face, None, true);
+                            } else {
+                                builder.add_text(text, section.content.clone(), face);
+                            }
+                            builder.row.end = section.source.end;
+                        }
                     }
                     K::DraftCode => builder.add_text(text, section.source.clone(), face),
                     K::ReadOnly => {
@@ -2283,6 +2415,104 @@ mod tests {
             assert_eq!(layout.rows[0].end, prefix.len());
             assert_eq!(layout.rows[1].start, prefix.len());
             assert_eq!(layout.step(prefix.len(), false), prefix.len() - 1);
+        });
+    }
+
+    #[gpui::test]
+    fn syntax_colors_clip_to_a_row_and_keep_ime_underline(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|window, cx| Editor::new(String::new(), window, cx));
+        cx.update(|window, _| {
+            let theme = Theme::for_window(window);
+            let template = TextRun {
+                len: 7,
+                color: theme.text.into(),
+                font: window.text_style().font(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            // Width is measured on one set of runs; a wrap can clip that run around `字`.
+            let source = "ab字cd";
+            let highlights = plain_text_highlights(
+                &[highlight::Span {
+                    range: 1..6,
+                    kind: highlight::Kind::String,
+                }],
+                theme,
+            );
+            let runs = text_runs(&template, 2..source.len(), Some(&(5..7)), &highlights);
+            let string = highlight::Kind::String.color(theme).into();
+            let actual: Vec<_> = runs
+                .iter()
+                .map(|run| (run.len, run.color, run.underline.is_some()))
+                .collect();
+            assert_eq!(
+                actual,
+                [
+                    (3, string, false),
+                    (1, string, true),
+                    (1, theme.text.into(), true)
+                ]
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn plain_text_shapes_markdown_syntax_as_literal_text(cx: &mut TestAppContext) {
+        let source = "# **Title**\r\n> `[raw]`\r\n";
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            let mut editor = Editor::new(source.into(), window, cx);
+            editor.set_path(Some("Makefile".into()), None);
+            editor
+        });
+        cx.update(|window, cx| {
+            editor.update(cx, |e, cx| {
+                let layout = e.shape_for_width(window, cx, px(400.));
+                assert_eq!(layout.rows.len(), 3);
+                for (row, expected) in layout.rows.iter().zip(["# **Title**", "> `[raw]`"]) {
+                    let [item] = row.items.as_slice() else { panic!("expected one text item"); };
+                    assert!(matches!(&item.paint, ItemPaint::Text(line) if line.text.as_ref() == expected));
+                    assert_eq!(&source[item.source.clone()], expected);
+                }
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn multiline_inline_code_uses_the_same_row_and_monospace_font(cx: &mut TestAppContext) {
+        let source = "**Before `` a\nb `` after**";
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source.into(), window, cx));
+        cx.update(|window, cx| {
+            editor.update(cx, |e, cx| {
+                let layout = e.shape_for_width(window, cx, px(400.));
+                assert_eq!(layout.rows.len(), 1);
+                let code = layout.rows[0]
+                    .items
+                    .iter()
+                    .find_map(|item| match &item.paint {
+                        ItemPaint::Text(line) if line.text.as_ref() == "a b" => Some(line),
+                        _ => None,
+                    })
+                    .unwrap();
+                let mut font = window.text_style().font();
+                font.family = CODE_FONT_FAMILY.into();
+                font.weight = FontWeight::BOLD;
+                let expected = window.text_system().shape_line(
+                    "a b".into(),
+                    px(16.),
+                    &[TextRun {
+                        len: 3,
+                        font,
+                        color: Theme::for_window(window).text.into(),
+                        background_color: None,
+                        underline: None,
+                        strikethrough: None,
+                    }],
+                    None,
+                );
+                assert_eq!(code.runs[0].font_id, expected.runs[0].font_id);
+                assert_eq!(e.source(), source);
+            });
         });
     }
 

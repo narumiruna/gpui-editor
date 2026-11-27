@@ -116,6 +116,12 @@ impl TextField {
 
     pub(in crate::app) fn bind_keys(cx: &mut App) {
         cx.set_global(KeysInstalled);
+        let [line_start, line_end, select_line_start, select_line_end] =
+            if cfg!(target_os = "macos") {
+                ["cmd-left", "cmd-right", "cmd-shift-left", "cmd-shift-right"]
+            } else {
+                ["home", "end", "shift-home", "shift-end"]
+            };
         for context in [
             FEEDBACK_CONTEXT,
             SEARCH_CONTEXT,
@@ -129,16 +135,16 @@ impl TextField {
                 KeyBinding::new("right", Right, context),
                 KeyBinding::new("shift-left", SelectLeft, context),
                 KeyBinding::new("shift-right", SelectRight, context),
-                KeyBinding::new("cmd-left", LineStart, context),
-                KeyBinding::new("cmd-right", LineEnd, context),
-                KeyBinding::new("cmd-shift-left", SelectLineStart, context),
-                KeyBinding::new("cmd-shift-right", SelectLineEnd, context),
-                KeyBinding::new("cmd-a", SelectAll, context),
+                KeyBinding::new(line_start, LineStart, context),
+                KeyBinding::new(line_end, LineEnd, context),
+                KeyBinding::new(select_line_start, SelectLineStart, context),
+                KeyBinding::new(select_line_end, SelectLineEnd, context),
+                KeyBinding::new("secondary-a", SelectAll, context),
                 KeyBinding::new("backspace", Backspace, context),
                 KeyBinding::new("delete", Delete, context),
-                KeyBinding::new("cmd-c", Copy, context),
-                KeyBinding::new("cmd-x", Cut, context),
-                KeyBinding::new("cmd-v", Paste, context),
+                KeyBinding::new("secondary-c", Copy, context),
+                KeyBinding::new("secondary-x", Cut, context),
+                KeyBinding::new("secondary-v", Paste, context),
             ]);
         }
         let feedback = Some(FEEDBACK_CONTEXT);
@@ -937,9 +943,9 @@ mod tests {
             cx.write_to_clipboard(ClipboardItem::new_string("**好**\r\n".into()));
         });
         cx.simulate_input("e\u{301}👩‍💻");
-        cx.simulate_keystrokes("left backspace enter cmd-v");
+        cx.simulate_keystrokes("left backspace enter secondary-v");
         cx.update(|_, cx| assert_eq!(field.read(cx).text(), "\n**好**\r\n👩‍💻"));
-        cx.simulate_keystrokes("delete cmd-a cmd-x");
+        cx.simulate_keystrokes("delete secondary-a secondary-x");
         cx.update(|_, cx| {
             assert_eq!(field.read(cx).text(), "");
             assert_eq!(
@@ -947,6 +953,22 @@ mod tests {
                 Some("\n**好**\r\n")
             );
         });
+    }
+
+    #[gpui::test]
+    fn native_line_shortcuts_move_and_extend_selection(cx: &mut TestAppContext) {
+        let (field, cx) = cx.add_window_view(|_, cx| TextField::new(cx));
+        cx.update(|window, cx| field.read(cx).focus(window));
+        cx.simulate_input("first\nsecond");
+        let keys = if cfg!(target_os = "macos") {
+            ["cmd-left", "cmd-shift-right", "cmd-right", "cmd-shift-left"]
+        } else {
+            ["home", "shift-end", "end", "shift-home"]
+        };
+        for (key, selection) in keys.into_iter().zip([6..6, 6..12, 12..12, 6..12]) {
+            cx.simulate_keystrokes(key);
+            cx.update(|_, cx| assert_eq!(field.read(cx).selection(), selection));
+        }
     }
 
     #[gpui::test]
@@ -980,7 +1002,7 @@ mod tests {
             )));
         });
         cx.simulate_input("keep this");
-        cx.simulate_keystrokes("cmd-a cmd-v");
+        cx.simulate_keystrokes("secondary-a secondary-v");
         cx.update(|_, cx| {
             let field = field.read(cx);
             assert_eq!(field.text(), "keep this");
@@ -1005,7 +1027,7 @@ mod tests {
             assert!(field.scroll.offset().x < px(0.));
             assert!(field.scroll.offset().y < px(0.));
         });
-        cx.simulate_keystrokes("cmd-a left right right right down shift-down");
+        cx.simulate_keystrokes("secondary-a left right right right down shift-down");
         cx.update(|_, cx| assert_eq!(field.read(cx).selection(), 6..10));
     }
 
@@ -1038,7 +1060,7 @@ mod tests {
             field.read(cx).focus(window);
             cx.write_to_clipboard(ClipboardItem::new_string(format!("{long}\r\n好\u{2028}👩‍💻")));
         });
-        cx.simulate_keystrokes("cmd-v");
+        cx.simulate_keystrokes("secondary-v");
         cx.run_until_parked();
         cx.update(|_, cx| {
             let field = field.read(cx);
@@ -1047,7 +1069,7 @@ mod tests {
             assert!(field.scroll.offset().x < px(0.));
             assert_eq!(field.scroll.offset().y, px(0.));
         });
-        cx.simulate_keystrokes("shift-left cmd-c cmd-x");
+        cx.simulate_keystrokes("shift-left secondary-c secondary-x");
         cx.update(|_, cx| {
             assert_eq!(field.read(cx).text(), format!("{long}  好 "));
             assert_eq!(

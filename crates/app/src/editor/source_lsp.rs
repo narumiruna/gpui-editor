@@ -587,6 +587,7 @@ fn hover_anchor(
         ItemPaint::Text(line) => {
             item.target.is_none() && source.get(item.source.clone()) == Some(line.text.as_ref())
         }
+        #[cfg(target_os = "macos")]
         ItemPaint::Isolated(_) => true,
         _ => false,
     });

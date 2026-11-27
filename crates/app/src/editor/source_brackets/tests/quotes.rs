@@ -116,7 +116,7 @@ fn check_quotes(cx: &mut TestAppContext, language: &str, fixture: &str) {
             );
             assert!(editor.view.can_undo(), "{}", case.name);
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| {
             let editor = editor.read(cx);
             assert_eq!(editor.source(), source, "{}", case.name);

@@ -223,7 +223,7 @@ fn independent_exact_base_authority_rebases_unicode_and_maps_native_undo_redo(
     assert_converged(&authority, &a, &b, a_cx);
     check_stage(&synced, a_cx);
 
-    for (key, stage) in [("cmd-z", &undo), ("cmd-shift-z", &redo)] {
+    for (key, stage) in [("secondary-z", &undo), ("secondary-shift-z", &redo)] {
         a_cx.simulate_keystrokes(key);
         a_cx.update(|_, cx| {
             let editor = a.read(cx);

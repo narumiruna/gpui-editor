@@ -55,7 +55,7 @@ fn xml_feedback_matches_case_sensitive_tag_names_and_delimiters(cx: &mut TestApp
             );
         });
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|window, cx| {
         editor.update(cx, |editor, cx| {
             assert_eq!(editor.source(), original);

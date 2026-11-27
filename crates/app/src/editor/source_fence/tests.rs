@@ -335,7 +335,7 @@ fn configured_wast_comments_follow_live_mounted_tokens_and_undo(cx: &mut TestApp
             assert_eq!(editor.view.undo_depth(), 1);
         });
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         editor.update(cx, |editor, cx| {
             assert_eq!(editor.source(), source);
@@ -385,14 +385,14 @@ fn strict_configured_fence_rejects_invalid_edit_without_changes_or_history(
             assert_eq!(editor.view.undo_depth(), 1);
         });
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source);
         assert_eq!(editor.view.undo_depth(), 0);
         assert!(editor.view.can_redo());
     });
-    cx.simulate_keystrokes("cmd-shift-z");
+    cx.simulate_keystrokes("secondary-shift-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source.replace("$a", "$b"));
@@ -433,7 +433,7 @@ fn strict_wast_rejects_undo_without_consuming_the_entry(cx: &mut TestAppContext)
             )
         })
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         editor.update(cx, |editor, cx| {
             assert_eq!(editor.source(), source.replace(body, "(func $a)"));
@@ -452,7 +452,7 @@ fn strict_wast_rejects_undo_without_consuming_the_entry(cx: &mut TestAppContext)
             );
         })
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source);

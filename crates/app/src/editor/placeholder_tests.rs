@@ -132,7 +132,7 @@ fn typing_hides_placeholder_and_undo_paints_the_current_configuration(cx: &mut T
     });
     cx.run_until_parked();
     cx.update(|_, cx| assert_painted(editor.read(cx), &[]));
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.run_until_parked();
     cx.update(|window, cx| {
         let editor = editor.read(cx);

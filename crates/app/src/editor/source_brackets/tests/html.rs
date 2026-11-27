@@ -238,7 +238,7 @@ fn html_feedback_uses_tag_names_and_stays_inside_the_active_fence(cx: &mut TestA
             );
         });
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|window, cx| {
         editor.update(cx, |editor, cx| {
             assert_eq!(editor.source(), source);

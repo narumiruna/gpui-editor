@@ -37,6 +37,7 @@ impl Shell {
     ) -> Div {
         let busy = self.active.is_some();
         let current = self.current();
+        let markdown = current.is_some_and(|tab| tab.editor.read(cx).is_markdown());
         let can_save = current.is_some() && !busy;
         let mut actions = toolbar::group();
         if !self.sidebar.visible {
@@ -63,7 +64,7 @@ impl Shell {
         let mut more_button = None;
         let mut more_tools = None;
         let mut remote_images = None;
-        if let Some(current) = current {
+        if let Some(current) = current.filter(|_| markdown) {
             let editor = current.editor.read(cx);
             let reviewing = editor.is_reviewing_changes();
             let edit_enabled = !busy && !editor.is_composing() && !reviewing;
@@ -163,7 +164,7 @@ impl Shell {
                 .p_4()
                 .text_color(theme.muted)
                 .child(if self.workspace.is_some() {
-                    "Select a Markdown file or create a new one."
+                    "Select a file or create a new note."
                 } else {
                     "Open a workspace folder or create a new document."
                 }),
@@ -203,7 +204,11 @@ impl Shell {
                 picker,
                 body,
                 "editor.surface",
-                "Markdown editing surface",
+                if markdown {
+                    "Markdown editing surface"
+                } else {
+                    "Text editing surface"
+                },
             ))
             .children(more_tools)
     }

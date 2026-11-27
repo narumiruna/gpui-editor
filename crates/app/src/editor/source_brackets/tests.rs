@@ -253,7 +253,7 @@ fn wast_bracket_feedback_uses_the_current_fence_body(cx: &mut TestAppContext) {
                 );
             });
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|window, cx| {
             editor.update(cx, |editor, cx| {
                 assert_eq!(editor.source(), source);
@@ -340,7 +340,7 @@ fn wast_quote_input_matches_the_pinned_oracle(cx: &mut TestAppContext) {
                 cx.simulate_input("\"");
                 cx.update(|_, cx| check(editor.read(cx), step));
             }
-            cx.simulate_keystrokes("cmd-z");
+            cx.simulate_keystrokes("secondary-z");
             cx.update(|_, cx| {
                 let editor = editor.read(cx);
                 check(editor, &case.before);
@@ -376,7 +376,7 @@ fn wast_quote_input_preserves_ime_and_protected_markdown(cx: &mut TestAppContext
             assert_eq!(editor.source(), composed);
         });
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source);
@@ -451,7 +451,7 @@ fn json_brackets_use_language_data_and_do_not_cross_syntax_classes(cx: &mut Test
             format!("{}\"{}", &source[..inside], &source[inside..])
         );
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         editor.update(cx, |editor, cx| {
             editor.move_to(start + body.len(), false, cx)
@@ -464,7 +464,7 @@ fn json_brackets_use_language_data_and_do_not_cross_syntax_classes(cx: &mut Test
             source.replacen(body, &format!("{body}("), 1)
         )
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.simulate_input("[");
     cx.update(|_, cx| {
         assert_eq!(
@@ -530,7 +530,7 @@ fn close_bracket_settings_follow_the_mounted_language(cx: &mut TestAppContext) {
             assert_eq!(editor.read(cx).source(), expected);
             assert_eq!(editor.read(cx).cursor(), position + 1);
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source));
     }
 }
@@ -568,7 +568,7 @@ fn template_percent_brace_is_one_input_edit_inside_the_draft(cx: &mut TestAppCon
             assert_eq!(editor.source(), draft.replacen("{}", expected, 1));
             assert_eq!(editor.cursor(), position + 1);
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|_, cx| assert_eq!(editor.read(cx).source(), draft));
     }
 }
@@ -652,7 +652,7 @@ fn source_tag_input_stays_in_the_draft_and_undo_is_atomic(cx: &mut TestAppContex
             };
             assert_eq!(editor.cursor(), prefix.len() + expected_head);
         });
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         cx.update(|window, cx| {
             editor.update(cx, |editor, cx| {
                 assert_eq!(editor.source(), source);

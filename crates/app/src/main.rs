@@ -1,6 +1,6 @@
 use std::{env, process::ExitCode};
 
-const USAGE: &str = "Usage: gpui-editor\nLaunch the macOS app. Choose a folder inside the app.";
+const USAGE: &str = "Usage: gpui-editor\nLaunch the desktop app. Choose a folder inside the app.";
 
 fn main() -> ExitCode {
     let mut args = env::args_os().skip(1);
@@ -17,14 +17,14 @@ fn main() -> ExitCode {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn launch() -> ExitCode {
     gpui_editor::app::run();
     ExitCode::SUCCESS
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn launch() -> ExitCode {
-    eprintln!("GPUI Editor requires macOS.");
+    eprintln!("GPUI Editor requires macOS or Windows.");
     ExitCode::FAILURE
 }

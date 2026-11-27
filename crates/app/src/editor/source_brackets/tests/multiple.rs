@@ -498,7 +498,7 @@ fn focused_canvas_submits_native_brackets_and_hides_them_during_ime(cx: &mut Tes
             assert!(!editor.is_composing());
         });
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(editor.source(), source);

@@ -564,7 +564,7 @@ fn a_fold_tracks_accepted_edits_and_undo(cx: &mut TestAppContext) {
             assert_eq!(editor.source(), CODE.replacen('{', " {", 1));
         });
     });
-    cx.simulate_keystrokes("cmd-z");
+    cx.simulate_keystrokes("secondary-z");
     cx.update(|_, cx| {
         let editor = editor.read(cx);
         assert_eq!(only_fold(editor), open + 1..close);

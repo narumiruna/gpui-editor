@@ -3,9 +3,9 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    App, Application, Bounds, Context, Entity, FocusHandle, Menu, MenuItem, OsAction, Pixels,
-    ScrollHandle, Subscription, TitlebarOptions, WeakEntity, Window, WindowBounds, WindowHandle,
-    WindowOptions, actions, div, point, prelude::*, px, size,
+    App, Application, Bounds, Context, Entity, FocusHandle, Pixels, ScrollHandle, Subscription,
+    WeakEntity, Window, WindowBounds, WindowHandle, WindowOptions, actions, div, prelude::*, px,
+    size,
 };
 
 use crate::{
@@ -19,7 +19,14 @@ mod editor_pane;
 mod hotkeys;
 mod operation;
 mod palette;
+#[cfg(target_os = "macos")]
 mod quit;
+#[cfg(target_os = "windows")]
+mod quit {
+    pub(super) fn after_confirmation(cx: &gpui::App) {
+        cx.quit();
+    }
+}
 mod session;
 mod sidebar;
 mod state_file;
@@ -52,6 +59,7 @@ pub fn run() {
     let hotkeys = Hotkeys::load(state_file::path("hotkeys.json"));
     let app = Application::new().with_assets(editor::ToolbarAssets);
     app.run(move |cx| {
+        #[cfg(target_os = "macos")]
         editor::announcements::install_native_delivery(cx);
         editor::bind_keys(cx);
         hotkeys.bindings.bind(cx);
@@ -63,11 +71,7 @@ pub fn run() {
                     cx,
                 ))),
                 window_min_size: Some(size(px(560.), px(360.))),
-                titlebar: Some(TitlebarOptions {
-                    title: None,
-                    appears_transparent: true,
-                    traffic_light_position: Some(point(px(10.), px(12.))),
-                }),
+                titlebar: Some(window_chrome::titlebar()),
                 ..Default::default()
             },
             |window, cx| {
@@ -83,6 +87,7 @@ pub fn run() {
             cx.quit();
             return;
         };
+        #[cfg(target_os = "macos")]
         if let Err(error) = quit::install(cx) {
             eprintln!("Could not protect unsaved changes on macOS quit: {error}");
             cx.quit();
@@ -100,6 +105,8 @@ pub fn run() {
 }
 
 fn set_menus(cx: &App) {
+    use gpui::{Menu, MenuItem, OsAction};
+
     cx.set_menus(vec![
         Menu {
             name: "GPUI Editor".into(),

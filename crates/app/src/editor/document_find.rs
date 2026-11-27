@@ -387,7 +387,7 @@ impl Editor {
             let Some(changes) =
                 self.replace_find_selection(selected, &replacement, announcement, cx)
             else {
-                self.set_find_message(Some("Cannot replace this Markdown match".into()), cx);
+                self.set_find_message(Some("Cannot replace this match".into()), cx);
                 return;
             };
             // Keep the app's post-edit Find navigation. Use the start-state
@@ -443,25 +443,30 @@ impl Editor {
             self.set_find_message(Some("No replaceable matches".into()), cx);
             return;
         }
-        let planned = self
-            .markdown()
-            .plan_replacements(changes.changes().map(|(range, text)| (range.clone(), text)));
-        let changes = planned.ok().and_then(|planned| {
-            ChangeSet::new(
-                planned
-                    .into_iter()
-                    .map(|(range, text)| Change::new(range, text))
-                    .collect(),
-            )
-            .ok()
-        });
-        let Some(changes) = changes else {
-            self.set_find_message(
-                Some("Cannot replace all matches in this Markdown document".into()),
-                cx,
-            );
-            return;
+        let changes = if self.is_markdown() {
+            let planned = self
+                .markdown()
+                .plan_replacements(changes.changes().map(|(range, text)| (range.clone(), text)));
+            let Some(changes) = planned.ok().and_then(|planned| {
+                ChangeSet::new(
+                    planned
+                        .into_iter()
+                        .map(|(range, text)| Change::new(range, text))
+                        .collect(),
+                )
+                .ok()
+            }) else {
+                self.set_find_message(
+                    Some("Cannot replace all matches in this Markdown document".into()),
+                    cx,
+                );
+                return;
+            };
+            changes
+        } else {
+            changes
         };
+        self.finish_typing();
         let transaction = Transaction::new(changes)
             .with_effects([replacements_announcement(self.view.state(), count)])
             .with_user_event("input.replace.all");
@@ -985,9 +990,35 @@ mod tests {
                     .eq(std::iter::once(14..18))
             );
         });
-        cx.simulate_keystrokes("escape cmd-z cmd-f");
+        cx.simulate_keystrokes("escape secondary-z cmd-f");
         cx.run_until_parked();
         cx.update(|_, cx| assert_eq!(marks(editor.read(cx)), [2..6, 13..17]));
+    }
+
+    #[gpui::test]
+    fn replace_all_treats_fences_as_literal_text_in_plain_files(cx: &mut TestAppContext) {
+        let source = "```\r\nhit\r\n```\r\nhit\r\n";
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            let mut editor = Editor::new(source.into(), window, cx);
+            editor.set_path(Some("sample.txt".into()), None);
+            editor
+        });
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.open_find(window, cx);
+                let find = editor.find.as_ref().unwrap();
+                find.query.update(cx, |field, cx| {
+                    field.replace_text_in_range(None, "hit", window, cx);
+                });
+                find.replacement.update(cx, |field, cx| {
+                    field.replace_text_in_range(None, "new", window, cx);
+                });
+                editor.replace_all_matches(cx);
+                assert_eq!(editor.source(), "```\r\nnew\r\n```\r\nnew\r\n");
+                editor.replay_history(false, cx);
+                assert_eq!(editor.source(), source);
+            });
+        });
     }
 
     #[gpui::test]

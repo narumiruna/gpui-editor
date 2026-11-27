@@ -207,7 +207,7 @@ mod tests {
                 TabFocusMode::TemporaryUntil(_)
             ))
         });
-        cx.simulate_keystrokes("cmd-a");
+        cx.simulate_keystrokes("secondary-a");
         cx.update(|_, cx| assert_eq!(editor.read(cx).tab_focus, TabFocusMode::Disabled));
         cx.simulate_keystrokes("escape");
         let clock = cx.update(|_, cx| {

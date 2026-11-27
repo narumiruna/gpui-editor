@@ -138,9 +138,12 @@ fn drop_cursor_suppresses_unprojected_and_protected_positions(cx: &mut TestAppCo
     cx.update(|_, cx| editor.update(cx, |editor, cx| apply(editor, drop_cursor().append(), cx)));
     let body = source.find("word").unwrap();
     let fence = source.find("json").unwrap();
+    let inline = source.find("inline").unwrap() + 1;
+    cx.update(|_, cx| editor.update(cx, |editor, cx| track(editor, Some(inline), cx)));
+    cx.run_until_parked();
+    cx.update(|_, cx| assert_paint(editor.read(cx), Some((inline, rgb(0x000000)))));
     for target in [
         source.find(" ##").unwrap() + 2,  // Hidden heading markup.
-        source.find("inline").unwrap(),   // Visible but read-only text.
         source.find('\u{200d}').unwrap(), // Inside one grapheme.
         body,                             // Read-only preview.
     ] {

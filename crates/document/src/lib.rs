@@ -9,6 +9,7 @@ pub enum SectionKind {
     Bullet,
     Strong,
     Emphasis,
+    InlineCode,
     FrontMatter,
     Mermaid,
     InlineMath,
@@ -36,6 +37,8 @@ pub struct Section {
     pub content: Range<usize>,
     pub destination: Option<String>,
     pub preview: Option<BlockPreview>,
+    /// Normalized inline code when the preview does not match the source content.
+    pub inline_code: Option<Box<str>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -87,6 +90,7 @@ impl Section {
             content,
             destination: None,
             preview: None,
+            inline_code: None,
         }
     }
 
@@ -275,6 +279,24 @@ impl<'a> Markdown<'a> {
                         source.start + text.len() - text[1..].trim_start_matches([' ', '\t']).len();
                     Some(Section::new(K::Bullet, source.clone(), start..source.end))
                 }
+                Event::Code(code) => {
+                    let ticks = text.bytes().take_while(|&byte| byte == b'`').count();
+                    let mut section = delimited(K::InlineCode, source, ticks);
+                    let body = &self.source[section.content.clone()];
+                    if body != code.as_ref() {
+                        if body
+                            .strip_prefix(' ')
+                            .and_then(|body| body.strip_suffix(' '))
+                            == Some(code.as_ref())
+                        {
+                            section.content.start += 1;
+                            section.content.end -= 1;
+                        } else {
+                            section.inline_code = Some(code.into_string().into_boxed_str());
+                        }
+                    }
+                    Some(section)
+                }
                 Event::InlineMath(_) => Some(delimited(K::InlineMath, source, 1)),
                 Event::DisplayMath(_) => Some(delimited(K::DisplayMath, source, 2)),
                 Event::Start(Tag::MetadataBlock(_)) => {
@@ -355,7 +377,6 @@ impl<'a> Markdown<'a> {
                     | Tag::Link { .. }
                     | Tag::Image { .. },
                 )
-                | Event::Code(_)
                 | Event::Html(_)
                 | Event::InlineHtml(_)
                 | Event::Rule => Some(Section::new(K::ReadOnly, source.clone(), source)),
@@ -437,7 +458,7 @@ impl<'a> Markdown<'a> {
             // Sections are sorted outermost first. Remove inner spans first so
             // an enclosing span also goes away if it becomes empty.
             for section in sections.iter().rev() {
-                if matches!(section.kind, K::Strong | K::Emphasis)
+                if matches!(section.kind, K::Strong | K::Emphasis | K::InlineCode)
                     && range.start <= section.content.start
                     && section.content.end <= range.end
                 {

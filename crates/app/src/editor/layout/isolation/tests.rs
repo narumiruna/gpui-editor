@@ -158,7 +158,7 @@ fn live_wast_uses_native_pixels_hits_selection_and_undo_boundaries(cx: &mut Test
             cx.notify();
         })
     });
-    cx.simulate_keystrokes("cmd-c");
+    cx.simulate_keystrokes("secondary-c");
     cx.update(|_, cx| {
         assert_eq!(
             cx.read_from_clipboard().unwrap().text().unwrap(),

@@ -21,8 +21,8 @@ actions!(editor, [CloseMergeReview]);
 pub(super) fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("escape", CloseMergeReview, Some("MergeReview")),
-        KeyBinding::new("cmd-z", Undo, Some("MergeReview")),
-        KeyBinding::new("cmd-shift-z", Redo, Some("MergeReview")),
+        KeyBinding::new("secondary-z", Undo, Some("MergeReview")),
+        KeyBinding::new("secondary-shift-z", Redo, Some("MergeReview")),
     ]);
 }
 
@@ -95,9 +95,14 @@ impl Editor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.input_enabled || self.is_composing() || self.source() == saved {
+        if !self.input_enabled
+            || !self.is_markdown()
+            || self.is_composing()
+            || self.source() == saved
+        {
             return;
         }
+        self.finish_typing();
         self.cancel_source_snippet(cx);
         self.dismiss_keyboard_diagnostic_hover();
         self.invalidate_edit_layout();
@@ -432,7 +437,7 @@ impl ReviewRows<'_> {
                     .flex_1()
                     .min_w_0()
                     .overflow_hidden()
-                    .font_family("Menlo")
+                    .font_family(super::layout::CODE_FONT_FAMILY)
                     .child(text),
             )
     }

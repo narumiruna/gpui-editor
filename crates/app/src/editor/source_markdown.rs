@@ -84,7 +84,8 @@ impl Editor {
     }
 
     fn can_edit_markup(&self) -> bool {
-        self.input_enabled
+        self.is_markdown()
+            && self.input_enabled
             && !self.view.state().read_only()
             && self.active.is_none()
             && !self.is_composing()
@@ -111,22 +112,25 @@ impl Editor {
         receipt: Option<&mut Option<super::EditReceipt>>,
         cx: &mut Context<Self>,
     ) -> bool {
-        let edits = transaction.changes().changes();
-        let Ok(planned) = self
-            .markdown()
-            .plan_replacements(edits.map(|(range, text)| (range.clone(), text)))
-        else {
-            return false;
-        };
-        if planned.len() != transaction.changes().changes().count()
-            || !planned.iter().zip(transaction.changes().changes()).all(
-                |((range, text), (planned_range, planned_text))| {
-                    range == planned_range && text == planned_text
-                },
-            )
-        {
-            return false;
+        if self.is_markdown() {
+            let edits = transaction.changes().changes();
+            let Ok(planned) = self
+                .markdown()
+                .plan_replacements(edits.map(|(range, text)| (range.clone(), text)))
+            else {
+                return false;
+            };
+            if planned.len() != transaction.changes().changes().count()
+                || !planned.iter().zip(transaction.changes().changes()).all(
+                    |((range, text), (planned_range, planned_text))| {
+                        range == planned_range && text == planned_text
+                    },
+                )
+            {
+                return false;
+            }
         }
+        self.finish_typing();
         let check = super::preserve_markdown_edit(&transaction, receipt);
         if self
             .view
