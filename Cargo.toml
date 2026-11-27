@@ -17,5 +17,5 @@ publish = false
 [workspace.dependencies]
 gpui = { version = "0.2.2", default-features = false, features = ["font-kit", "runtime_shaders"] }
 image = { version = "0.25.8", default-features = false }
-resvg = { version = "0.45.1", default-features = false }
+resvg = { version = "0.50.0", default-features = false }
 tempfile = "3.27.0"
