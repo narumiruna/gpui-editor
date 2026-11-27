@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
 use gpui::{
-    AssetSource, Context, Div, Entity, FontWeight, SharedString, Stateful, Window, div, prelude::*,
-    px, svg,
+    App, AssetSource, Context, Div, Entity, FontWeight, SharedString, Stateful, Window, div,
+    prelude::*, px, svg,
 };
 
 use super::{Editor, commands::Command};
@@ -52,6 +52,13 @@ const SHELL_ICONS: &[(&str, &str)] = &[
         glyph!("M12 3v11m-4-4 4 4 4-4M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"),
     ),
     ("More tools", glyph!("M5 12h.01M12 12h.01M19 12h.01")),
+    (
+        "Review changes",
+        glyph!("M3 5h18v14H3zM12 5v14M6 10h3m6 0h3m-3 5h3"),
+    ),
+    ("Close change review", glyph!("M5 5l14 14M19 5 5 19")),
+    ("Diagnostics", glyph!("M12 3 22 20H2L12 3Zm0 6v5m0 3h.01")),
+    ("Toggle code fold", glyph!("M4 5h16M4 19h16m-8-9v4m-2-2h4")),
     ("Workspace", glyph!("M3 6h7l2 2h9v11H3z")),
     (
         "Tree",
@@ -304,8 +311,46 @@ pub(crate) fn more_group(
     enabled: bool,
     theme: Theme,
     picker: Option<&Picker>,
+    cx: &App,
 ) -> Div {
-    tool_group(MORE, editor, enabled, theme, picker, false)
+    let group = tool_group(MORE, editor, enabled, theme, picker, false).when(
+        editor.read(cx).can_toggle_source_fold(),
+        |group| {
+            let editor = editor.clone();
+            group.child(
+                Picker::mark(
+                    picker,
+                    button("Toggle code fold", enabled, false, theme),
+                    "Toggle code fold",
+                    "Toggle code fold",
+                )
+                .when(enabled, |button| {
+                    button.on_click(move |_, window, cx| {
+                        editor.update(cx, |editor, cx| {
+                            window.focus(&editor.focus);
+                            editor.toggle_source_fold(cx);
+                        });
+                    })
+                }),
+            )
+        },
+    );
+    group.when(editor.read(cx).has_source_diagnostics(), |group| {
+        let editor = editor.clone();
+        group.child(
+            Picker::mark(
+                picker,
+                button("Diagnostics", enabled, false, theme),
+                "Diagnostics",
+                "Diagnostics",
+            )
+            .when(enabled, |button| {
+                button.on_click(move |_, window, cx| {
+                    editor.update(cx, |editor, cx| editor.open_source_diagnostics(window, cx));
+                })
+            }),
+        )
+    })
 }
 
 fn tool_group(

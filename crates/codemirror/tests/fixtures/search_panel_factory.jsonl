@@ -1,0 +1,10 @@
+{"step":"before","placement":null,"events":[]}
+{"step":"open_a","placement":"bottom","events":[["create","a1",""],["mount","a1"]]}
+{"step":"open_again","placement":"bottom","events":[]}
+{"step":"equivalent_a","placement":"bottom","events":[["update","a1",""]]}
+{"step":"change_top","placement":"bottom","events":[["update","a1",""]]}
+{"step":"change_factory","placement":"bottom","events":[["update","a1",""]]}
+{"step":"set_query","placement":"bottom","events":[["update","a1","dog"]]}
+{"step":"close","placement":null,"events":[["destroy","a1"]]}
+{"step":"reopen_b","placement":"top","events":[["create","b2","dog"],["mount","b2"]]}
+{"step":"destroy_view","placement":null,"events":[["destroy","b2"]]}

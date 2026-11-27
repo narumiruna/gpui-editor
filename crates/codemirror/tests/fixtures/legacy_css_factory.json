@@ -1,0 +1,882 @@
+{
+  "triggers": [
+    [
+      "",
+      false
+    ],
+    [
+      "}",
+      true
+    ],
+    [
+      " }",
+      true
+    ],
+    [
+      "\t}",
+      true
+    ],
+    [
+      " }",
+      true
+    ],
+    [
+      "﻿}",
+      true
+    ],
+    [
+      "} ",
+      false
+    ],
+    [
+      "}}",
+      false
+    ],
+    [
+      "a}",
+      false
+    ],
+    [
+      "\n}",
+      true
+    ]
+  ],
+  "cases": [
+    {
+      "title": "anonymous defaults",
+      "config": {},
+      "source": "a:hover, #root {\n\twidth: calc(23px + 2%);\n\tcolor: #123;\n\taccent-color: red; /* open\n\tcomment */\n\tbackground: url(\n\t\tcontent\n\t);\n}\n",
+      "lang": {
+        "name": null,
+        "mergeTokens": true,
+        "commentTokens": {
+          "line": null,
+          "block": {
+            "open": "/*",
+            "close": "*/"
+          }
+        }
+      },
+      "indents": [
+        0,
+        2,
+        2,
+        2,
+        2,
+        2,
+        6,
+        4,
+        0,
+        0
+      ],
+      "tokens": [
+        [
+          [0, 1, "tag"],
+          [1, 2, null],
+          [2, 7, "variableName.constant"],
+          [7, 8, null],
+          [8, 9, null],
+          [9, 14, "builtin"],
+          [14, 15, null],
+          [15, 16, null]
+        ],
+        [
+          [17, 18, null],
+          [18, 23, "property"],
+          [23, 24, null],
+          [24, 25, null],
+          [25, 29, "variableName.function"],
+          [29, 30, null],
+          [30, 34, "number"],
+          [34, 35, null],
+          [35, 36, null],
+          [36, 37, null],
+          [37, 39, "number"],
+          [39, 40, null],
+          [40, 41, null]
+        ],
+        [
+          [42, 43, null],
+          [43, 48, "property"],
+          [48, 49, null],
+          [49, 50, null],
+          [50, 54, "atom"],
+          [54, 55, null]
+        ],
+        [
+          [56, 57, null],
+          [57, 69, "string.special"],
+          [69, 70, null],
+          [70, 71, null],
+          [71, 74, "keyword"],
+          [74, 75, null],
+          [75, 76, null],
+          [76, 83, "comment"]
+        ],
+        [
+          [84, 95, "comment"]
+        ],
+        [
+          [96, 97, null],
+          [97, 107, "property"],
+          [107, 108, null],
+          [108, 109, null],
+          [109, 112, "variableName.function"],
+          [112, 113, null]
+        ],
+        [
+          [114, 123, "string"]
+        ],
+        [
+          [124, 125, "string"],
+          [125, 126, null],
+          [126, 127, null]
+        ],
+        [
+          [128, 129, null]
+        ],
+        []
+      ]
+    },
+    {
+      "title": "inline root",
+      "config": {
+        "name": "declarations",
+        "inline": true,
+        "lineComment": "//"
+      },
+      "source": "COLOR: red;\nunknown: black;\nfont: /* a */ block;\n// decoration only\nbackground: url(\n\tpath\n)",
+      "lang": {
+        "name": "declarations",
+        "mergeTokens": true,
+        "commentTokens": {
+          "line": "//",
+          "block": {
+            "open": "/*",
+            "close": "*/"
+          }
+        }
+      },
+      "indents": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        2,
+        0
+      ],
+      "tokens": [
+        [
+          [0, 5, "property"],
+          [5, 6, null],
+          [6, 7, null],
+          [7, 10, "keyword"],
+          [10, 11, null]
+        ],
+        [
+          [12, 19, "error"],
+          [19, 20, null],
+          [20, 21, null],
+          [21, 26, "keyword"],
+          [26, 27, null]
+        ],
+        [
+          [28, 32, "property"],
+          [32, 33, null],
+          [33, 34, null],
+          [34, 41, "comment"],
+          [41, 42, null],
+          [42, 47, "atom"],
+          [47, 48, null]
+        ],
+        [
+          [49, 50, null],
+          [50, 51, null],
+          [51, 52, null],
+          [52, 62, "error"],
+          [62, 63, null],
+          [63, 67, "error"]
+        ],
+        [
+          [68, 78, "property"],
+          [78, 79, null],
+          [79, 80, null],
+          [80, 83, "variableName.function"],
+          [83, 84, null]
+        ],
+        [
+          [85, 90, "string"]
+        ],
+        [
+          [91, 92, null]
+        ]
+      ]
+    },
+    {
+      "title": "nested rules do not add dialect hooks",
+      "config": {
+        "name": "nested",
+        "allowNested": true,
+        "lineComment": "//"
+      },
+      "source": "a {\n  .inner {\n    color: red;\n  }\n  font: {\n    weight: normal;\n  };\n  custom: blue;\n  color: $value; // not a comment\n}\n@media screen {\n  color: red;\n}",
+      "lang": {
+        "name": "nested",
+        "mergeTokens": true,
+        "commentTokens": {
+          "line": "//",
+          "block": {
+            "open": "/*",
+            "close": "*/"
+          }
+        }
+      },
+      "indents": [
+        0,
+        2,
+        4,
+        2,
+        2,
+        4,
+        4,
+        2,
+        2,
+        0,
+        0,
+        2,
+        0
+      ],
+      "tokens": [
+        [
+          [0, 1, "tag"],
+          [1, 2, null],
+          [2, 3, null]
+        ],
+        [
+          [4, 6, null],
+          [6, 12, "qualifier"],
+          [12, 13, null],
+          [13, 14, null]
+        ],
+        [
+          [15, 19, null],
+          [19, 24, "property"],
+          [24, 25, null],
+          [25, 26, null],
+          [26, 29, "keyword"],
+          [29, 30, null]
+        ],
+        [
+          [31, 33, null],
+          [33, 34, null]
+        ],
+        [
+          [35, 37, null],
+          [37, 41, "property"],
+          [41, 42, null],
+          [42, 43, null],
+          [43, 44, null]
+        ],
+        [
+          [45, 49, null],
+          [49, 55, "property"],
+          [55, 56, null],
+          [56, 57, null],
+          [57, 63, "atom"],
+          [63, 64, null]
+        ],
+        [
+          [65, 67, null],
+          [67, 68, null],
+          [68, 69, null]
+        ],
+        [
+          [70, 72, null],
+          [72, 78, "property"],
+          [78, 79, null],
+          [79, 80, null],
+          [80, 84, "variableName.constant"],
+          [84, 85, null]
+        ],
+        [
+          [86, 88, null],
+          [88, 93, "property"],
+          [93, 94, null],
+          [94, 95, null],
+          [95, 96, null],
+          [96, 101, "variable"],
+          [101, 102, null],
+          [102, 103, null],
+          [103, 104, null],
+          [104, 105, null],
+          [105, 106, null],
+          [106, 109, "tag"],
+          [109, 110, null],
+          [110, 111, "tag"],
+          [111, 112, null],
+          [112, 119, "tag"]
+        ],
+        [
+          [120, 121, null]
+        ],
+        [
+          [122, 128, "def"],
+          [128, 129, null],
+          [129, 135, "attribute"],
+          [135, 136, null],
+          [136, 137, null]
+        ],
+        [
+          [138, 140, null],
+          [140, 145, "property"],
+          [145, 146, null],
+          [146, 147, null],
+          [147, 150, "keyword"],
+          [150, 151, null]
+        ],
+        [
+          [152, 153, null]
+        ]
+      ]
+    },
+    {
+      "title": "component blocks",
+      "config": {
+        "name": "component",
+        "supportsAtComponent": true
+      },
+      "source": "@coMponent stray {\n  a {\n    color: red;\n  }\n}\n@other tag {\n  opacity: 0;\n}",
+      "lang": {
+        "name": "component",
+        "mergeTokens": true,
+        "commentTokens": {
+          "line": null,
+          "block": {
+            "open": "/*",
+            "close": "*/"
+          }
+        }
+      },
+      "indents": [
+        0,
+        0,
+        4,
+        0,
+        0,
+        0,
+        2,
+        0
+      ],
+      "tokens": [
+        [
+          [0, 10, "def"],
+          [10, 11, null],
+          [11, 16, "error"],
+          [16, 17, null],
+          [17, 18, null]
+        ],
+        [
+          [19, 21, null],
+          [21, 22, "tag"],
+          [22, 23, null],
+          [23, 24, null]
+        ],
+        [
+          [25, 29, null],
+          [29, 34, "property"],
+          [34, 35, null],
+          [35, 36, null],
+          [36, 39, "keyword"],
+          [39, 40, null]
+        ],
+        [
+          [41, 43, null],
+          [43, 44, null]
+        ],
+        [
+          [45, 46, null]
+        ],
+        [
+          [47, 53, "def"],
+          [53, 54, null],
+          [54, 57, "tag"],
+          [57, 58, null],
+          [58, 59, null]
+        ],
+        [
+          [60, 62, null],
+          [62, 69, "property"],
+          [69, 70, null],
+          [70, 71, null],
+          [71, 72, "number"],
+          [72, 73, null]
+        ],
+        [
+          [74, 75, null]
+        ]
+      ]
+    },
+    {
+      "title": "component with nesting",
+      "config": {
+        "name": "everything",
+        "supportsAtComponent": true,
+        "allowNested": true
+      },
+      "source": "@component-part {\n  opacity: 1;\n  .part {\n    color: red;\n  }\n}",
+      "lang": {
+        "name": "everything",
+        "mergeTokens": true,
+        "commentTokens": {
+          "line": null,
+          "block": {
+            "open": "/*",
+            "close": "*/"
+          }
+        }
+      },
+      "indents": [
+        0,
+        0,
+        0,
+        4,
+        0,
+        0
+      ],
+      "tokens": [
+        [
+          [0, 15, "def"],
+          [15, 16, null],
+          [16, 17, null]
+        ],
+        [
+          [18, 20, null],
+          [20, 27, "property"],
+          [27, 28, null],
+          [28, 29, null],
+          [29, 30, "number"],
+          [30, 31, null]
+        ],
+        [
+          [32, 34, null],
+          [34, 39, "qualifier"],
+          [39, 40, null],
+          [40, 41, null]
+        ],
+        [
+          [42, 46, null],
+          [46, 51, "property"],
+          [51, 52, null],
+          [52, 53, null],
+          [53, 56, "keyword"],
+          [56, 57, null]
+        ],
+        [
+          [58, 60, null],
+          [60, 61, null]
+        ],
+        [
+          [62, 63, null]
+        ]
+      ]
+    },
+    {
+      "title": "ten replacement tables and nonstandard property highlighting",
+      "config": {
+        "name": "custom words",
+        "highlightNonStandardPropertyKeywords": false,
+        "documentTypes": {
+          "Include": true
+        },
+        "mediaTypes": {
+          "device": true
+        },
+        "mediaFeatures": {
+          "speed": false
+        },
+        "mediaValueKeywords": {
+          "fast": true
+        },
+        "propertyKeywords": {
+          "size": true,
+          "ignoredUppercase": true
+        },
+        "nonStandardPropertyKeywords": {
+          "tilt": true
+        },
+        "fontProperties": {
+          "fontish": true
+        },
+        "counterDescriptors": {
+          "cycle": true
+        },
+        "colorKeywords": {
+          "azureish": true,
+          "same": true
+        },
+        "valueKeywords": {
+          "periwinkle": true,
+          "same": true
+        }
+      },
+      "source": "@document Include, include, domain {\n  a { Size: periwinkle; Tilt: Azureish; color: red; ignoredUppercase: same; }\n}\n@media only DEVICE and (Speed: Fast), screen and (width: tilt) {\n  a { size: same; }\n}\n@font-face { fontish: azureish; src: periwinkle; }\n@counter-style test { cycle: same; system: periwinkle; }",
+      "lang": {
+        "name": "custom words",
+        "mergeTokens": true,
+        "commentTokens": {
+          "line": null,
+          "block": {
+            "open": "/*",
+            "close": "*/"
+          }
+        }
+      },
+      "indents": [
+        0,
+        2,
+        0,
+        0,
+        2,
+        0,
+        0,
+        0
+      ],
+      "tokens": [
+        [
+          [0, 9, "def"],
+          [9, 10, null],
+          [10, 17, "tag"],
+          [17, 18, null],
+          [18, 19, null],
+          [19, 26, "error"],
+          [26, 27, null],
+          [27, 28, null],
+          [28, 34, "error"],
+          [34, 35, null],
+          [35, 36, null]
+        ],
+        [
+          [37, 39, null],
+          [39, 40, "tag"],
+          [40, 41, null],
+          [41, 42, null],
+          [42, 43, null],
+          [43, 47, "property"],
+          [47, 48, null],
+          [48, 49, null],
+          [49, 59, "atom"],
+          [59, 60, null],
+          [60, 61, null],
+          [61, 65, "property"],
+          [65, 66, null],
+          [66, 67, null],
+          [67, 75, "keyword"],
+          [75, 76, null],
+          [76, 77, null],
+          [77, 82, "error"],
+          [82, 83, null],
+          [83, 84, null],
+          [84, 87, "variable"],
+          [87, 88, null],
+          [88, 89, null],
+          [89, 105, "error"],
+          [105, 106, null],
+          [106, 107, null],
+          [107, 111, "atom"],
+          [111, 112, null],
+          [112, 113, null],
+          [113, 114, null]
+        ],
+        [
+          [115, 116, null]
+        ],
+        [
+          [117, 123, "def"],
+          [123, 124, null],
+          [124, 128, "keyword"],
+          [128, 129, null],
+          [129, 135, "attribute"],
+          [135, 136, null],
+          [136, 139, "keyword"],
+          [139, 140, null],
+          [140, 141, null],
+          [141, 146, "property"],
+          [146, 147, null],
+          [147, 148, null],
+          [148, 152, "keyword"],
+          [152, 153, null],
+          [153, 154, null],
+          [154, 155, null],
+          [155, 161, "error"],
+          [161, 162, null],
+          [162, 165, "keyword"],
+          [165, 166, null],
+          [166, 167, null],
+          [167, 172, "error"],
+          [172, 173, null],
+          [173, 174, null],
+          [174, 178, "property"],
+          [178, 179, null],
+          [179, 180, null],
+          [180, 181, null]
+        ],
+        [
+          [182, 184, null],
+          [184, 185, "tag"],
+          [185, 186, null],
+          [186, 187, null],
+          [187, 188, null],
+          [188, 192, "property"],
+          [192, 193, null],
+          [193, 194, null],
+          [194, 198, "atom"],
+          [198, 199, null],
+          [199, 200, null],
+          [200, 201, null]
+        ],
+        [
+          [202, 203, null]
+        ],
+        [
+          [204, 214, "def"],
+          [214, 215, null],
+          [215, 216, null],
+          [216, 217, null],
+          [217, 224, "property"],
+          [224, 225, null],
+          [225, 226, null],
+          [226, 234, "keyword"],
+          [234, 235, null],
+          [235, 236, null],
+          [236, 239, "error"],
+          [239, 240, null],
+          [240, 241, null],
+          [241, 251, "atom"],
+          [251, 252, null],
+          [252, 253, null],
+          [253, 254, null]
+        ],
+        [
+          [255, 269, "def"],
+          [269, 270, null],
+          [270, 274, "variable"],
+          [274, 275, null],
+          [275, 276, null],
+          [276, 277, null],
+          [277, 282, "property"],
+          [282, 283, null],
+          [283, 284, null],
+          [284, 288, "atom"],
+          [288, 289, null],
+          [289, 290, null],
+          [290, 296, "error"],
+          [296, 297, null],
+          [297, 298, null],
+          [298, 308, "atom"],
+          [308, 309, null],
+          [309, 310, null],
+          [310, 311, null]
+        ]
+      ]
+    },
+    {
+      "title": "empty properties and hooks",
+      "config": {
+        "name": "",
+        "inline": true,
+        "propertyKeywords": {},
+        "valueKeywords": {},
+        "tokenHooks": {}
+      },
+      "source": "color: red;\naccent-color: block;\n/* no comment hook */\nwidth: 100%;\n--tone: azure;",
+      "lang": {
+        "name": "",
+        "mergeTokens": true,
+        "commentTokens": {
+          "line": null,
+          "block": {
+            "open": "/*",
+            "close": "*/"
+          }
+        }
+      },
+      "indents": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "tokens": [
+        [
+          [0, 5, "error"],
+          [5, 6, null],
+          [6, 7, null],
+          [7, 10, "keyword"],
+          [10, 11, null]
+        ],
+        [
+          [12, 24, "string.special"],
+          [24, 25, null],
+          [25, 26, null],
+          [26, 31, "variable"],
+          [31, 32, null]
+        ],
+        [
+          [33, 34, null],
+          [34, 35, null],
+          [35, 36, null],
+          [36, 38, "error"],
+          [38, 39, null],
+          [39, 46, "error"],
+          [46, 47, null],
+          [47, 51, "error"],
+          [51, 52, null],
+          [52, 53, null],
+          [53, 54, null]
+        ],
+        [
+          [55, 60, "error"],
+          [60, 61, null],
+          [61, 62, null],
+          [62, 66, "number"],
+          [66, 67, null]
+        ],
+        [
+          [68, 74, "def"],
+          [74, 75, null],
+          [75, 76, null],
+          [76, 81, "keyword"],
+          [81, 82, null]
+        ]
+      ]
+    },
+    {
+      "title": "token hook fallthrough, parser kinds, and copied continuation",
+      "config": {
+        "name": "scanner",
+        "lineComment": "%%",
+        "highlightNonStandardPropertyKeywords": false,
+        "hooks": "scanner"
+      },
+      "source": "@media screen {\r\n\ta {\r\n\t\tcolor? %start 🚀\r\n\r\n\t\tstill comment% red;\r\n\t\tbackground: ~{ shade };\r\n\t\taccent-color: red;\r\n\t}\r\n}\r\na[data~=value] { color: black; /* no block hook */ }\r\n@charset \"utf-8\";",
+      "lang": {
+        "name": "scanner",
+        "mergeTokens": true,
+        "commentTokens": {
+          "line": "%%",
+          "block": {
+            "open": "/*",
+            "close": "*/"
+          }
+        }
+      },
+      "indents": [
+        0,
+        2,
+        6,
+        10,
+        10,
+        6,
+        6,
+        2,
+        0,
+        0,
+        0
+      ],
+      "tokens": [
+        [
+          [0, 6, "meta"],
+          [6, 7, null],
+          [7, 13, "attribute"],
+          [13, 14, null],
+          [14, 15, null]
+        ],
+        [
+          [17, 18, null],
+          [18, 19, "tag"],
+          [19, 20, null],
+          [20, 21, null]
+        ],
+        [
+          [23, 25, null],
+          [25, 30, "property"],
+          [30, 31, null],
+          [31, 32, null],
+          [32, 43, "comment"]
+        ],
+        [],
+        [
+          [47, 63, "comment"],
+          [63, 64, null],
+          [64, 67, "keyword"],
+          [67, 68, null]
+        ],
+        [
+          [70, 72, null],
+          [72, 82, "property"],
+          [82, 83, null],
+          [83, 84, null],
+          [84, 86, "special"],
+          [86, 87, null],
+          [87, 92, "variable"],
+          [92, 93, null],
+          [93, 94, null],
+          [94, 95, null]
+        ],
+        [
+          [97, 99, null],
+          [99, 111, "property"],
+          [111, 112, null],
+          [112, 113, null],
+          [113, 116, "keyword"],
+          [116, 117, null]
+        ],
+        [
+          [119, 120, null],
+          [120, 121, null]
+        ],
+        [
+          [123, 124, null]
+        ],
+        [
+          [126, 127, "tag"],
+          [127, 128, null],
+          [128, 132, "tag"],
+          [132, 134, null],
+          [134, 139, "tag"],
+          [139, 140, null],
+          [140, 141, null],
+          [141, 142, null],
+          [142, 143, null],
+          [143, 148, "property"],
+          [148, 149, null],
+          [149, 150, null],
+          [150, 155, "keyword"],
+          [155, 156, null],
+          [156, 157, null],
+          [157, 158, null],
+          [158, 159, null],
+          [159, 160, null],
+          [160, 162, "error"],
+          [162, 163, null],
+          [163, 168, "error"],
+          [168, 169, null],
+          [169, 173, "error"],
+          [173, 174, null],
+          [174, 175, null],
+          [175, 176, null],
+          [176, 177, null],
+          [177, 178, null]
+        ],
+        [
+          [180, 188, "def"],
+          [188, 189, null],
+          [189, 196, "string"],
+          [196, 197, null]
+        ]
+      ]
+    }
+  ]
+}

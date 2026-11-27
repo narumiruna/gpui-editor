@@ -1,0 +1,16 @@
+[
+  {"label":"function","detail":"definition","text":"  function name(params) {\n    \n  }","stops":[[[11,15]],[[16,22]],[[30,30]]]},
+  {"label":"for","detail":"loop","text":"  for (let index = 0; index < bound; index++) {\n    \n  }","stops":[[[11,16],[22,27],[37,42]],[[30,35]],[[52,52]]]},
+  {"label":"for","detail":"of loop","text":"  for (let name of collection) {\n    \n  }","stops":[[[11,15]],[[19,29]],[[37,37]]]},
+  {"label":"do","detail":"loop","text":"  do {\n    \n  } while ()","stops":[[[11,11]],[[23,23]]]},
+  {"label":"while","detail":"loop","text":"  while () {\n    \n  }","stops":[[[9,9]],[[17,17]]]},
+  {"label":"try","detail":"/ catch block","text":"  try {\n    \n  } catch (error) {\n    \n  }","stops":[[[12,12]],[[24,29]],[[37,37]]]},
+  {"label":"if","detail":"block","text":"  if () {\n    \n  }","stops":[[[6,6]],[[14,14]]]},
+  {"label":"if","detail":"/ else block","text":"  if () {\n    \n  } else {\n    \n  }","stops":[[[6,6]],[[14,14]],[[30,30]]]},
+  {"label":"class","detail":"definition","text":"  class name {\n    constructor(params) {\n      \n    }\n  }","stops":[[[8,12]],[[31,37]],[[47,47]]]},
+  {"label":"import","detail":"named","text":"  import {names} from \"module\"\n  ","stops":[[[10,15]],[[23,29]],[[33,33]]]},
+  {"label":"import","detail":"default","text":"  import name from \"module\"\n  ","stops":[[[9,13]],[[20,26]],[[30,30]]]},
+  {"label":"interface","detail":"definition","text":"  interface name {\n    \n  }","stops":[[[12,16]],[[23,23]]]},
+  {"label":"type","detail":"definition","text":"  type name = type","stops":[[[7,11]],[[14,18]]]},
+  {"label":"enum","detail":"definition","text":"  enum name {\n    \n  }","stops":[[[7,11]],[[18,18]]]}
+]

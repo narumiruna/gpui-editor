@@ -1,0 +1,14 @@
+{"name":"isolated name","rgb":null}
+{"name":"standard parent","rgb":"e5c07b"}
+{"name":"standard ancestor","rgb":"e5c07b"}
+{"name":"same name other parent","rgb":"c678dd"}
+{"name":"modified standard ancestor","rgb":"61afef"}
+{"name":"multiple modifiers","rgb":"61afef"}
+{"name":"concrete identity","rgb":"123456"}
+{"name":"distinct same name identity","rgb":"654321"}
+{"name":"custom parent identity","rgb":"123456"}
+{"name":"independent same name","rgb":null}
+{"name":"modified custom parent","rgb":"112233"}
+{"name":"unmodified custom parent","rgb":"445566"}
+{"name":"child unmodified first","rgb":"334455"}
+{"name":"modified parent rejected","rejected":true}

@@ -1,0 +1,14 @@
+{"body":"😀 first row has very long words that wrap with a narrow viewport {\n  hidden text\n} suffix after the replacement which also wraps substantially\nunrelated last line","fold":[69,84]}
+{"name":"theme-only","mainIndex":2,"focused":false,"selections":[[7,7],[10,10],[165,84]],"blocks":[[0,69],[0,69],[84,145]],"content":[],"gutter":[]}
+{"name":"theme-only-focused","mainIndex":2,"focused":true,"selections":[[7,7],[10,10],[165,84]],"blocks":[[0,69],[0,69],[84,145]],"content":[],"gutter":[]}
+{"name":"line-only-light","mainIndex":2,"focused":false,"selections":[[7,7],[10,10],[165,84]],"blocks":[[0,69],[0,69],[84,145]],"content":[[0,3438214980],[84,3438214980]],"gutter":[]}
+{"name":"gutter-only-light","mainIndex":2,"focused":false,"selections":[[7,7],[10,10],[165,84]],"blocks":[[0,69],[0,69],[84,145]],"content":[],"gutter":[[0,3807576063],[84,3807576063]]}
+{"name":"both-one-dark-readonly-uneditable","mainIndex":2,"focused":false,"selections":[[7,7],[10,10],[165,84]],"blocks":[[0,69],[0,69],[84,145]],"content":[[0,1721368331],[84,1721368331]],"gutter":[[0,741423871],[84,741423871]]}
+{"name":"fold-start","mainIndex":0,"focused":false,"selections":[[165,5]],"blocks":[[0,145]],"content":[[0,1721368331]],"gutter":[[0,741423871]]}
+{"name":"fold-inside-hidden","mainIndex":0,"focused":false,"selections":[[165,72]],"blocks":[[0,145]],"content":[[0,1721368331]],"gutter":[]}
+{"name":"fold-visible-suffix","mainIndex":0,"focused":false,"selections":[[165,86]],"blocks":[[0,145]],"content":[[0,1721368331]],"gutter":[]}
+{"name":"unrelated","mainIndex":0,"focused":false,"selections":[[165,148]],"blocks":[[146,165]],"content":[[146,1721368331]],"gutter":[[146,741423871]]}
+{"name":"remove-gutter-opt-in","mainIndex":0,"focused":true,"selections":[[165,148]],"blocks":[[146,165]],"content":[[146,1721368331]],"gutter":[]}
+{"name":"remove-content-opt-in","mainIndex":0,"focused":true,"selections":[[165,148]],"blocks":[[146,165]],"content":[],"gutter":[[146,741423871]]}
+{"name":"remove-both-opt-ins","mainIndex":0,"focused":true,"selections":[[165,148]],"blocks":[[146,165]],"content":[],"gutter":[]}
+{"name":"no-theme-no-opt-ins","mainIndex":0,"focused":true,"selections":[[165,148]],"blocks":[[146,165]],"content":[],"gutter":[]}

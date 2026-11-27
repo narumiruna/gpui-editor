@@ -45,6 +45,7 @@ pub struct Section {
 pub enum BlockPreview {
     Code {
         body: String,
+        language: Option<String>,
     },
     Table {
         alignments: Vec<Alignment>,
@@ -55,7 +56,7 @@ pub enum BlockPreview {
 impl BlockPreview {
     fn consume(&mut self, event: Event<'_>) -> bool {
         match (self, event) {
-            (Self::Code { body }, Event::Text(text)) => body.push_str(&text),
+            (Self::Code { body, .. }, Event::Text(text)) => body.push_str(&text),
             (Self::Table { rows, .. }, Event::Start(Tag::TableHead | Tag::TableRow)) => {
                 rows.push(Vec::new());
             }
@@ -147,6 +148,9 @@ impl Document {
         Ok((range, text.len()))
     }
 }
+
+/// The range and text after applying Markdown edit rules.
+pub type PlannedReplacement<'text> = (Range<usize>, Cow<'text, str>);
 
 /// Parse Markdown and plan edits to its borrowed source.
 pub struct Markdown<'a> {
@@ -307,11 +311,18 @@ impl<'a> Markdown<'a> {
                 }
                 Event::Start(Tag::CodeBlock(kind)) => {
                     let body_end = matches!(kind, CodeBlockKind::Fenced(_)).then_some(source.start);
+                    let language = match kind {
+                        CodeBlockKind::Fenced(info) => {
+                            info.split_whitespace().next().map(str::to_owned)
+                        }
+                        CodeBlockKind::Indented => None,
+                    };
                     block_preview = Some((
                         Section::with_preview(
                             source,
                             BlockPreview::Code {
                                 body: String::new(),
+                                language,
                             },
                         ),
                         body_end,
@@ -411,16 +422,38 @@ impl<'a> Markdown<'a> {
     /// An active code draft permits edits to its own code preview, not other read-only sections.
     pub fn plan_replacement<'text>(
         &self,
+        range: Range<usize>,
+        text: &'text str,
+        active: Option<&Section>,
+    ) -> Result<PlannedReplacement<'text>, EditError> {
+        self.plan(&self.sections(), range, text, active)
+    }
+
+    /// Plan multiple edits against the same source using one parse.
+    /// The caller must check the planned ranges for overlap before applying them.
+    pub fn plan_replacements<'text>(
+        &self,
+        edits: impl IntoIterator<Item = (Range<usize>, &'text str)>,
+    ) -> Result<Vec<PlannedReplacement<'text>>, EditError> {
+        let sections = self.sections();
+        edits
+            .into_iter()
+            .map(|(range, text)| self.plan(&sections, range, text, None))
+            .collect()
+    }
+
+    fn plan<'text>(
+        &self,
+        sections: &[Section],
         mut range: Range<usize>,
         text: &'text str,
         active: Option<&Section>,
-    ) -> Result<(Range<usize>, Cow<'text, str>), EditError> {
+    ) -> Result<PlannedReplacement<'text>, EditError> {
         use SectionKind as K;
 
         if self.source.get(range.clone()).is_none() {
             return Err(EditError::InvalidRange);
         }
-        let sections = self.sections();
         if active.is_none() && text.is_empty() && !range.is_empty() {
             // Sections are sorted outermost first. Remove inner spans first so
             // an enclosing span also goes away if it becomes empty.

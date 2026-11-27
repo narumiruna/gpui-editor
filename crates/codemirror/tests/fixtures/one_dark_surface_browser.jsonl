@@ -1,0 +1,10 @@
+{"name":"bare","dark":false,"foreground":"000000ff","background":"00000000"}
+{"name":"hostOnly","dark":false,"foreground":"304050ff","background":"102030ff"}
+{"name":"viewHostFirst","dark":true,"foreground":"304050ff","background":"102030ff"}
+{"name":"viewHostSecond","dark":true,"foreground":"abb2bfff","background":"282c34ff"}
+{"name":"onlyForegroundWins","dark":true,"foreground":"304050ff","background":"282c34ff"}
+{"name":"bothPropertiesWin","dark":true,"foreground":"304050ff","background":"102030ff"}
+{"name":"higherPrecedence","dark":true,"foreground":"304050ff","background":"102030ff"}
+{"name":"lowerPrecedence","dark":true,"foreground":"abb2bfff","background":"282c34ff"}
+{"name":"foregroundOnly","dark":false,"foreground":"304050ff","background":"00000000"}
+{"name":"removed","dark":false,"foreground":"000000ff","background":"00000000"}

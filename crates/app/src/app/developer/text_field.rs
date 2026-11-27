@@ -19,9 +19,15 @@ const MAX_BYTES: usize = 16 * 1024;
 const FEEDBACK_CONTEXT: &str = "FeedbackTextField";
 const SEARCH_CONTEXT: &str = "SearchTextField";
 const PALETTE_CONTEXT: &str = "PaletteTextField";
+const FIND_CONTEXT: &str = "DocumentFindTextField";
 
 /// The user pressed Enter in the search field without an active IME composition.
 pub struct SearchSubmitted;
+
+pub(crate) enum FindInput {
+    Next,
+    Previous,
+}
 
 pub(crate) enum PaletteInput {
     Previous,
@@ -29,11 +35,11 @@ pub(crate) enum PaletteInput {
     Run,
 }
 
-#[derive(Clone, Copy)]
 enum Mode {
     Feedback,
     Search,
     Palette,
+    Find(&'static str, FieldColorSource),
 }
 
 struct KeysInstalled;
@@ -58,10 +64,14 @@ actions!(
         Delete,
         Newline,
         SubmitSearch,
+        SubmitFind,
+        FindPrevious,
         RunPalette,
         KeepPaletteFocus,
     ]
 );
+
+type FieldColorSource = Box<dyn Fn(&App) -> Option<FieldColors>>;
 
 pub struct TextField {
     mode: Mode,
@@ -88,6 +98,18 @@ impl TextField {
         Self::with_mode(Mode::Search, cx)
     }
 
+    pub(crate) fn document_find(
+        id: &'static str,
+        text: String,
+        panel_colors: impl Fn(&App) -> Option<FieldColors> + 'static,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut field = Self::with_mode(Mode::Find(id, Box::new(panel_colors)), cx);
+        field.cursor = text.len();
+        field.text = text;
+        field
+    }
+
     pub(crate) fn palette(cx: &mut Context<Self>) -> Self {
         Self::with_mode(Mode::Palette, cx)
     }
@@ -100,7 +122,14 @@ impl TextField {
             } else {
                 ["home", "end", "shift-home", "shift-end"]
             };
-        for context in [FEEDBACK_CONTEXT, SEARCH_CONTEXT, PALETTE_CONTEXT].map(Some) {
+        for context in [
+            FEEDBACK_CONTEXT,
+            SEARCH_CONTEXT,
+            PALETTE_CONTEXT,
+            FIND_CONTEXT,
+        ]
+        .map(Some)
+        {
             cx.bind_keys([
                 KeyBinding::new("left", Left, context),
                 KeyBinding::new("right", Right, context),
@@ -128,6 +157,8 @@ impl TextField {
             KeyBinding::new("shift-enter", Newline, feedback),
             KeyBinding::new("enter", SubmitSearch, Some(SEARCH_CONTEXT)),
             KeyBinding::new("shift-enter", Newline, Some(SEARCH_CONTEXT)),
+            KeyBinding::new("enter", SubmitFind, Some(FIND_CONTEXT)),
+            KeyBinding::new("shift-enter", FindPrevious, Some(FIND_CONTEXT)),
             KeyBinding::new("up", Up, Some(PALETTE_CONTEXT)),
             KeyBinding::new("down", Down, Some(PALETTE_CONTEXT)),
             KeyBinding::new("enter", RunPalette, Some(PALETTE_CONTEXT)),
@@ -166,7 +197,12 @@ impl TextField {
         self.marked.is_some()
     }
 
-    pub(super) fn set_editable(&mut self, editable: bool, cx: &mut Context<Self>) {
+    #[cfg(test)]
+    pub(crate) fn painted_colors(&self) -> FieldColors {
+        self.layout.as_ref().expect("painted field").colors
+    }
+
+    pub(crate) fn set_editable(&mut self, editable: bool, cx: &mut Context<Self>) {
         self.editable = editable;
         cx.notify();
     }
@@ -197,7 +233,7 @@ impl TextField {
         }
         let text = match self.mode {
             Mode::Feedback => Cow::Borrowed(text),
-            Mode::Search | Mode::Palette => single_line(text),
+            Mode::Search | Mode::Palette | Mode::Find(..) => single_line(text),
         };
         let available = MAX_BYTES - (self.text.len() - range.len());
         let inserted = &text[..text.floor_char_boundary(available)];
@@ -319,6 +355,7 @@ impl TextField {
 }
 
 impl EventEmitter<SearchSubmitted> for TextField {}
+impl EventEmitter<FindInput> for TextField {}
 impl EventEmitter<PaletteInput> for TextField {}
 
 impl Focusable for TextField {
@@ -502,26 +539,29 @@ impl Row {
 }
 
 #[derive(Clone, Copy)]
-struct FieldColors {
-    surface: Rgba,
-    border: Rgba,
-    text: Rgba,
-    accent: Rgba,
-    selection: Rgba,
+#[cfg_attr(test, derive(Debug, PartialEq))]
+pub(crate) struct FieldColors {
+    pub surface: Rgba,
+    pub border: Rgba,
+    pub text: Rgba,
+    pub accent: Rgba,
+    pub selection: Rgba,
 }
 
 struct Layout {
     origin: Point<Pixels>,
     line_height: Pixels,
     rows: Vec<Row>,
+    #[cfg(test)]
+    colors: FieldColors,
 }
 
 impl Layout {
-    fn shape(text: &str, color: Rgba, window: &Window) -> Self {
+    fn shape(text: &str, colors: FieldColors, window: &Window) -> Self {
         let mut run = TextRun {
             len: 0,
             font: window.text_style().font(),
-            color: color.into(),
+            color: colors.text.into(),
             background_color: None,
             underline: None,
             strikethrough: None,
@@ -544,6 +584,8 @@ impl Layout {
             origin: Point::default(),
             line_height: px(20.),
             rows,
+            #[cfg(test)]
+            colors,
         }
     }
 
@@ -673,7 +715,7 @@ impl Render for TextField {
                 cx.notify();
             }));
         }
-        let (id, key_context, field_height, colors) = match self.mode {
+        let (id, key_context, field_height, colors) = match &self.mode {
             Mode::Feedback => (
                 "feedback-text-field",
                 FEEDBACK_CONTEXT,
@@ -686,32 +728,30 @@ impl Render for TextField {
                     selection: rgba(0x4a86ed50),
                 },
             ),
-            Mode::Search | Mode::Palette => {
-                let theme = Theme::for_window(window);
-                let (id, context) = if matches!(self.mode, Mode::Palette) {
-                    ("palette-text-field", PALETTE_CONTEXT)
-                } else {
-                    ("search-text-field", SEARCH_CONTEXT)
+            mode => {
+                let (id, context, panel_colors) = match mode {
+                    Mode::Palette => ("palette-text-field", PALETTE_CONTEXT, None),
+                    Mode::Search => ("search-text-field", SEARCH_CONTEXT, None),
+                    Mode::Find(id, source) => (*id, FIND_CONTEXT, source(cx)),
+                    Mode::Feedback => unreachable!(),
                 };
-                (
-                    id,
-                    context,
-                    px(38.),
+                let mut colors = panel_colors.unwrap_or_else(|| {
+                    let theme = Theme::for_window(window);
                     FieldColors {
                         surface: theme.surface,
-                        border: if self.focus.is_focused(window) {
-                            theme.accent
-                        } else {
-                            theme.border
-                        },
+                        border: theme.border,
                         text: theme.text,
                         accent: theme.accent,
                         selection: theme.selection,
-                    },
-                )
+                    }
+                });
+                if self.focus.is_focused(window) {
+                    colors.border = colors.accent;
+                }
+                (id, context, px(38.), colors)
             }
         };
-        let layout = Layout::shape(self.text(), colors.text, window);
+        let layout = Layout::shape(self.text(), colors, window);
         let width = layout
             .rows
             .iter()
@@ -733,7 +773,7 @@ impl Render for TextField {
             .bg(colors.surface)
             .map(|element| match self.mode {
                 Mode::Feedback => element.overflow_scroll(),
-                Mode::Search | Mode::Palette => element
+                Mode::Search | Mode::Palette | Mode::Find(..) => element
                     .tab_index(0)
                     .flex_none()
                     .overflow_y_hidden()
@@ -794,6 +834,19 @@ impl Render for TextField {
                         cx.emit(SearchSubmitted);
                     }
                 }))
+            })
+            .when(matches!(self.mode, Mode::Find(..)), |element| {
+                element
+                    .on_action(cx.listener(|e, _: &SubmitFind, _, cx| {
+                        if e.editable && !e.is_composing() {
+                            cx.emit(FindInput::Next);
+                        }
+                    }))
+                    .on_action(cx.listener(|e, _: &FindPrevious, _, cx| {
+                        if e.editable && !e.is_composing() {
+                            cx.emit(FindInput::Previous);
+                        }
+                    }))
             })
             .when(matches!(self.mode, Mode::Palette), |element| {
                 element

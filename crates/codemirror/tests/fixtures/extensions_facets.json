@@ -1,0 +1,40 @@
+{
+  "pin": {"name":"@codemirror/state","version":"6.7.6","integrity":"sha512-kAz+AncRtKuIknedxT1bq4XwXv4UowhbkHU1myPrtVb/jZtImWuV5BXzv5vK6i3kYACsdiZiQKFQQ5Mq7elW8w=="},
+  "dependencies": [
+    {"calls":[1,1,1,1,1,0],"values":[[2],[0],[99],[0],[10],[10]],"reused":[false,false,false,false,false,false]},
+    {"calls":[1,1,1,1,1,0],"values":[[2],[0],[99],[0],[10],[10]],"reused":[true,true,true,true,true,true]},
+    {"calls":[1,2,1,1,1,0],"values":[[2],[0],[99],[0],[10],[10]],"reused":[true,false,true,true,true,true]},
+    {"calls":[1,3,1,1,1,0],"values":[[2],[1],[99],[0],[10],[10]],"reused":[true,false,true,true,true,true]},
+    {"calls":[2,4,1,1,1,0],"values":[[3],[1],[99],[0],[10],[10]],"reused":[false,false,true,true,true,true]},
+    {"calls":[2,4,1,2,2,0],"values":[[3],[1],[99],[1],[10],[11]],"reused":[true,true,true,false,true,false]},
+    {"calls":[2,4,1,2,2,0],"values":[[3],[1],[99],[1],[10],[11]],"reused":[true,true,true,true,true,true]},
+    {"calls":[2,4,1,2,2,0],"values":[[3],[1],[99],[1],[10],[11]],"reused":[true,true,true,true,true,true]},
+    {"calls":[2,4,1,2,3,0],"values":[[3],[1],[99],[1],[20],[21]],"reused":[true,true,true,true,false,false]},
+    {"calls":[2,4,1,2,3,0],"values":[[3],[1],[99],[1],[20],[21]],"reused":[true,true,true,true,true,true]},
+    {"calls":[3,5,1,3,4,0],"values":[[4],[1],[99],[2],[20],[22]],"reused":[false,false,true,false,true,false]},
+    {"calls":[4,6,1,3,4,2],"values":[[502,5],[1],[99],[2],[20],[22]],"reused":[false,false,true,true,true,true]},
+    {"calls":[4,6,1,3,4,2],"values":[[5],[1],[99],[2],[20],[22]],"reused":[false,true,true,true,true,true]},
+    {"calls":[4,6,1,3,4,3],"values":[[503,5],[1],[99],[2],[20],[22]],"reused":[false,true,true,true,true,true]}
+  ],
+  "comparisons": [
+    {"value":{"sum":14,"labels":"s:a,fixed,m:a:0,m:a:1"},"reused":false,"derivedReused":false,"events":[["combine",""],["single","a"],["multi","a"],["combine","s:a,fixed,m:a:0,m:a:1"],["dependent","s:a,fixed,m:a:0,m:a:1"]]},
+    {"value":{"sum":14,"labels":"s:a,fixed,m:a:0,m:a:1"},"reused":true,"derivedReused":true,"events":[["single","b"],["input","s:b","s:a"],["multi","b"],["input","m:b:0","m:a:0"],["input","m:b:1","m:a:1"]]},
+    {"value":{"sum":14,"labels":"s:a,fixed,m:a:0,m:a:1"},"reused":true,"derivedReused":true,"events":[["single","c"],["input","s:c","s:a"],["multi","c"],["input","m:c:0","m:a:0"],["input","m:c:1","m:a:1"],["combine","s:c,fixed,m:c:0,m:c:1"],["output","s:c,fixed,m:c:0,m:c:1","s:a,fixed,m:a:0,m:a:1"]]},
+    {"value":{"sum":15,"labels":"s:c,fixed,m:d:0"},"reused":false,"derivedReused":false,"events":[["single","d"],["input","s:d","s:c"],["multi","d"],["combine","s:c,fixed,m:d:0"],["output","s:c,fixed,m:d:0","s:a,fixed,m:a:0,m:a:1"],["dependent","s:c,fixed,m:d:0"]]},
+    {"value":{"sum":15,"labels":"s:c,fixed,m:d:0"},"reused":true,"derivedReused":true,"events":[["single","e"],["input","s:e","s:c"],["multi","e"],["input","m:e:0","m:d:0"]]},
+    {"value":{"sum":12,"labels":"s:c,fixed"},"reused":false,"derivedReused":false,"events":[["single","f"],["input","s:f","s:c"],["multi","f"],["combine","s:c,fixed"],["output","s:c,fixed","s:c,fixed,m:d:0"],["dependent","s:c,fixed"]]},
+    {"value":{"sum":12,"labels":"s:c,fixed"},"reused":true,"derivedReused":true,"events":[["combine","s:c,fixed"],["output","s:c,fixed","s:c,fixed"]]},
+    {"value":{"sum":12,"labels":"s:c,fixed"},"reused":true,"derivedReused":true,"events":[["single","f"],["combine","s:f,fixed"],["output","s:f,fixed","s:c,fixed"]]},
+    {"value":{"sum":12,"labels":"s:c,fixed"},"reused":true,"derivedReused":true,"events":[["combine","static,fixed"],["output","static,fixed","s:c,fixed"]]},
+    {"value":{"sum":12,"labels":"s:c,fixed"},"reused":true,"derivedReused":true,"events":[["single","f"],["multi","f"],["combine","s:f,fixed"],["output","s:f,fixed","s:c,fixed"]]}
+  ],
+  "staticAndDefault": [
+    {"value":{"n":0,"tag":""},"reused":false,"list":[],"listReused":false,"calls":[["combine",""]]},
+    {"value":{"n":0,"tag":""},"reused":true,"list":[],"listReused":true,"calls":[["combine","zero"],["compare","zero",""]]},
+    {"value":{"n":0,"tag":""},"reused":true,"list":[1],"listReused":false,"calls":[]},
+    {"value":{"n":1,"tag":"one"},"reused":false,"list":[1],"listReused":true,"calls":[["combine","one"],["compare","one",""]]},
+    {"value":{"n":1,"tag":"one"},"reused":true,"list":[1],"listReused":false,"calls":[]},
+    {"value":{"n":0,"tag":"zero"},"reused":false,"list":[1],"listReused":true,"calls":[["combine","zero"],["compare","zero","one"]]},
+    {"value":{"n":0,"tag":""},"reused":false,"list":[],"listReused":false,"calls":[]}
+  ]
+}

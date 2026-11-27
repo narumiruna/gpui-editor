@@ -1,0 +1,403 @@
+{
+  "indentInputs": ["","name","{","}","]",")","  }","end","else extra","endé","ending"," {% end %} ","end!","  {% } %}","\t[","some end"],
+  "triggers": ["","}","\t}","﻿)",")","}","{","[","]",")"," ) ","x}","}\n","end","splitend","  elsif","ensure","rescue","else","end?"],
+  "modes": {
+    "elm": {
+      "name": "elm",
+      "data": {"commentTokens":{"line":"--"}},
+      "mergeTokens": true,
+      "triggers": [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],
+      "cases": {
+        "basics": {
+          "source": "module Main exposing (..)\nimport Html as H\nport run : Int\nvalue Arg0 = if x_2 then _ else bad?+^|\n  case of alias type where let in\ndef _name [x, Y] <| \t 🙂 café\n1 007 0XBeef 0x 45. 1e- 3E+05 0.1e2 ٠ -- end",
+          "tokens": [
+            [[0,6,"keyword"],[6,7,null],[7,11,"type"],[11,12,null],[12,20,"keyword"],[20,21,null],[21,22,"builtin"],[22,24,"keyword"],[24,25,"builtin"]],
+            [[26,32,"keyword"],[32,33,null],[33,37,"type"],[37,38,null],[38,40,"keyword"],[40,41,null],[41,42,"type"]],
+            [[43,47,"keyword"],[47,48,null],[48,51,"variable"],[51,52,null],[52,53,"keyword"],[53,54,null],[54,57,"type"]],
+            [[58,63,"def"],[63,64,null],[64,68,"type"],[68,69,null],[69,70,"keyword"],[70,71,null],[71,73,"keyword"],[73,74,null],[74,77,"variable"],[77,78,null],[78,82,"keyword"],[82,83,null],[83,84,"keyword"],[84,85,null],[85,89,"keyword"],[89,90,null],[90,93,"variable"],[93,97,"keyword"]],
+            [[98,100,null],[100,104,"keyword"],[104,105,null],[105,107,"keyword"],[107,108,null],[108,113,"keyword"],[113,114,null],[114,118,"keyword"],[118,119,null],[119,124,"keyword"],[124,125,null],[125,128,"keyword"],[128,129,null],[129,131,"keyword"]],
+            [[132,135,"def"],[135,136,null],[136,137,"keyword"],[137,141,"variable"],[141,142,null],[142,143,"builtin"],[143,144,"variable"],[144,145,"builtin"],[145,146,null],[146,147,"type"],[147,148,"builtin"],[148,149,null],[149,151,"keyword"],[151,152,null],[152,153,"error"],[153,155,"error"],[155,159,"error"],[159,160,null],[160,163,"variable"],[163,165,"error"]],
+            [[166,167,"number"],[167,168,null],[168,169,"number"],[169,170,"number"],[170,171,"number"],[171,172,null],[172,178,"number"],[178,179,null],[179,181,"number"],[181,182,null],[182,185,"number"],[185,186,null],[186,189,"number"],[189,190,null],[190,195,"number"],[195,196,null],[196,201,"number"],[201,202,null],[202,204,"error"],[204,205,null],[205,211,"comment"]]
+          ],
+          "retries": [],
+          "indents": [null,null,null,null,null,null,null],
+          "lastIndents": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        },
+        "state": {
+          "source": "f = {- outer {- inner\n\nif\n -} still outer\n-} g -- more\ng = \"\"\"one\nthen\ntwo \"\" mid \"\"\" Tail\nh = [glsl|void\ntype\n|] End\nc = \"\" 'a' \"escape\\\"ok\" '\\''\nd = \"oops\nafter = 'oops\ngood = \"a\" \\\"b\" tail",
+          "tokens": [
+            [[0,1,"def"],[1,2,null],[2,3,"keyword"],[3,4,null],[4,21,"comment"]],
+            [],
+            [[23,25,"keyword"]],
+            [[26,41,"comment"]],
+            [[42,44,"comment"],[44,45,null],[45,46,"variable"],[46,47,null],[47,54,"comment"]],
+            [[55,56,"def"],[56,57,null],[57,58,"keyword"],[58,59,null],[59,65,"string"]],
+            [[66,70,"keyword"]],
+            [[71,85,"string"],[85,86,null],[86,90,"type"]],
+            [[91,92,"def"],[92,93,null],[93,94,"keyword"],[94,95,null],[95,105,"string"]],
+            [[106,110,"keyword"]],
+            [[111,113,"string"],[113,114,null],[114,117,"type"]],
+            [[118,119,"def"],[119,120,null],[120,121,"keyword"],[121,122,null],[122,124,"string"],[124,125,null],[125,146,"string"]],
+            [[147,148,"def"],[148,149,null],[149,150,"keyword"],[150,151,null],[151,156,"error"]],
+            [[157,162,"def"],[162,163,null],[163,164,"keyword"],[164,165,null],[165,170,"error"]],
+            [[171,175,"def"],[175,176,null],[176,177,"keyword"],[177,178,null],[178,186,"string"],[186,187,null],[187,191,"variable"]]
+          ],
+          "retries": [],
+          "indents": [null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],
+          "lastIndents": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        },
+        "comment_pending": {
+          "source": "{- outer {- inner\n -} still outer",
+          "tokens": [
+            [[0,17,"comment"]],
+            [[18,33,"comment"]]
+          ],
+          "retries": [],
+          "indents": [null,null],
+          "lastIndents": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        },
+        "glsl_pending": {
+          "source": "[glsl|source\n  no end",
+          "tokens": [
+            [[0,12,"string"]],
+            [[13,21,"string"]]
+          ],
+          "retries": [],
+          "indents": [null,null],
+          "lastIndents": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        }
+      }
+    },
+    "swift": {
+      "name": "swift",
+      "data": {"commentTokens":{"line":"//","block":{"open":"/*","close":"*/"}},"closeBrackets":{"brackets":["(","[","{","'","\"","`"]}},
+      "mergeTokens": true,
+      "triggers": [false,true,true,true,false,true,false,false,true,true,false,false,false,false,false,false,false,false,false,false],
+      "cases": {
+        "basics": {
+          "source": "#if #line42 @available @$3 @`class` @? .bare .`if` .$12\nlet café = 2; let `class` = nil; actor Worker\nfunc /* comment */ name(_ x: Int, value: UInt) -> Void {\n\tvar value = self.foo\n  for item in Array { await item() }\n}\n-0b10_1 0o7_6 -0x8.fp-3 0x9P8 3e-2 3E+2 -42.0_0...x 0. 0XFF\n().. .. ... @ !~+= `unclosed $0 $$ foo$3 é 🙂\n  break default Any AnyObject Self Type super String __LINE__",
+          "tokens": [
+            [[0,3,"builtin"],[3,4,null],[4,9,"builtin"],[9,11,"number"],[11,12,null],[12,22,"attribute"],[22,23,null],[23,26,"attribute"],[26,27,null],[27,35,"attribute"],[35,36,null],[36,37,null],[37,38,"operator"],[38,39,null],[39,44,"property"],[44,45,null],[45,50,"property"],[50,51,null],[51,55,"property"]],
+            [[56,59,"keyword"],[59,60,null],[60,63,"def"],[63,65,null],[65,66,null],[66,67,"operator"],[67,68,null],[68,69,"number"],[69,70,"punctuation"],[70,71,null],[71,74,"keyword"],[74,75,null],[75,82,"def"],[82,83,null],[83,84,"operator"],[84,85,null],[85,88,"atom"],[88,89,"punctuation"],[89,90,null],[90,95,"keyword"],[95,96,null],[96,102,"def"]],
+            [[103,107,"keyword"],[107,108,null],[108,121,"comment"],[121,122,null],[122,126,"def"],[126,127,"punctuation"],[127,128,"atom"],[128,129,null],[129,130,"variable"],[130,131,"punctuation"],[131,132,null],[132,135,"type"],[135,136,"punctuation"],[136,137,null],[137,142,"variable"],[142,143,"punctuation"],[143,144,null],[144,148,"variable"],[148,149,"punctuation"],[149,150,null],[150,151,"operator"],[151,152,"operator"],[152,153,null],[153,157,"type"],[157,158,null],[158,159,"punctuation"]],
+            [[160,161,null],[161,164,"keyword"],[164,165,null],[165,170,"def"],[170,171,null],[171,172,"operator"],[172,173,null],[173,177,"atom"],[177,181,"property"]],
+            [[182,184,null],[184,187,"keyword"],[187,188,null],[188,192,"def"],[192,193,null],[193,195,"keyword"],[195,196,null],[196,201,"type"],[201,202,null],[202,203,"punctuation"],[203,204,null],[204,209,"keyword"],[209,210,null],[210,214,"variable"],[214,215,"punctuation"],[215,216,"punctuation"],[216,217,null],[217,218,"punctuation"]],
+            [[219,220,"punctuation"]],
+            [[221,228,"number"],[228,229,null],[229,234,"number"],[234,235,null],[235,244,"number"],[244,245,null],[245,250,"number"],[250,251,null],[251,255,"number"],[255,256,null],[256,257,"number"],[257,258,"variable"],[258,259,"operator"],[259,260,"number"],[260,261,null],[261,268,"number"],[268,271,"punctuation"],[271,272,"variable"],[272,273,null],[273,274,"number"],[274,275,"punctuation"],[275,276,null],[276,277,"number"],[277,280,"variable"]],
+            [[281,282,"punctuation"],[282,285,"punctuation"],[285,286,null],[286,287,"punctuation"],[287,288,"punctuation"],[288,289,null],[289,292,"punctuation"],[292,293,null],[293,294,null],[294,295,null],[295,296,"operator"],[296,297,"operator"],[297,298,"operator"],[298,299,"operator"],[299,300,null],[300,301,null],[301,309,"variable"],[309,310,null],[310,312,"variable"],[312,313,null],[313,314,null],[314,315,null],[315,316,null],[316,321,"variable"],[321,322,null],[322,324,null],[324,325,null],[325,329,null]],
+            [[330,332,null],[332,337,"keyword"],[337,338,null],[338,345,"keyword"],[345,346,null],[346,349,"keyword"],[349,350,null],[350,359,"keyword"],[359,360,null],[360,364,"keyword"],[364,365,null],[365,369,"keyword"],[369,370,null],[370,375,"atom"],[375,376,null],[376,382,"type"],[382,383,null],[383,391,"keyword"]]
+          ],
+          "retries": [],
+          "indents": [0,0,0,2,2,0,0,0,0],
+          "lastIndents": [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]
+        },
+        "state": {
+          "source": "func /* outer /* nested */\n    next */ thing() {\n  let a = \"not continued\n next\n  let b = \"a \\(foo(1, 'z')) end\"\n  let c = \"\"\"\n\n  triple \\(foo(\"inside \\(x)\")\n       ) rest\n  \"\"\"\n  // comment\n}",
+          "tokens": [
+            [[0,4,"keyword"],[4,5,null],[5,26,"comment"]],
+            [[27,38,"comment"],[38,39,null],[39,44,"def"],[44,45,"punctuation"],[45,46,"punctuation"],[46,47,null],[47,48,"punctuation"]],
+            [[49,51,null],[51,54,"keyword"],[54,55,null],[55,56,"def"],[56,57,null],[57,58,"operator"],[58,59,null],[59,73,"string"]],
+            [[74,75,null],[75,79,"variable"]],
+            [[80,82,null],[82,85,"keyword"],[85,86,null],[86,87,"def"],[87,88,null],[88,89,"operator"],[89,90,null],[90,95,"string"],[95,98,"variable"],[98,99,"punctuation"],[99,100,"number"],[100,101,"punctuation"],[101,102,null],[102,105,"string"],[105,106,"punctuation"],[106,112,"string"]],
+            [[113,115,null],[115,118,"keyword"],[118,119,null],[119,120,"def"],[120,121,null],[121,122,"operator"],[122,123,null],[123,126,"string"]],
+            [],
+            [[128,139,"string"],[139,142,"variable"],[142,143,"punctuation"],[143,153,"string"],[153,154,"variable"],[154,156,"string"],[156,157,"punctuation"]],
+            [[158,165,null],[165,171,"string"]],
+            [[172,177,"string"]],
+            [[178,180,null],[180,190,"comment"]],
+            [[191,192,"punctuation"]]
+          ],
+          "retries": [],
+          "indents": [0,0,2,2,2,2,2,2,0,2,2,0],
+          "lastIndents": [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]
+        },
+        "align_pending": {
+          "source": "\tlet xs = [1,\n     foo(",
+          "tokens": [
+            [[0,1,null],[1,4,"keyword"],[4,5,null],[5,7,"def"],[7,8,null],[8,9,"operator"],[9,10,null],[10,11,"punctuation"],[11,12,"number"],[12,13,"punctuation"]],
+            [[14,19,null],[19,22,"variable"],[22,23,"punctuation"]]
+          ],
+          "retries": [],
+          "indents": [0,14],
+          "lastIndents": [[7,8],[7,8],[7,8],[5,5],[5,5],[5,5],[7,8],[7,8],[7,8],[7,8],[7,8],[7,8],[7,8],[7,8],[7,8],[7,8]]
+        },
+        "comment_pending": {
+          "source": "call( // trailing comment\n  /* outer /* inner\n  inner end */\n  still outer",
+          "tokens": [
+            [[0,4,"variable"],[4,5,"punctuation"],[5,6,null],[6,25,"comment"]],
+            [[26,28,null],[28,45,"comment"]],
+            [[46,60,"comment"]],
+            [[61,74,"comment"]]
+          ],
+          "retries": [],
+          "indents": [0,2,2,2],
+          "lastIndents": [[2,3],[2,3],[2,3],[0,0],[0,0],[0,0],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3]]
+        },
+        "interpolation_pending": {
+          "source": "let z = \"interpolation \\(call(0,",
+          "tokens": [
+            [[0,3,"keyword"],[3,4,null],[4,5,"def"],[5,6,null],[6,7,"operator"],[7,8,null],[8,25,"string"],[25,29,"variable"],[29,30,"punctuation"],[30,31,"number"],[31,32,"punctuation"]]
+          ],
+          "retries": [],
+          "indents": [0],
+          "lastIndents": [[30,30],[30,30],[30,30],[29,29],[29,29],[29,29],[30,30],[30,30],[30,30],[30,30],[30,30],[30,30],[30,30],[30,30],[30,30],[30,30]]
+        },
+        "punctuation_alignment": {
+          "source": "call(..a,\n     b),\n\t[/* note */ 1,\n  ]\n\t[  \n  1,\n]",
+          "tokens": [
+            [[0,4,"variable"],[4,7,"punctuation"],[7,8,"variable"],[8,9,"punctuation"]],
+            [[10,15,null],[15,16,"variable"],[16,17,"punctuation"],[17,18,"punctuation"]],
+            [[19,20,null],[20,21,"punctuation"],[21,31,"comment"],[31,32,null],[32,33,"number"],[33,34,"punctuation"]],
+            [[35,37,null],[37,38,"punctuation"]],
+            [[39,40,null],[40,41,"punctuation"],[41,43,null]],
+            [[44,46,null],[46,47,"number"],[47,48,"punctuation"]],
+            [[49,50,"punctuation"]]
+          ],
+          "retries": [],
+          "indents": [0,5,0,4,0,6,4],
+          "lastIndents": [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]
+        }
+      }
+    },
+    "d": {
+      "name": "d",
+      "data": {"commentTokens":{"line":"//","block":{"open":"/*","close":"*/"}}},
+      "mergeTokens": true,
+      "triggers": [false,true,true,false,false,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false],
+      "cases": {
+        "basics": {
+          "source": "module sample; import std.stdio;\n@safe @$x9 @é size_t short wchar true null failure\nint café = 42foo..; auto x = 0xg!; !<++/= ^abc `raw`\n// comment\n/+ outer /+ nested +/ after +/\nif (x) { out {} else { foo; } }\na = foo([1,\n         2]);\ncall(\n  one,\n  two);",
+          "tokens": [
+            [[0,6,"keyword"],[6,7,null],[7,13,"variable"],[13,14,null],[14,15,null],[15,21,"keyword"],[21,22,null],[22,25,"variable"],[25,26,null],[26,31,"variable"],[31,32,null]],
+            [[33,38,"meta"],[38,39,null],[39,43,"meta"],[43,44,null],[44,45,"meta"],[45,47,"variable"],[47,48,null],[48,54,"builtin"],[54,55,null],[55,60,"keyword"],[60,61,null],[61,66,"builtin"],[66,67,null],[67,71,"atom"],[71,72,null],[72,76,"atom"],[76,77,null],[77,84,"atom"]],
+            [[85,88,"builtin"],[88,89,null],[89,94,"variable"],[94,95,null],[95,96,"operator"],[96,97,null],[97,104,"number"],[104,105,null],[105,106,null],[106,110,"keyword"],[110,111,null],[111,112,"variable"],[112,113,null],[113,114,"operator"],[114,115,null],[115,118,"number"],[118,119,"operator"],[119,120,null],[120,121,null],[121,127,"operator"],[127,128,null],[128,132,"variable"],[132,133,null],[133,138,"string"]],
+            [[139,149,"comment"]],
+            [[150,171,"comment"],[171,172,null],[172,177,"variable"],[177,178,null],[178,180,"operator"]],
+            [[181,183,"keyword"],[183,184,null],[184,185,null],[185,186,"variable"],[186,187,null],[187,188,null],[188,189,null],[189,190,null],[190,193,"keyword"],[193,194,null],[194,195,null],[195,196,null],[196,197,null],[197,201,"keyword"],[201,202,null],[202,203,null],[203,204,null],[204,207,"variable"],[207,208,null],[208,209,null],[209,210,null],[210,211,null],[211,212,null]],
+            [[213,214,"variable"],[214,215,null],[215,216,"operator"],[216,217,null],[217,220,"variable"],[220,221,null],[221,222,null],[222,223,"number"],[223,224,null]],
+            [[225,234,null],[234,235,"number"],[235,236,null],[236,237,null],[237,238,null]],
+            [[239,243,"variable"],[243,244,null]],
+            [[245,247,null],[247,250,"variable"],[250,251,null]],
+            [[252,254,null],[254,257,"variable"],[257,258,null],[258,259,null]]
+          ],
+          "retries": [],
+          "indents": [0,0,2,2,2,2,0,9,0,2,2],
+          "lastIndents": [[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1]]
+        },
+        "state": {
+          "source": "void main()\n{\n\tif (x)\n\t  call(\n\t    a,\n\t    b);\n\t/* start\n\n\t  still comment */ @safe\n\tx = \"string\\\n\t  more\";\n`unfinished\nnormal\n}",
+          "tokens": [
+            [[0,4,"builtin"],[4,5,null],[5,9,"variable"],[9,10,null],[10,11,null]],
+            [[12,13,null]],
+            [[14,15,null],[15,17,"keyword"],[17,18,null],[18,19,null],[19,20,"variable"],[20,21,null]],
+            [[22,25,null],[25,29,"variable"],[29,30,null]],
+            [[31,36,null],[36,37,"variable"],[37,38,null]],
+            [[39,44,null],[44,45,"variable"],[45,46,null],[46,47,null]],
+            [[48,49,null],[49,57,"comment"]],
+            [],
+            [[59,62,null],[62,78,"comment"],[78,79,null],[79,84,"meta"]],
+            [[85,86,null],[86,87,"variable"],[87,88,null],[88,89,"operator"],[89,90,null],[90,98,"string"]],
+            [[99,102,null],[102,107,"string"],[107,108,null]],
+            [[109,120,"string"]],
+            [[121,127,"variable"]],
+            [[128,129,null]]
+          ],
+          "retries": [],
+          "indents": [0,0,2,6,6,6,2,null,null,2,null,2,2,0],
+          "lastIndents": [[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1]]
+        },
+        "statement_pending": {
+          "source": "if (x)\n  if (y)\n    value",
+          "tokens": [
+            [[0,2,"keyword"],[2,3,null],[3,4,null],[4,5,"variable"],[5,6,null]],
+            [[7,9,null],[9,11,"keyword"],[11,12,null],[12,13,null],[13,14,"variable"],[14,15,null]],
+            [[16,20,null],[20,25,"variable"]]
+          ],
+          "retries": [],
+          "indents": [0,2,2],
+          "lastIndents": [[2,3],[2,3],[0,0],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3]]
+        },
+        "aligned_pending": {
+          "source": "{\n\tcall([1,",
+          "tokens": [
+            [[0,1,null]],
+            [[2,3,null],[3,7,"variable"],[7,8,null],[8,9,null],[9,10,"number"],[10,11,null]]
+          ],
+          "retries": [],
+          "indents": [0,2],
+          "lastIndents": [[10,10],[10,10],[10,10],[10,10],[9,9],[10,10],[10,10],[10,10],[10,10],[10,10],[10,10],[10,10],[10,10],[10,10],[10,10],[10,10]]
+        },
+        "comment_pending": {
+          "source": "int x; /+ outer\n  still a comment",
+          "tokens": [
+            [[0,3,"builtin"],[3,4,null],[4,5,"variable"],[5,6,null],[6,7,null],[7,15,"comment"]],
+            [[16,18,null],[18,33,"comment"]]
+          ],
+          "retries": [],
+          "indents": [0,null],
+          "lastIndents": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        },
+        "string_pending": {
+          "source": "auto y = `open\\",
+          "tokens": [
+            [[0,4,"keyword"],[4,5,null],[5,6,"variable"],[6,7,null],[7,8,"operator"],[8,9,null],[9,15,"string"]]
+          ],
+          "retries": [],
+          "indents": [0],
+          "lastIndents": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        },
+        "top": {
+          "source": "}",
+          "tokens": [
+            [[0,1,null]]
+          ],
+          "retries": [],
+          "indents": [0],
+          "lastIndents": [[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1]]
+        }
+      }
+    },
+    "crystal": {
+      "name": "crystal",
+      "data": {"commentTokens":{"line":"#"}},
+      "mergeTokens": true,
+      "triggers": [false,true,true,true,true,true,false,false,true,true,false,true,false,true,true,true,true,true,true,false],
+      "cases": {
+        "basics": {
+          "source": "require \"foo\"\nabstract def value?\nlib LibC\n  fun do_something(a : Int32) : Void\nend\nclass Example < Base\n  def []=(idx, value)\n    @value = {hello: :world, foo?: :\"a b\", empty: :[], c: :+}\n    @@stuff.foo!.bar[] # comment\n    @[AlwaysInline(foo)]\n    A B É 🙂 _x __DIR__ 0x 0o7 0b1_ 00 2.5e+2 2._ 1e-3\n    a <<= b >= c <=> d === e !~ f && g->h .. ...\n    'a' '\\n' '' x\n  end\nend",
+          "tokens": [
+            [[0,7,"keyword"],[7,8,null],[8,13,"string"]],
+            [[14,22,"keyword"],[22,23,null],[23,26,"keyword"],[26,27,null],[27,33,"def"]],
+            [[34,37,"keyword"],[37,38,null],[38,42,"def"]],
+            [[43,45,null],[45,48,"keyword"],[48,49,null],[49,61,"def"],[61,62,null],[62,63,"variable"],[63,64,null],[64,65,"operator"],[65,66,null],[66,71,"tag"],[71,72,null],[72,73,null],[73,74,"operator"],[74,75,null],[75,79,"tag"]],
+            [[80,83,"keyword"]],
+            [[84,89,"keyword"],[89,90,null],[90,97,"def"],[97,98,null],[98,99,"operator"],[99,100,null],[100,104,"tag"]],
+            [[105,107,null],[107,110,"keyword"],[110,111,null],[111,114,"def"],[114,115,null],[115,118,"variable"],[118,119,null],[119,120,null],[120,125,"variable"],[125,126,null]],
+            [[127,131,null],[131,137,"propertyName"],[137,138,null],[138,139,"operator"],[139,140,null],[140,141,null],[141,147,"atom"],[147,148,null],[148,154,"atom"],[154,155,null],[155,156,null],[156,161,"atom"],[161,162,null],[162,168,"atom"],[168,169,null],[169,170,null],[170,176,"atom"],[176,177,null],[177,180,"atom"],[180,181,null],[181,182,null],[182,184,"atom"],[184,185,null],[185,187,"atom"],[187,188,null]],
+            [[189,193,null],[193,200,"propertyName"],[200,201,"operator"],[201,205,"property"],[205,206,"operator"],[206,209,"property"],[209,210,null],[210,211,null],[211,212,null],[212,221,"comment"]],
+            [[222,226,null],[226,228,"meta"],[228,240,"tag"],[240,241,null],[241,244,"variable"],[244,245,null],[245,246,"meta"]],
+            [[247,251,null],[251,252,"tag"],[252,253,null],[253,254,"tag"],[254,255,null],[255,257,"variable"],[257,258,null],[258,262,"variable"],[262,263,null],[263,265,"variable"],[265,266,null],[266,273,"keyword"],[273,274,null],[274,276,"number"],[276,277,null],[277,280,"number"],[280,281,null],[281,285,"number"],[285,286,null],[286,287,"number"],[287,288,"number"],[288,289,null],[289,295,"number"],[295,296,null],[296,299,"number"],[299,300,null],[300,304,"number"]],
+            [[305,309,null],[309,310,"variable"],[310,311,null],[311,314,"operator"],[314,315,null],[315,316,"variable"],[316,317,null],[317,319,"operator"],[319,320,null],[320,321,"variable"],[321,322,null],[322,325,"operator"],[325,326,null],[326,327,"variable"],[327,328,null],[328,331,"operator"],[331,332,null],[332,333,"variable"],[333,334,null],[334,336,"operator"],[336,337,null],[337,338,"variable"],[338,339,null],[339,340,"operator"],[340,341,"operator"],[341,342,null],[342,343,"variable"],[343,344,"operator"],[344,345,"operator"],[345,346,"variable"],[346,347,null],[347,348,"operator"],[348,349,"operator"],[349,350,null],[350,353,"operator"]],
+            [[354,358,null],[358,361,"atom"],[361,362,null],[362,364,"atom"],[364,365,"variable"],[365,368,"atom"],[368,370,"atom"],[370,371,"variable"]],
+            [[372,374,null],[374,377,"keyword"]],
+            [[378,381,"keyword"]]
+          ],
+          "retries": [],
+          "indents": [0,0,0,2,0,0,2,4,4,4,4,4,4,2,0],
+          "lastIndents": [[0,0],[0,0],[0,0],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[0,0],[-2,-3],[-2,-3],[-2,-3],[0,0],[0,0]]
+        },
+        "strings": {
+          "source": "s = \"open\n\n  #{call(123)} and {% if true %}x{% end %}\"\np = %q[not #{embed} {{ name }}] trailing\nw = %w(a b)\nr = %r{a#{b}}\nx = %<a> %some_var %= 2\nmacro def generated(x)\n  {% for y in x %}\n    {{ y.id }}\n  {% end %}\nend",
+          "tokens": [
+            [[0,1,"variable"],[1,2,null],[2,3,"operator"],[3,4,null],[4,9,"string"]],
+            [],
+            [[11,13,"string"],[13,15,"meta"],[15,19,"variable"],[19,20,null],[20,23,"number"],[23,24,null],[24,25,"meta"],[25,30,"string"],[30,32,"meta"],[32,33,null],[33,35,"keyword"],[35,36,null],[36,40,"atom"],[40,41,null],[41,43,"meta"],[43,44,"string"],[44,46,"meta"],[46,47,null],[47,50,"keyword"],[50,51,null],[51,53,"meta"],[53,54,"string"]],
+            [[55,56,"variable"],[56,57,null],[57,58,"operator"],[58,59,null],[59,75,"string"],[75,77,"meta"],[77,78,null],[78,82,"variable"],[82,83,null],[83,85,"meta"],[85,86,"string"],[86,87,null],[87,95,"variable"]],
+            [[96,97,"variable"],[97,98,null],[98,99,"operator"],[99,100,null],[100,107,"string"]],
+            [[108,109,"variable"],[109,110,null],[110,111,"operator"],[111,112,null],[112,116,"string.special"],[116,118,"meta"],[118,119,"variable"],[119,120,"meta"],[120,121,"string.special"]],
+            [[122,123,"variable"],[123,124,null],[124,125,"operator"],[125,126,null],[126,130,"string"],[130,131,null],[131,140,"meta"],[140,141,null],[141,142,"operator"],[142,143,"operator"],[143,144,null],[144,145,"number"]],
+            [[146,151,"keyword"],[151,152,null],[152,155,"keyword"],[155,156,null],[156,165,"def"],[165,166,null],[166,167,"variable"],[167,168,null]],
+            [[169,171,null],[171,173,"meta"],[173,174,null],[174,177,"keyword"],[177,178,null],[178,179,"variable"],[179,180,null],[180,182,"variable"],[182,183,null],[183,184,"variable"],[184,185,null],[185,187,"meta"]],
+            [[188,192,null],[192,194,"meta"],[194,195,null],[195,196,"variable"],[196,197,"operator"],[197,199,"property"],[199,200,null],[200,202,"meta"]],
+            [[203,205,null],[205,207,"meta"],[207,208,null],[208,211,"keyword"],[211,212,null],[212,214,"meta"]],
+            [[215,218,"keyword"]]
+          ],
+          "retries": [],
+          "indents": [0,0,0,-2,-2,-2,-2,-2,0,2,0,-2],
+          "lastIndents": [[-2,-3],[-2,-3],[-2,-3],[-4,-6],[-4,-6],[-4,-6],[-4,-6],[-4,-6],[-4,-6],[-4,-6],[-2,-3],[-4,-6],[-4,-6],[-4,-6],[-2,-3],[-2,-3]]
+        },
+        "heredoc": {
+          "source": "a = <<-'QUOTED' #{raw}\n  content {{ macro_var }}\n  QUOTED_more\nb = <<-EMBED #{calls(1)}\n  text\\#{literal} and #{vars[1]}\nEMBED tail\nc = <<-'BAD\nno quote",
+          "tokens": [
+            [[0,1,"variable"],[1,2,null],[2,3,"operator"],[3,4,null],[4,22,"string"]],
+            [[23,33,"string"],[33,35,"meta"],[35,36,null],[36,45,"variable"],[45,46,null],[46,48,"meta"]],
+            [[49,57,"string"],[57,62,"variable"]],
+            [[63,64,"variable"],[64,65,null],[65,66,"operator"],[66,67,null],[67,76,"string"],[76,78,"meta"],[78,83,"variable"],[83,84,null],[84,85,"number"],[85,86,null],[86,87,"meta"]],
+            [[88,110,"string"],[110,112,"meta"],[112,116,"variable"],[116,117,null],[117,118,"number"],[118,119,null],[119,120,"meta"]],
+            [[121,126,"string"],[126,127,null],[127,131,"variable"]],
+            [[132,133,"variable"],[133,134,null],[134,135,"operator"],[135,136,null],[136,138,"operator"],[138,139,"operator"],[139,141,"atom"],[141,143,"tag"]],
+            [[144,146,"variable"],[146,147,null],[147,152,"variable"]]
+          ],
+          "retries": [],
+          "indents": [0,0,0,0,0,0,0,0],
+          "lastIndents": [[0,0],[0,0],[0,0],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[0,0],[-2,-3],[-2,-3],[-2,-3],[0,0],[0,0]]
+        },
+        "branches": {
+          "source": "if x\n  a = if y\n    z\n  else\n    w\n  end\n  guard if false\nend\nbegin\nrescue e\nensure\nend\nend\n  end\nclass lowercase\nmacro =\ndef ?!\nfoo",
+          "tokens": [
+            [[0,2,"keyword"],[2,3,null],[3,4,"variable"]],
+            [[5,7,null],[7,8,"variable"],[8,9,null],[9,10,"operator"],[10,11,null],[11,13,"keyword"],[13,14,null],[14,15,"variable"]],
+            [[16,20,null],[20,21,"variable"]],
+            [[22,24,null],[24,28,"keyword"]],
+            [[29,33,null],[33,34,"variable"]],
+            [[35,37,null],[37,40,"keyword"]],
+            [[41,43,null],[43,48,"variable"],[48,49,null],[49,51,"keyword"],[51,52,null],[52,57,"atom"]],
+            [[58,61,"keyword"]],
+            [[62,67,"keyword"]],
+            [[68,74,"keyword"],[74,75,null],[75,76,"variable"]],
+            [[77,83,"keyword"]],
+            [[84,87,"keyword"]],
+            [[88,91,"keyword"]],
+            [[92,94,null],[94,97,"keyword"]],
+            [[98,103,"keyword"],[103,104,null],[104,113,"variable"]],
+            [[114,119,"keyword"],[119,120,null],[120,121,"operator"]],
+            [[122,125,"keyword"],[125,126,null],[126,127,"operator"],[127,128,"operator"]],
+            [[129,132,"variable"]]
+          ],
+          "retries": [[104,"def"],[120,"def"],[126,"def"]],
+          "indents": [0,2,4,2,4,2,2,0,0,-2,-2,-2,-4,-6,-6,-4,-2,0],
+          "lastIndents": [[0,0],[0,0],[0,0],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[0,0],[-2,-3],[-2,-3],[-2,-3],[0,0],[0,0]]
+        },
+        "nested_pending": {
+          "source": "macro self.test\n  {% if x %}\n    {{ a[",
+          "tokens": [
+            [[0,5,"keyword"],[5,6,null],[6,10,"def"],[10,11,"operator"],[11,15,"property"]],
+            [[16,18,null],[18,20,"meta"],[20,21,null],[21,23,"keyword"],[23,24,null],[24,25,"variable"],[25,26,null],[26,28,"meta"]],
+            [[29,33,null],[33,35,"meta"],[35,36,null],[36,37,"variable"],[37,38,null]]
+          ],
+          "retries": [],
+          "indents": [0,2,2],
+          "lastIndents": [[6,9],[6,9],[6,9],[4,6],[4,6],[4,6],[4,6],[4,6],[4,6],[4,6],[6,9],[4,6],[4,6],[4,6],[6,9],[6,9]]
+        },
+        "percent_pending": {
+          "source": "x = %r\n   string to EOF",
+          "tokens": [
+            [[0,1,"variable"],[1,2,null],[2,3,"operator"],[3,4,null],[4,6,"string.special"]],
+            [[7,23,"string.special"]]
+          ],
+          "retries": [],
+          "indents": [0,0],
+          "lastIndents": [[0,0],[0,0],[0,0],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[0,0],[-2,-3],[-2,-3],[-2,-3],[0,0],[0,0]]
+        },
+        "heredoc_pending": {
+          "source": "x = <<-HERE\n  partial",
+          "tokens": [
+            [[0,1,"variable"],[1,2,null],[2,3,"operator"],[3,4,null],[4,11,"string"]],
+            [[12,21,"string"]]
+          ],
+          "retries": [],
+          "indents": [0,0],
+          "lastIndents": [[0,0],[0,0],[0,0],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[-2,-3],[0,0],[-2,-3],[-2,-3],[-2,-3],[0,0],[0,0]]
+        },
+        "malformed_follow_and_embed": {
+          "source": "class )\ndef +\nmacro def !\n\"\n#{x}\n{{x}}\n\"\n\\\n{% if x %}\nend",
+          "tokens": [
+            [[0,5,"keyword"],[5,6,null],[6,7,null]],
+            [[8,11,"keyword"],[11,12,null],[12,13,"def"]],
+            [[14,19,"keyword"],[19,20,null],[20,23,"keyword"],[23,24,null],[24,25,"operator"]],
+            [[26,27,"string"]],
+            [[28,30,"meta"],[30,31,"variable"],[31,32,"meta"]],
+            [[33,35,"meta"],[35,36,"variable"],[36,38,"meta"]],
+            [[39,40,"string"]],
+            [[41,42,"meta"]],
+            [[43,44,null],[44,45,"operator"],[45,46,null],[46,48,"keyword"],[48,49,null],[49,50,"variable"],[50,51,null],[51,53,"string"]],
+            [[54,57,"string"]]
+          ],
+          "retries": [[6,"def"],[24,"def"],[28,"string"],[33,"string"]],
+          "indents": [0,2,4,6,6,6,6,6,6,8],
+          "lastIndents": [[10,15],[10,15],[10,15],[8,12],[8,12],[8,12],[8,12],[8,12],[8,12],[8,12],[10,15],[8,12],[8,12],[8,12],[10,15],[10,15]]
+        }
+      }
+    }
+  }
+}

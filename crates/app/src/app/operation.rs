@@ -194,6 +194,8 @@ impl Shell {
                 });
             }
             tab.file = Some(saved.file);
+            tab.editor
+                .update(cx, |editor, cx| editor.dismiss_merge_review(cx));
         }
         if let Some(sidebar) = saved.sidebar {
             match sidebar {

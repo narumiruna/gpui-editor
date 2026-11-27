@@ -1,0 +1,206 @@
+{
+  "package": "@codemirror/lsp-client@6.3.1",
+  "integrity": "sha512-8uCLbozDGJKxEHKkPy3np4dNOvN1sLkRogsFkqm9QSK5nWwPktiqIeh+c9PWD1P3PUwnCgwfS1YWWNuuyts/dw==",
+  "exports": [
+    "LSPClient",
+    "LSPPlugin",
+    "Workspace",
+    "WorkspaceMapping",
+    "closeReferencePanel",
+    "findReferences",
+    "findReferencesKeymap",
+    "formatDocument",
+    "formatKeymap",
+    "hoverTooltips",
+    "jumpToDeclaration",
+    "jumpToDefinition",
+    "jumpToDefinitionKeymap",
+    "jumpToImplementation",
+    "jumpToTypeDefinition",
+    "languageServerExtensions",
+    "languageServerSupport",
+    "nextSignature",
+    "prevSignature",
+    "renameKeymap",
+    "renameSymbol",
+    "serverCompletion",
+    "serverCompletionSource",
+    "serverDiagnostics",
+    "showSignatureHelp",
+    "signatureHelp",
+    "signatureKeymap"
+  ],
+  "source": "head\r\n😀alpha tail",
+  "composition": {
+    "keys": [
+      ["Mod-Shift-Space",false],
+      ["Mod-Shift-ArrowUp",false],
+      ["Mod-Shift-ArrowDown",false],
+      ["Shift-Alt-f",true],
+      ["F2",true],
+      ["F12",true],
+      ["Shift-F12",true],
+      ["Escape",false]
+    ],
+    "capabilities": {
+      "general": {
+        "markdown": {
+          "parser": "marked"
+        }
+      },
+      "textDocument": {
+        "completion": {
+          "completionItem": {
+            "snippetSupport": true,
+            "documentationFormat": [
+              "markdown",
+              "plaintext"
+            ],
+            "insertReplaceSupport": false
+          },
+          "completionList": {
+            "itemDefaults": [
+              "commitCharacters",
+              "editRange",
+              "insertTextFormat"
+            ]
+          },
+          "completionItemKind": {
+            "valueSet": []
+          },
+          "contextSupport": true
+        },
+        "hover": {
+          "contentFormat": [
+            "markdown",
+            "plaintext"
+          ]
+        },
+        "formatting": {},
+        "rename": {},
+        "signatureHelp": {
+          "contextSupport": true,
+          "signatureInformation": {
+            "documentationFormat": [
+              "markdown",
+              "plaintext"
+            ],
+            "parameterInformation": {
+              "labelOffsetSupport": true
+            },
+            "activeParameterSupport": true
+          }
+        },
+        "definition": {},
+        "declaration": {},
+        "implementation": {},
+        "typeDefinition": {},
+        "references": {},
+        "publishDiagnostics": {
+          "versionSupport": true
+        }
+      },
+      "window": {
+        "showMessage": {}
+      }
+    },
+    "opened": {
+      "textDocument": {
+        "uri": "file:///src/main.rs",
+        "languageId": "rust",
+        "text": "head\n😀alpha tail",
+        "version": 0
+      }
+    },
+    "diagnosticSyncDelayMs": 500
+  },
+  "diagnostics": {
+    "pending": [
+      [0,0,"new\r\n"],
+      [10,10,"!"],
+      [15,15,"?"],
+      [17,19,"Z"]
+    ],
+    "params": {
+      "uri": "file:///src/main.rs",
+      "version": 0,
+      "diagnostics": [
+        {
+          "range": {"start":{"line":1,"character":2},"end":{"line":1,"character":7}},
+          "message": "default",
+          "source": "ignored",
+          "code": 42
+        },
+        {
+          "range": {"start":{"line":1,"character":7},"end":{"line":1,"character":7}},
+          "severity": 1,
+          "message": "error"
+        },
+        {
+          "range": {"start":{"line":1,"character":8},"end":{"line":1,"character":12}},
+          "severity": 2,
+          "message": "warning"
+        },
+        {
+          "range": {"start":{"line":0,"character":0},"end":{"line":0,"character":4}},
+          "severity": 3,
+          "message": "info"
+        },
+        {
+          "range": {"start":{"line":1,"character":9},"end":{"line":1,"character":11}},
+          "severity": 4,
+          "message": "hint"
+        },
+        {
+          "range": {"start":{"line":1,"character":2},"end":{"line":1,"character":2}},
+          "severity": 9,
+          "message": "unknown"
+        },
+        {
+          "range": {"start":{"line":1,"character":8},"end":{"line":1,"character":8}},
+          "severity": null,
+          "message": "null"
+        }
+      ]
+    },
+    "mapped": [
+      ["info","info",0,9],
+      ["unknown","hint",15,15],
+      ["default","error",15,21],
+      ["error","error",21,21],
+      ["null","error",23,23],
+      ["hint","hint",24,25],
+      ["warning","warning",23,26]
+    ]
+  },
+  "navigation": {
+    "requestByte": 12,
+    "targetUri": "file:///src/defs.rs",
+    "targetDoc": "defs\r\n😀let alpha",
+    "targetEdit": "preface\r\n",
+    "params": {
+      "textDocument": {
+        "uri": "file:///src/main.rs"
+      },
+      "position": {
+        "line": 1,
+        "character": 4
+      }
+    },
+    "known": {
+      "uri": "file:///src/defs.rs",
+      "range": {"start":{"line":1,"character":6},"end":{"line":1,"character":11}}
+    },
+    "unknown": {
+      "uri": "file:///not-open",
+      "range": {"start":{"line":0,"character":2},"end":{"line":0,"character":7}}
+    },
+    "targetStart": 23,
+    "cases": [
+      ["textDocument/definition","definitionProvider",true],
+      ["textDocument/declaration","declarationProvider",false],
+      ["textDocument/typeDefinition","typeDefinitionProvider",true],
+      ["textDocument/implementation","implementationProvider",true]
+    ]
+  }
+}

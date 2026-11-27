@@ -1,0 +1,623 @@
+[
+  {
+    "id": "dedent",
+    "source": "# 🐍\r\npré = 0\rdef café(value):\r\n\tif value:\r\t\tfirst = value + 10\n\t\t# keep these lines in the nested body\r\n\t\t\r\t\tlast = first + 20\r\n\t\treturn last\r\treturn value\nresult = café(pré)\r\n",
+    "edits": [
+      [
+        133,
+        "\t\t",
+        "\t"
+      ]
+    ],
+    "oracle": [
+      "Script 0 182 0",
+      "Comment 0 6 1",
+      "AssignStatement 8 16 1",
+      "VariableName 8 12 2",
+      "AssignOp 13 14 2",
+      "Number 15 16 2",
+      "FunctionDefinition 17 160 1",
+      "def 17 20 2",
+      "VariableName 21 26 2",
+      "ParamList 26 33 2",
+      "( 26 27 3",
+      "VariableName 27 32 3",
+      ") 32 33 3",
+      "Body 33 160 2",
+      ": 33 34 3",
+      "IfStatement 37 133 3",
+      "if 37 39 4",
+      "VariableName 40 45 4",
+      "Body 45 133 4",
+      ": 45 46 5",
+      "AssignStatement 49 67 5",
+      "VariableName 49 54 6",
+      "AssignOp 55 56 6",
+      "BinaryExpression 57 67 6",
+      "VariableName 57 62 7",
+      "ArithOp 63 64 7",
+      "Number 65 67 7",
+      "Comment 70 107 5",
+      "AssignStatement 114 131 5",
+      "VariableName 114 118 6",
+      "AssignOp 119 120 6",
+      "BinaryExpression 121 131 6",
+      "VariableName 121 126 7",
+      "ArithOp 127 128 7",
+      "Number 129 131 7",
+      "ReturnStatement 134 145 3",
+      "return 134 140 4",
+      "VariableName 141 145 4",
+      "ReturnStatement 147 159 3",
+      "return 147 153 4",
+      "VariableName 154 159 4",
+      "AssignStatement 160 180 1",
+      "VariableName 160 166 2",
+      "AssignOp 167 168 2",
+      "CallExpression 169 180 2",
+      "VariableName 169 174 3",
+      "ArgList 174 180 3",
+      "( 174 175 4",
+      "VariableName 175 179 4",
+      ") 179 180 4"
+    ]
+  },
+  {
+    "id": "blank-line",
+    "source": "# 🐍\r\npré = 0\rdef café(value):\r\n\tif value:\r\t\tfirst = value + 10\n\t\t# keep these lines in the nested body\r\n\t\t\r\t\tlast = first + 20\r\n\t\treturn last\r\treturn value\nresult = café(pré)\r\n",
+    "edits": [
+      [
+        111,
+        "",
+        "middle = first"
+      ]
+    ],
+    "oracle": [
+      "Script 0 197 0",
+      "Comment 0 6 1",
+      "AssignStatement 8 16 1",
+      "VariableName 8 12 2",
+      "AssignOp 13 14 2",
+      "Number 15 16 2",
+      "FunctionDefinition 17 175 1",
+      "def 17 20 2",
+      "VariableName 21 26 2",
+      "ParamList 26 33 2",
+      "( 26 27 3",
+      "VariableName 27 32 3",
+      ") 32 33 3",
+      "Body 33 175 2",
+      ": 33 34 3",
+      "IfStatement 37 161 3",
+      "if 37 39 4",
+      "VariableName 40 45 4",
+      "Body 45 161 4",
+      ": 45 46 5",
+      "AssignStatement 49 67 5",
+      "VariableName 49 54 6",
+      "AssignOp 55 56 6",
+      "BinaryExpression 57 67 6",
+      "VariableName 57 62 7",
+      "ArithOp 63 64 7",
+      "Number 65 67 7",
+      "Comment 70 107 5",
+      "AssignStatement 111 125 5",
+      "VariableName 111 117 6",
+      "AssignOp 118 119 6",
+      "VariableName 120 125 6",
+      "AssignStatement 128 145 5",
+      "VariableName 128 132 6",
+      "AssignOp 133 134 6",
+      "BinaryExpression 135 145 6",
+      "VariableName 135 140 7",
+      "ArithOp 141 142 7",
+      "Number 143 145 7",
+      "ReturnStatement 149 160 5",
+      "return 149 155 6",
+      "VariableName 156 160 6",
+      "ReturnStatement 162 174 3",
+      "return 162 168 4",
+      "VariableName 169 174 4",
+      "AssignStatement 175 195 1",
+      "VariableName 175 181 2",
+      "AssignOp 182 183 2",
+      "CallExpression 184 195 2",
+      "VariableName 184 189 3",
+      "ArgList 189 195 3",
+      "( 189 190 4",
+      "VariableName 190 194 4",
+      ") 194 195 4"
+    ]
+  },
+  {
+    "id": "raw-format",
+    "source": "label = \"é🐍\"\r\nresult = [\r    fr\"\"\"long café 🐍 text keeps the scanner\r\n    inside a raw format string: {{literal}} \\n {value!r:>{width + 10}} tail\r    after\"\"\",\r\n    1,\n]\rnext = result[0]\r\n",
+    "edits": [
+      [
+        144,
+        "10",
+        "222"
+      ]
+    ],
+    "oracle": [
+      "Script 0 197 0",
+      "AssignStatement 0 16 1",
+      "VariableName 0 5 2",
+      "AssignOp 6 7 2",
+      "String 8 16 2",
+      "AssignStatement 18 178 1",
+      "VariableName 18 24 2",
+      "AssignOp 25 26 2",
+      "ArrayExpression 27 178 2",
+      "[ 27 28 3",
+      "FormatString 33 167 3",
+      "FormatReplacement 125 149 4",
+      "{ 125 126 5",
+      "VariableName 126 131 5",
+      "FormatConversion 131 133 5",
+      "FormatSpec 133 148 5",
+      ": 133 134 6",
+      "FormatReplacement 135 148 6",
+      "{ 135 136 7",
+      "BinaryExpression 136 147 7",
+      "VariableName 136 141 8",
+      "ArithOp 142 143 8",
+      "Number 144 147 8",
+      "} 147 148 7",
+      "} 148 149 5",
+      ", 167 168 3",
+      "Number 174 175 3",
+      ", 175 176 3",
+      "] 177 178 3",
+      "AssignStatement 179 195 1",
+      "VariableName 179 183 2",
+      "AssignOp 184 185 2",
+      "MemberExpression 186 195 2",
+      "VariableName 186 192 3",
+      "[ 192 193 3",
+      "Number 193 194 3",
+      "] 194 195 3"
+    ]
+  },
+  {
+    "id": "bracketed",
+    "source": "label = \"é🐍\"\r\nresult = [\r    fr\"\"\"long café 🐍 text keeps the scanner\r\n    inside a raw format string: {{literal}} \\n {value!r:>{width + 10}} tail\r    after\"\"\",\r\n    1,\n]\rnext = result[0]\r\n",
+    "edits": [
+      [
+        169,
+        "    1,",
+        "    [1, 2],"
+      ]
+    ],
+    "oracle": [
+      "Script 0 201 0",
+      "AssignStatement 0 16 1",
+      "VariableName 0 5 2",
+      "AssignOp 6 7 2",
+      "String 8 16 2",
+      "AssignStatement 18 182 1",
+      "VariableName 18 24 2",
+      "AssignOp 25 26 2",
+      "ArrayExpression 27 182 2",
+      "[ 27 28 3",
+      "FormatString 33 166 3",
+      "FormatReplacement 125 148 4",
+      "{ 125 126 5",
+      "VariableName 126 131 5",
+      "FormatConversion 131 133 5",
+      "FormatSpec 133 147 5",
+      ": 133 134 6",
+      "FormatReplacement 135 147 6",
+      "{ 135 136 7",
+      "BinaryExpression 136 146 7",
+      "VariableName 136 141 8",
+      "ArithOp 142 143 8",
+      "Number 144 146 8",
+      "} 146 147 7",
+      "} 147 148 5",
+      ", 166 167 3",
+      "ArrayExpression 173 179 3",
+      "[ 173 174 4",
+      "Number 174 175 4",
+      ", 175 176 4",
+      "Number 177 178 4",
+      "] 178 179 4",
+      ", 179 180 3",
+      "] 181 182 3",
+      "AssignStatement 183 199 1",
+      "VariableName 183 187 2",
+      "AssignOp 188 189 2",
+      "MemberExpression 190 199 2",
+      "VariableName 190 196 3",
+      "[ 196 197 3",
+      "Number 197 198 3",
+      "] 198 199 3"
+    ]
+  },
+  {
+    "id": "nested-replacement",
+    "source": "# 🐍\r\nmessage = fr\"\"\"é {value!r:>{compute(\r\n    argument, # still inside a nested replacement\r\n    target,\r)}} tail\"\"\"\r\n",
+    "edits": [
+      [
+        102,
+        "target",
+        "café"
+      ]
+    ],
+    "oracle": [
+      "Script 0 122 0",
+      "Comment 0 6 1",
+      "AssignStatement 8 120 1",
+      "VariableName 8 15 2",
+      "AssignOp 16 17 2",
+      "FormatString 18 120 2",
+      "FormatReplacement 26 112 3",
+      "{ 26 27 4",
+      "VariableName 27 32 4",
+      "FormatConversion 32 34 4",
+      "FormatSpec 34 111 4",
+      ": 34 35 5",
+      "FormatReplacement 36 111 5",
+      "{ 36 37 6",
+      "CallExpression 37 110 6",
+      "VariableName 37 44 7",
+      "ArgList 44 110 7",
+      "( 44 45 8",
+      "VariableName 51 59 8",
+      ", 59 60 8",
+      "Comment 61 96 8",
+      "VariableName 102 107 8",
+      ", 107 108 8",
+      ") 109 110 8",
+      "} 110 111 6",
+      "} 111 112 4"
+    ]
+  },
+  {
+    "id": "legacy-print-lookahead",
+    "source": "# 🐍\r\ncafé = 1\r#ppppppppppppppppppppppppppppppppppppppppppppppp\r\nprint              (café)\r\nafter = 10\n",
+    "edits": [
+      [
+        87,
+        "(café)",
+        "\"café\""
+      ],
+      [
+        104,
+        "10",
+        "11"
+      ]
+    ],
+    "oracle": [
+      "Script 0 107 0",
+      "Comment 0 6 1",
+      "AssignStatement 8 17 1",
+      "VariableName 8 13 2",
+      "AssignOp 14 15 2",
+      "Number 16 17 2",
+      "Comment 18 66 1",
+      "PrintStatement 68 94 1",
+      "print 68 73 2",
+      "String 87 94 2",
+      "AssignStatement 96 106 1",
+      "VariableName 96 101 2",
+      "AssignOp 102 103 2",
+      "Number 104 106 2"
+    ]
+  },
+  {
+    "id": "legacy-print-prefix",
+    "source": "# 🐍\r\ncafé = 1\r#ppppppppppppppppppppppppppppppppppppppppppppppp\r\nprint              (café)\r\nafter = 10\n",
+    "edits": [
+      [
+        88,
+        "café",
+        "𐐀"
+      ]
+    ],
+    "oracle": [
+      "Script 0 106 0",
+      "Comment 0 6 1",
+      "AssignStatement 8 17 1",
+      "VariableName 8 13 2",
+      "AssignOp 14 15 2",
+      "Number 16 17 2",
+      "Comment 18 66 1",
+      "ExpressionStatement 68 93 1",
+      "CallExpression 68 93 2",
+      "VariableName 68 73 3",
+      "ArgList 87 93 3",
+      "( 87 88 4",
+      "VariableName 88 92 4",
+      ") 92 93 4",
+      "AssignStatement 95 105 1",
+      "VariableName 95 100 2",
+      "AssignOp 101 102 2",
+      "Number 103 105 2"
+    ]
+  },
+  {
+    "id": "eof-lookahead",
+    "source": "# 🐍\r\ncafé = 1\r#ppppppppppppppppppppppppppppppppppppppppppppppp\r\nlong_name",
+    "edits": [
+      [
+        77,
+        "",
+        "é"
+      ]
+    ],
+    "oracle": [
+      "Script 0 79 0",
+      "Comment 0 6 1",
+      "AssignStatement 8 17 1",
+      "VariableName 8 13 2",
+      "AssignOp 14 15 2",
+      "Number 16 17 2",
+      "Comment 18 66 1",
+      "ExpressionStatement 68 79 1",
+      "VariableName 68 79 2"
+    ]
+  },
+  {
+    "id": "split-crlf",
+    "source": "# 🐍\r\ncafé = 1\r#ppppppppppppppppppppppppppppppppppppppppppppppp\r\nvalue = (\r\n    \"🐍\",\r    \"é\",\n)\r\nend = value\r",
+    "edits": [
+      [
+        78,
+        "\n",
+        ""
+      ]
+    ],
+    "oracle": [
+      "Script 0 115 0",
+      "Comment 0 6 1",
+      "AssignStatement 8 17 1",
+      "VariableName 8 13 2",
+      "AssignOp 14 15 2",
+      "Number 16 17 2",
+      "Comment 18 66 1",
+      "AssignStatement 68 101 1",
+      "VariableName 68 73 2",
+      "AssignOp 74 75 2",
+      "TupleExpression 76 101 2",
+      "( 76 77 3",
+      "String 82 88 3",
+      ", 88 89 3",
+      "String 94 98 3",
+      ", 98 99 3",
+      ") 100 101 3",
+      "AssignStatement 103 114 1",
+      "VariableName 103 106 2",
+      "AssignOp 107 108 2",
+      "VariableName 109 114 2"
+    ]
+  },
+  {
+    "id": "insert-inside-crlf",
+    "source": "# 🐍\r\ncafé = 1\r#ppppppppppppppppppppppppppppppppppppppppppppppp\r\nvalue = (\r\n    \"🐍\",\r    \"é\",\n)\r\nend = value\r",
+    "edits": [
+      [
+        78,
+        "",
+        "    \"middle\","
+      ]
+    ],
+    "oracle": [
+      "Script 0 129 0",
+      "Comment 0 6 1",
+      "AssignStatement 8 17 1",
+      "VariableName 8 13 2",
+      "AssignOp 14 15 2",
+      "Number 16 17 2",
+      "Comment 18 66 1",
+      "AssignStatement 68 115 1",
+      "VariableName 68 73 2",
+      "AssignOp 74 75 2",
+      "TupleExpression 76 115 2",
+      "( 76 77 3",
+      "String 82 90 3",
+      ", 90 91 3",
+      "String 96 102 3",
+      ", 102 103 3",
+      "String 108 112 3",
+      ", 112 113 3",
+      ") 114 115 3",
+      "AssignStatement 117 128 1",
+      "VariableName 117 120 2",
+      "AssignOp 121 122 2",
+      "VariableName 123 128 2"
+    ]
+  },
+  {
+    "id": "edit-before-first-checkpoint",
+    "source": "# 🐍\r\ncafé = 1\r#ppppppppppppppppppppppppppppppppppppppppppppppp\r\nvalue = (\r\n    \"🐍\",\r    \"é\",\n)\r\nend = value\r",
+    "edits": [
+      [
+        2,
+        "🐍",
+        "🧪"
+      ]
+    ],
+    "oracle": [
+      "Script 0 116 0",
+      "Comment 0 6 1",
+      "AssignStatement 8 17 1",
+      "VariableName 8 13 2",
+      "AssignOp 14 15 2",
+      "Number 16 17 2",
+      "Comment 18 66 1",
+      "AssignStatement 68 102 1",
+      "VariableName 68 73 2",
+      "AssignOp 74 75 2",
+      "TupleExpression 76 102 2",
+      "( 76 77 3",
+      "String 83 89 3",
+      ", 89 90 3",
+      "String 95 99 3",
+      ", 99 100 3",
+      ") 101 102 3",
+      "AssignStatement 104 115 1",
+      "VariableName 104 107 2",
+      "AssignOp 108 109 2",
+      "VariableName 110 115 2"
+    ]
+  },
+  {
+    "id": "append-crlf-at-eof",
+    "source": "# 🐍\r\ncafé = 1\r#ppppppppppppppppppppppppppppppppppppppppppppppp\r\nvalue = (\r\n    \"🐍\",\r    \"é\",\n)\r\nend = value\r",
+    "edits": [
+      [
+        116,
+        "",
+        "\n"
+      ]
+    ],
+    "oracle": [
+      "Script 0 117 0",
+      "Comment 0 6 1",
+      "AssignStatement 8 17 1",
+      "VariableName 8 13 2",
+      "AssignOp 14 15 2",
+      "Number 16 17 2",
+      "Comment 18 66 1",
+      "AssignStatement 68 102 1",
+      "VariableName 68 73 2",
+      "AssignOp 74 75 2",
+      "TupleExpression 76 102 2",
+      "( 76 77 3",
+      "String 83 89 3",
+      ", 89 90 3",
+      "String 95 99 3",
+      ", 99 100 3",
+      ") 101 102 3",
+      "AssignStatement 104 115 1",
+      "VariableName 104 107 2",
+      "AssignOp 108 109 2",
+      "VariableName 110 115 2"
+    ]
+  },
+  {
+    "id": "astral-escape",
+    "source": "# 🐍\r\ncafé = 1\r#ppppppppppppppppppppppppppppppppppppppppppppppp\r\nvalue = \"abc\\x\"\r\n",
+    "edits": [
+      [
+        81,
+        "x",
+        "🐍"
+      ]
+    ],
+    "oracle": [
+      "Script 0 88 0",
+      "Comment 0 6 1",
+      "AssignStatement 8 17 1",
+      "VariableName 8 13 2",
+      "AssignOp 14 15 2",
+      "Number 16 17 2",
+      "Comment 18 66 1",
+      "AssignStatement 68 86 1",
+      "VariableName 68 73 2",
+      "AssignOp 74 75 2",
+      "String 76 86 2",
+      "Escape 80 u16:77 3"
+    ]
+  },
+  {
+    "id": "glr-soft-keywords",
+    "source": "# 🐍\r\ncafé = 1\r#ppppppppppppppppppppppppppppppppppppppppppppppp\r\n",
+    "edits": [
+      [
+        68,
+        "",
+        "match café:\r\n\tcase 1:\r\t\tpass\r\n"
+      ]
+    ],
+    "oracle": [
+      "Script 0 99 0",
+      "Comment 0 6 1",
+      "AssignStatement 8 17 1",
+      "VariableName 8 13 2",
+      "AssignOp 14 15 2",
+      "Number 16 17 2",
+      "Comment 18 66 1",
+      "MatchStatement 68 99 1",
+      "match 68 73 2",
+      "VariableName 74 79 2",
+      "MatchBody 79 99 2",
+      ": 79 80 3",
+      "MatchClause 83 99 3",
+      "case 83 87 4",
+      "LiteralPattern 88 89 4",
+      "Number 88 89 5",
+      "Body 89 99 4",
+      ": 89 90 5",
+      "PassStatement 93 97 5",
+      "pass 93 97 6"
+    ]
+  },
+  {
+    "id": "repair-closers",
+    "source": "# 🐍\r\ncafé = 1\r#ppppppppppppppppppppppppppppppppppppppppppppppp\r\nvalue = call(1,\r\n    [2, 3]);\r\n",
+    "edits": [
+      [
+        94,
+        "]);",
+        ""
+      ]
+    ],
+    "oracle": [
+      "Script 0 96 0",
+      "Comment 0 6 1",
+      "AssignStatement 8 17 1",
+      "VariableName 8 13 2",
+      "AssignOp 14 15 2",
+      "Number 16 17 2",
+      "Comment 18 66 1",
+      "AssignStatement 68 96 1",
+      "VariableName 68 73 2",
+      "AssignOp 74 75 2",
+      "CallExpression 76 96 2",
+      "VariableName 76 80 3",
+      "ArgList 80 96 3",
+      "( 80 81 4",
+      "Number 81 82 4",
+      ", 82 83 4",
+      "ArrayExpression 89 96 4",
+      "[ 89 90 5",
+      "Number 90 91 5",
+      ", 91 92 5",
+      "Number 93 94 5",
+      "⚠ 96 96 5",
+      "⚠ 96 96 4"
+    ]
+  },
+  {
+    "id": "parseable-line-prefix",
+    "source": "# 🐍\r\ncafé = 1\r#ppppppppppppppppppppppppppppppppppppppppppppppp\r\nvalue = 10\r\nclass Later:\r    data = 1\n",
+    "edits": [
+      [
+        68,
+        "value = 10",
+        "?"
+      ]
+    ],
+    "oracle": [
+      "Script 0 97 0",
+      "Comment 0 6 1",
+      "AssignStatement 8 17 1",
+      "VariableName 8 13 2",
+      "AssignOp 14 15 2",
+      "Number 16 17 2",
+      "Comment 18 66 1",
+      "⚠ 68 71 1",
+      "ClassDefinition 71 97 1",
+      "class 71 76 2",
+      "VariableName 77 82 2",
+      "Body 82 97 2",
+      ": 82 83 3",
+      "AssignStatement 88 96 3",
+      "VariableName 88 92 4",
+      "AssignOp 93 94 4",
+      "Number 95 96 4"
+    ]
+  }
+]

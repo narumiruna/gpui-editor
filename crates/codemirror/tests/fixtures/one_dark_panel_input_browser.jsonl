@@ -1,0 +1,9 @@
+{"mode":"uninstalled","field":"find","surface":"ffffff","text":"000000","border":"c0c0c0","width":"1px","placement":"bottom","value":"needle"}
+{"mode":"uninstalled","field":"replace","surface":"ffffff","text":"000000","border":"c0c0c0","width":"1px","placement":"bottom","value":" 🦀 "}
+{"mode":"uninstalled","field":"goto","surface":"ffffff","text":"000000","border":"c0c0c0","width":"1px","placement":"bottom","value":"1"}
+{"mode":"theme","field":"find","surface":"21252b","text":"abb2bf","border":"555555","width":"1px","placement":"bottom","value":"needle"}
+{"mode":"theme","field":"replace","surface":"21252b","text":"abb2bf","border":"555555","width":"1px","placement":"bottom","value":" 🦀 "}
+{"mode":"theme","field":"goto","surface":"21252b","text":"abb2bf","border":"555555","width":"1px","placement":"bottom","value":"1"}
+{"mode":"highlightOnly","field":"find","surface":"ffffff","text":"000000","border":"c0c0c0","width":"1px","placement":"bottom","value":"needle"}
+{"mode":"highlightOnly","field":"replace","surface":"ffffff","text":"000000","border":"c0c0c0","width":"1px","placement":"bottom","value":" 🦀 "}
+{"mode":"highlightOnly","field":"goto","surface":"ffffff","text":"000000","border":"c0c0c0","width":"1px","placement":"bottom","value":"1"}

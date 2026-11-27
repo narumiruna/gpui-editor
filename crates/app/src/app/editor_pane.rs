@@ -8,6 +8,26 @@ use crate::{editor::toolbar, theme::Theme};
 const TOOLBAR_HEIGHT: gpui::Pixels = px(40.);
 
 impl Shell {
+    fn toggle_merge_review(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
+        if self.active.is_some() {
+            return;
+        }
+        let Some(tab) = self.current() else { return };
+        tab.editor.clone().update(cx, |editor, cx| {
+            if editor.is_reviewing_changes() {
+                editor.dismiss_merge_review(cx);
+            } else {
+                let saved = tab
+                    .file
+                    .as_ref()
+                    .map_or("", crate::workspace::DocumentFile::source);
+                editor.review_changes(saved, window, cx);
+            }
+        });
+        self.show_more_tools = false;
+        cx.notify();
+    }
+
     pub(super) fn editor_pane(
         &self,
         native_controls: gpui::Pixels,
@@ -45,7 +65,9 @@ impl Shell {
         let mut more_tools = None;
         let mut remote_images = None;
         if let Some(current) = current.filter(|_| markdown) {
-            let edit_enabled = !busy && !current.editor.read(cx).is_composing();
+            let editor = current.editor.read(cx);
+            let reviewing = editor.is_reviewing_changes();
+            let edit_enabled = !busy && !editor.is_composing() && !reviewing;
             tools = tools.children(toolbar::primary_groups(
                 &current.editor,
                 edit_enabled,
@@ -68,7 +90,23 @@ impl Shell {
             ));
             if self.show_more_tools {
                 more_tools = Some(
-                    toolbar::more_group(&current.editor, edit_enabled, theme, picker)
+                    toolbar::more_group(&current.editor, edit_enabled, theme, picker, cx)
+                        .when(current.dirty(cx) || reviewing, |group| {
+                            let enabled = !busy && !editor.is_composing();
+                            let label = if reviewing {
+                                "Close change review"
+                            } else {
+                                "Review changes"
+                            };
+                            group.child(toolbar::marked_button(label, enabled, theme, picker).when(
+                                enabled,
+                                |button| {
+                                    button.on_click(cx.listener(|shell, _, window, cx| {
+                                        shell.toggle_merge_review(window, cx);
+                                    }))
+                                },
+                            ))
+                        })
                         .absolute()
                         .top(window_chrome::TOP_ROW_HEIGHT + TOOLBAR_HEIGHT)
                         .right_2()

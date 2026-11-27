@@ -1,0 +1,4 @@
+{"label":"multiple","doc":"","aria":"","widgetSets":[[0,0,"second"],[0,0,"last"]],"rendered":[["second","true","none"],["last","true","none"]]}
+{"label":"typed","doc":"typed","aria":"","widgetSets":[],"rendered":[]}
+{"label":"replaced","doc":"","aria":"new","widgetSets":[[0,0,"new"]],"rendered":[["new","true","none"]]}
+{"label":"removed","doc":"","aria":null,"widgetSets":[],"rendered":[]}

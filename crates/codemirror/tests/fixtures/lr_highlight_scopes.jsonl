@@ -1,0 +1,26 @@
+{"name":"json","step":"raw-stock","source":"{ \"😀\": [\r\n\"字\"] }","range":[0,21],"spans":[[13,18,["S","L"]]]}
+{"name":"json","step":"raw-changed","source":"{ \"😀\": [\r\n\"字\"] }","range":[0,21],"spans":[[13,18,["R","L"]]]}
+{"name":"json","step":"raw-renamed","source":"{ \"😀\": [\r\n\"字\"] }","range":[0,21],"spans":[[13,18,["R","L"]]]}
+{"name":"json","step":"raw-leafOnly","source":"{ \"😀\": [\r\n\"字\"] }","range":[0,21],"spans":[[13,18,["S","L"]]]}
+{"name":"json","step":"raw-replace","source":"{ \"😀\": [\r\n\"字\"] }","range":[0,21],"spans":[[13,18,["C"]]]}
+{"name":"json","step":"raw-absent","source":"{ \"😀\": [\r\n\"字\"] }","range":[0,21],"spans":[[13,18,["A"]]]}
+{"name":"json","step":"raw-wastFacet","source":"{ \"😀\": [\r\n\"字\"] }","range":[0,21],"spans":[[13,18,["W"]]]}
+{"name":"json","step":"editor-new","source":"{ \"😀\": [\r\n\"字\"] }","range":[0,21],"spans":[[13,18,["R","L"]]]}
+{"name":"json","step":"editor-retained","source":"{ \"😀\": [\r\n\"字\"] }","range":[0,21],"spans":[[13,18,["S","L"]]]}
+{"name":"json","step":"editor-edit","source":"{ \"😀\": [\r\n\"new\"] }","range":[0,21],"spans":[[13,18,["R","L"]]]}
+{"name":"json","step":"editor-independent","source":"{ \"😀\": [\r\n\"字\"] }","range":[0,21],"spans":[[13,18,["D","L"]]]}
+{"name":"json","step":"mount","source":"Prose 😀\r\n\r\n> ```key\r\n> { \"😀\": [\r\n> \"字\"] }\r\n> ```","range":[0,56],"spans":[[41,46,["R","L"]]]}
+{"name":"json","step":"mount-clipped","source":"Prose 😀\r\n\r\n> ```key\r\n> { \"😀\": [\r\n> \"字\"] }\r\n> ```","range":[42,45],"spans":[[42,45,["R","L"]]]}
+{"name":"lezer","step":"raw-stock","source":"@top Main { // 😀\r\n \"字\" }","range":[0,29],"spans":[[22,27,["S","L"]]]}
+{"name":"lezer","step":"raw-changed","source":"@top Main { // 😀\r\n \"字\" }","range":[0,29],"spans":[[22,27,["R","L"]]]}
+{"name":"lezer","step":"raw-renamed","source":"@top Main { // 😀\r\n \"字\" }","range":[0,29],"spans":[[22,27,["R","L"]]]}
+{"name":"lezer","step":"raw-leafOnly","source":"@top Main { // 😀\r\n \"字\" }","range":[0,29],"spans":[[22,27,["S","L"]]]}
+{"name":"lezer","step":"raw-replace","source":"@top Main { // 😀\r\n \"字\" }","range":[0,29],"spans":[[22,27,["C"]]]}
+{"name":"lezer","step":"raw-absent","source":"@top Main { // 😀\r\n \"字\" }","range":[0,29],"spans":[[22,27,["A"]]]}
+{"name":"lezer","step":"raw-wastFacet","source":"@top Main { // 😀\r\n \"字\" }","range":[0,29],"spans":[[22,27,["W"]]]}
+{"name":"lezer","step":"editor-new","source":"@top Main { // 😀\r\n \"字\" }","range":[0,29],"spans":[[22,27,["R","L"]]]}
+{"name":"lezer","step":"editor-retained","source":"@top Main { // 😀\r\n \"字\" }","range":[0,29],"spans":[[22,27,["S","L"]]]}
+{"name":"lezer","step":"editor-edit","source":"@top Main { // 😀\r\n \"new\" }","range":[0,29],"spans":[[22,27,["R","L"]]]}
+{"name":"lezer","step":"editor-independent","source":"@top Main { // 😀\r\n \"字\" }","range":[0,29],"spans":[[22,27,["D","L"]]]}
+{"name":"lezer","step":"mount","source":"Prose 😀\r\n\r\n> ```key\r\n> @top Main { // 😀\r\n>  \"字\" }\r\n> ```","range":[0,64],"spans":[[50,55,["R","L"]]]}
+{"name":"lezer","step":"mount-clipped","source":"Prose 😀\r\n\r\n> ```key\r\n> @top Main { // 😀\r\n>  \"字\" }\r\n> ```","range":[51,54],"spans":[[51,54,["R","L"]]]}

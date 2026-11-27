@@ -2,7 +2,7 @@
 
 use std::{ffi::OsStr, ops::Range, path::Path, sync::LazyLock};
 
-use gpui::{Context, Hsla};
+use gpui::{Context, Rgba};
 use two_face::re_exports::syntect::{
     easy::ScopeRangeIterator,
     parsing::{ParseState, Scope, ScopeStack, SyntaxSet},
@@ -25,7 +25,7 @@ pub(super) enum Kind {
 }
 
 impl Kind {
-    pub(super) fn color(self, theme: Theme) -> Hsla {
+    pub(super) fn color(self, theme: Theme) -> Rgba {
         match self {
             Self::Comment => theme.muted,
             Self::Keyword => theme.syntax_keyword,
@@ -33,7 +33,6 @@ impl Kind {
             Self::Constant => theme.syntax_constant,
             Self::Name => theme.accent,
         }
-        .into()
     }
 }
 

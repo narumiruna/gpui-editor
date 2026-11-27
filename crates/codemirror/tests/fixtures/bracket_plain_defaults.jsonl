@@ -1,0 +1,4 @@
+{"name":"multibyte BMP fits the stock cap","fill":"é","repeat":5000,"separator":"\r\n","checks":[[0,[[0,1],[10003,10004]]],[1,[[0,1],[10003,10004]]],[10003,[[0,1],[10003,10004]]],[10004,[[0,1],[10003,10004]]]]}
+{"name":"supplementary text reaches the cap exactly","fill":"😀","repeat":4999,"separator":"\r\n","checks":[[0,[[0,1],[19999,20000]]],[1,[[0,1],[19999,20000]]],[19999,[[0,1],[19999,20000]]],[20000,[[0,1],[19999,20000]]]]}
+{"name":"lone CR reaches a logical boundary past the cap","fill":"😀","repeat":5000,"separator":"\r","checks":[[0,[]],[1,[]],[20002,[[0,1],[20002,20003]]],[20003,[[0,1],[20002,20003]]]]}
+{"name":"a same-line match can overshoot the cap","fill":"😀","repeat":6000,"separator":"","checks":[[0,[[0,1],[24001,24002]]],[1,[[0,1],[24001,24002]]],[24001,[[0,1],[24001,24002]]],[24002,[[0,1],[24001,24002]]]]}

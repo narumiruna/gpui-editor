@@ -1,0 +1,23 @@
+{"name":"inside a double literal","before":{"body":"\" \"","selection":[1,1]},"after":[["\"",{"body":"\"\" \"","selection":[2,2]}]]}
+{"name":"inside a single literal","before":{"body":"' '","selection":[1,1]},"after":[["'",{"body":"'' '","selection":[2,2]}]]}
+{"name":"inside raw string after a non-BMP scalar and CRLF","before":{"body":"x = 0\r\nr\"😀 \"","selection":[13,13]},"after":[["\"",{"body":"x = 0\r\nr\"😀\" \"","selection":[14,14]}]]}
+{"name":"inside raw format string","before":{"body":"rf\"  \"","selection":[4,4]},"after":[["\"",{"body":"rf\" \" \"","selection":[5,5]}]]}
+{"name":"inside format replacement expression","before":{"body":"f\"{(  )}\"","selection":[5,5]},"after":[["\"",{"body":"f\"{( \"\" )}\"","selection":[6,6]}]]}
+{"name":"inside triple literal","before":{"body":"\"\"\"\r\n😀 \"\"\"","selection":[9,9]},"after":[["\"",{"body":"\"\"\"\r\n😀\" \"\"\"","selection":[10,10]}]]}
+{"name":"other quote inside a literal","before":{"body":"\"  \"","selection":[2,2]},"after":[["'",{"body":"\" '' \"","selection":[3,3]}]]}
+{"name":"after an escape inside a literal","before":{"body":"\"\\\" \"","selection":[3,3]},"after":[["\"",{"body":"\"\\\"\" \"","selection":[4,4]}]]}
+{"name":"before a parsed opener","before":{"body":"\"x\"","selection":[0,0]},"after":[["\"",{"body":"\"\"\"x\"","selection":[1,1]}]]}
+{"name":"before a second adjacent literal","before":{"body":"\"a\"\"b\"","selection":[3,3]},"after":[["\"",{"body":"\"a\"\"\"\"b\"","selection":[4,4]}]]}
+{"name":"after a prefix before a parsed opener","before":{"body":"r\"x\"","selection":[1,1]},"after":[["\"",{"body":"r\"\"x\"","selection":[2,2]}]]}
+{"name":"before an untracked closer","before":{"body":"\"x\"","selection":[2,2]},"after":[["\"",{"body":"\"x\"\"","selection":[3,3]}]]}
+{"name":"at the end of a complete literal","before":{"body":"\"x\"","selection":[3,3]},"after":[["\"",{"body":"\"x\"\"","selection":[4,4]}]]}
+{"name":"after whitespace outside a literal","before":{"body":"\"x\" ","selection":[4,4]},"after":[["\"",{"body":"\"x\" \"\"","selection":[5,5]}]]}
+{"name":"unterminated literal with a native string node","before":{"body":"\"x ","selection":[3,3]},"after":[["\"",{"body":"\"x \"","selection":[4,4]}]]}
+{"name":"comment with a quote is not a literal","before":{"body":"# \" ","selection":[4,4]},"after":[["\"",{"body":"# \" \"\"","selection":[5,5]}]]}
+{"name":"mixed-case prefix not in closeBrackets data","before":{"body":"fR","selection":[2,2]},"after":[["\"",{"body":"fR\"","selection":[3,3]}]]}
+{"name":"reverse selection with UTF-8 offsets","before":{"body":"x = 字","selection":[7,4]},"after":[["\"",{"body":"x = \"字\"","selection":[8,5]}]]}
+{"name":"single quote pair, skip, triple pair, triple skip","before":{"body":"x = ","selection":[4,4]},"after":[["'",{"body":"x = ''","selection":[5,5]}],["'",{"body":"x = ''","selection":[6,6]}],["'",{"body":"x = ''''''","selection":[7,7]}],["'",{"body":"x = ''''''","selection":[10,10]}]]}
+{"name":"prefixed pair, skip, triple pair, triple skip","before":{"body":"r","selection":[1,1]},"after":[["\"",{"body":"r\"\"","selection":[2,2]}],["\"",{"body":"r\"\"","selection":[3,3]}],["\"",{"body":"r\"\"\"\"\"\"","selection":[4,4]}],["\"",{"body":"r\"\"\"\"\"\"","selection":[7,7]}]]}
+{"name":"untracked empty pair Backspace","before":{"body":"x = r\"\"","selection":[6,6]},"after":[["\b",{"body":"x = r","selection":[5,5]}]]}
+{"name":"tracked pair Backspace","before":{"body":"x = ","selection":[4,4]},"after":[["\"",{"body":"x = \"\"","selection":[5,5]}],["\b",{"body":"x = ","selection":[4,4]}]]}
+{"name":"triple Backspace only deletes adjacent quotes","before":{"body":"\"\"\"\"\"\"","selection":[3,3]},"after":[["\b",{"body":"\"\"\"\"","selection":[2,2]}]]}

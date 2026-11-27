@@ -1,0 +1,4 @@
+{"name":"startOnly","source":"(甲) [😀]","carets":[1,7],"marks":[[0,1,"cm-nonmatchingBracket"],[6,7,"cm-nonmatchingBracket"]]}
+{"name":"interior","source":"(甲) [😀]","carets":[1,7],"marks":[[1,4,"cm-matchingBracket"],[7,11,"cm-matchingBracket"]]}
+{"name":"empty","source":"(甲) [😀]","carets":[1,7],"marks":[]}
+{"name":"unstyled","source":"(甲) [😀]","carets":[1,7],"marks":[[0,1,"host-custom"],[6,7,"host-custom"]]}

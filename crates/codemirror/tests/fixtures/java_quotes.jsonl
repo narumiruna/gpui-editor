@@ -1,0 +1,15 @@
+{"name":"inside-double","source":"class A { String s = \"😀 \"; }","head":26,"key":"\"","after":"class A { String s = \"😀\" \"; }","position":27,"handled":false}
+{"name":"escape","source":"class A { String s = \"\\\" \"; }","head":24,"key":"\"","after":"class A { String s = \"\\\"\" \"; }","position":25,"handled":false}
+{"name":"inside-block","source":"class A {\r\n String s = \"\"\"\r\n  甲😀 \r\n \"\"\";\r\n}","head":37,"key":"\"","after":"class A {\r\n String s = \"\"\"\r\n  甲😀\" \r\n \"\"\";\r\n}","position":38,"handled":false}
+{"name":"inside-character","source":"class A { char a = ' '; }","head":20,"key":"'","after":"class A { char a = '' '; }","position":21,"handled":false}
+{"name":"before-open","source":"class A { String s = \"字\"; }","head":21,"key":"\"","after":"class A { String s = \"\"\"字\"; }","position":22,"handled":true}
+{"name":"inside-other-quote","source":"class A { String s = \"x  \"; }","head":24,"key":"'","after":"class A { String s = \"x '' \"; }","position":25,"handled":true}
+{"name":"before-untracked-close","source":"class A { String s = \"x\"; }","head":23,"key":"\"","after":"class A { String s = \"x\"\"; }","position":24,"handled":false}
+{"name":"after-close","source":"class A { String s = \"x\"; }","head":24,"key":"\"","after":"class A { String s = \"x\"\"; }","position":25,"handled":false}
+{"name":"after-space","source":"class A { String s = \"x\" ; }","head":25,"key":"\"","after":"class A { String s = \"x\" \"\"; }","position":26,"handled":true}
+{"name":"line-comment","source":"class A { // \" \r\n }","head":15,"key":"\"","after":"class A { // \" \"\"\r\n }","position":16,"handled":true}
+{"name":"block-comment","source":"class A { /* \"  */ }","head":15,"key":"\"","after":"class A { /* \" \"\" */ }","position":16,"handled":true}
+{"name":"new-character","source":"class A { char x = ; }","head":19,"key":"'","after":"class A { char x = ''; }","position":20,"handled":true}
+{"name":"quoted-character","source":"class A { char x = '\\''; }","head":22,"key":"'","after":"class A { char x = '\\'''; }","position":23,"handled":false}
+{"name":"missing-close","source":"class A { String s = \"x ; }","head":24,"key":"\"","after":"class A { String s = \"x \"\"; }","position":25,"handled":true}
+{"name":"after-word","source":"class A { Object o = test; }","head":25,"key":"\"","after":"class A { Object o = test\"; }","position":26,"handled":false}

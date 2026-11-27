@@ -1,0 +1,15 @@
+{"name":"exact custom","query":["leaf",["a"]],"rules":[["leaf",["a"]],["leaf",[]]],"rgb":"123456"}
+{"name":"different same name","query":["leaf",["b"]],"rules":[["leaf",["a"]],["leaf",[]]],"rgb":"654321"}
+{"name":"custom ancestor","query":["leaf",["b"]],"rules":[["root",["b"]],["number",["b"]]],"rgb":"123456"}
+{"name":"standard ancestor","query":["leaf",["b"]],"rules":[["number",["b"]],["number",[]]],"rgb":"123456"}
+{"name":"unmodified child first","query":["leaf",["b"]],"rules":[["leaf",[]],["root",["b"]]],"rgb":"123456"}
+{"name":"larger subset first","query":["leaf",["d","b","a"]],"rules":[["leaf",["b","d"]],["leaf",["a"]]],"rgb":"123456"}
+{"name":"first defined custom first","query":["leaf",["b","a"]],"rules":[["leaf",["a"]],["leaf",["b"]]],"rgb":"123456"}
+{"name":"first defined custom first reversed","query":["leaf",["a","b"]],"rules":[["leaf",["b"]],["leaf",["a"]]],"rgb":"654321"}
+{"name":"mixed subset first","query":["leaf",["a","function","definition"]],"rules":[["leaf",["function","definition"]],["leaf",["a","definition"]]],"rgb":"123456"}
+{"name":"highest differing id first","query":["leaf",["d","b","a","c"]],"rules":[["leaf",["c","b"]],["leaf",["d","a"]]],"rgb":"123456"}
+{"name":"mixed highest differing id first","query":["leaf",["b","a","function"]],"rules":[["leaf",["a","b"]],["leaf",["a","function"]]],"rgb":"654321"}
+{"name":"exact mixed","query":["leaf",["a","function","a"]],"rules":[["leaf",["function","a"]],["leaf",["function"]]],"rgb":"123456"}
+{"name":"duplicate selector last","query":["leaf",["function","a"]],"rules":[["leaf",["function","a"]],["leaf",["a","function","a"]]],"rgb":"654321"}
+{"name":"unrelated modifier ignored","query":["root",["function"]],"rules":[["root",["a"]]],"rgb":null}
+{"idempotent":true,"commutes":true,"distinct":true,"modifiedParentRejected":true}

@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+use std::rc::Rc;
 use std::{
     collections::{HashMap, HashSet},
     ops::Range,
@@ -6,7 +8,25 @@ use std::{
 
 use gpui::{
     App, Bounds, Context, Edges, FontStyle, FontWeight, Pixels, Point, RenderImage, ShapedLine,
-    SharedString, TextRun, UnderlineStyle, Window, point, px, quad, size,
+    SharedString, StrikethroughStyle, TextRun, UnderlineStyle, Window, fill, point, px, quad, rgba,
+    size,
+};
+#[cfg(target_os = "macos")]
+use gpui_editor_codemirror::view::bidi::BidiIsolate;
+use gpui_editor_codemirror::{
+    Assoc, EditorSelection, EditorState, SelectionRange, Text,
+    language::{
+        Color, HighlightContext, HighlightProperties, HighlightSpan, HighlightTag, StreamSettings,
+        TextDecoration, highlighting_for_context,
+    },
+    language_data::SupportedDocument,
+    theme_one_dark::highlight_configuration,
+    view::{
+        ScrollBlock, ViewHighlight,
+        bidi::{Direction, move_visually},
+        gutters::highlight_active_line_gutter_enabled,
+        placeholder_projection,
+    },
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -19,11 +39,25 @@ use crate::{
     workspace::Workspace,
 };
 
+#[cfg(test)]
+mod active_line_tests;
+mod bidi;
 mod blocks;
+mod gutter;
+#[cfg(target_os = "macos")]
+mod isolation;
+#[cfg(target_os = "macos")]
+mod textkit;
 
+use bidi::BidiRow;
 use blocks::BlockLayout;
+use gutter::SourceGutter;
+#[cfg(target_os = "macos")]
+use isolation::{BodyCache, CachedBody, IsolatedRow};
+#[cfg(not(target_os = "macos"))]
+type BodyCache = std::convert::Infallible;
 
-const CODE_FONT_FAMILY: &str = if cfg!(target_os = "windows") {
+pub(super) const CODE_FONT_FAMILY: &str = if cfg!(target_os = "windows") {
     "Consolas"
 } else {
     "Menlo"
@@ -60,23 +94,170 @@ impl Graphic {
     }
 }
 
+pub(super) const DEFAULT_LINE_HEIGHT: Pixels = px(26.);
+
 const SOURCE_PADDING: Pixels = px(8.);
 const SOURCE_HEADER: Pixels = px(24.);
 const SOURCE_MARGIN: Pixels = px(4.);
 
 pub(super) struct Layout {
+    pub(super) theme: Theme,
     pub(super) origin: Point<Pixels>,
     pub(super) rows: Vec<Row>,
     pub(super) source_frame: Option<SourceFrame>,
+    // Paint only. This list does not take part in source geometry or hit testing.
+    placeholders: Vec<Placeholder>,
+    #[cfg(test)]
+    pub(super) painted_drop_cursor: Option<gpui::PaintQuad>,
+    #[cfg(test)]
+    pub(super) painted_carets: Vec<gpui::PaintQuad>,
+    #[cfg(test)]
+    pub(super) painted_find_quads: Vec<gpui::PaintQuad>,
+    #[cfg(test)]
+    pub(super) painted_bracket_quads: Vec<gpui::PaintQuad>,
+    #[cfg(test)]
+    pub(super) painted_active_lines: PaintedActiveLines,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+pub(super) struct PaintedActiveLines {
+    content: Vec<gpui::PaintQuad>,
+    gutter: Vec<gpui::PaintQuad>,
+    pub(super) ordinary_gutter: Vec<gpui::PaintQuad>,
+    pub(super) gutter_labels: Vec<ShapedLine>,
+}
+
+#[derive(Default)]
+pub(super) struct ActiveSourceHighlights {
+    content: Vec<Range<usize>>,
+    gutter: Vec<Range<usize>>,
+    legacy: bool,
+}
+
+impl ActiveSourceHighlights {
+    pub(super) fn paint_row(
+        &self,
+        frame: &SourceFrame,
+        origin: Point<Pixels>,
+        row: &Row,
+        theme: Theme,
+        window: &mut Window,
+        #[cfg(test)] painted: &mut PaintedActiveLines,
+    ) {
+        let content = frame.active_line_bounds(origin, row, &self.content);
+        if let Some(mut bounds) = content {
+            if !self.legacy
+                && let Some(gutter) = &frame.gutter
+            {
+                // Without a themed background, the gutter cannot cover a content fill.
+                let left = origin.x + SOURCE_PADDING + gutter.width;
+                bounds.size.width = (bounds.right() - left).max(px(0.));
+                bounds.origin.x = left;
+            }
+            if bounds.size.width > px(0.) {
+                // CodeMirror view 6.44.0 base light fill when there is no view style.
+                let color = theme
+                    .view
+                    .map_or(0xcceeff44, |style| style.active_line.rgba32());
+                let quad = fill(bounds, rgba(color));
+                #[cfg(test)]
+                painted.content.push(quad.clone());
+                window.paint_quad(quad);
+            }
+        }
+        if let Some(bounds) = frame
+            .gutter
+            .as_ref()
+            .and_then(|gutter| gutter.row_bounds(origin, row))
+        {
+            let active = (self.legacy && content.is_some())
+                || frame
+                    .active_line_bounds(origin, row, &self.gutter)
+                    .is_some();
+            let color = if active {
+                Some(
+                    theme
+                        .view
+                        .map_or(0xe2f2ffff, |style| style.active_line_gutter.rgba32()),
+                )
+            } else {
+                theme.view.map(|style| style.gutters.background.rgba32())
+            };
+            if let Some(color) = color {
+                let quad = fill(bounds, rgba(color));
+                #[cfg(test)]
+                if active {
+                    painted.gutter.push(quad.clone());
+                } else {
+                    painted.ordinary_gutter.push(quad.clone());
+                }
+                window.paint_quad(quad);
+            }
+        }
+    }
+}
+
+struct Placeholder {
+    line: ShapedLine,
+    #[cfg(test)]
+    painted_at: Option<Point<Pixels>>,
 }
 
 pub(super) struct SourceFrame {
     pub(super) bounds: Bounds<Pixels>,
     content: Range<usize>,
+    editable: Option<Range<usize>>,
     label: ShapedLine,
+    gutter: Option<SourceGutter>,
 }
 
 impl SourceFrame {
+    pub(super) fn paint_gutter_row(
+        &self,
+        origin: Point<Pixels>,
+        row: &Row,
+        theme: Theme,
+        window: &mut Window,
+        cx: &mut App,
+        #[cfg(test)] painted: &mut PaintedActiveLines,
+    ) {
+        if let Some(gutter) = &self.gutter {
+            gutter.paint_row(
+                origin,
+                row,
+                theme,
+                window,
+                cx,
+                #[cfg(test)]
+                &mut painted.gutter_labels,
+            );
+        }
+    }
+
+    pub(super) fn active_line_bounds(
+        &self,
+        origin: Point<Pixels>,
+        row: &Row,
+        lines: &[Range<usize>],
+    ) -> Option<Bounds<Pixels>> {
+        let next = lines.partition_point(|line| line.start <= row.start);
+        let line = lines.get(next.checked_sub(1)?)?;
+        if row.start > line.end
+            || row.start < self.content.start
+            || row.start > self.content.end
+            || row.y < self.bounds.top() + SOURCE_HEADER
+            || row.y + row.height > self.bounds.bottom()
+        {
+            return None;
+        }
+        let side = px(1.);
+        Some(Bounds::new(
+            origin + point(self.bounds.left() + side, row.y),
+            size((self.bounds.size.width - side * 2.).max(px(0.)), row.height),
+        ))
+    }
+
     pub(super) fn paint(
         &self,
         origin: Point<Pixels>,
@@ -118,12 +299,62 @@ pub(super) struct Row {
 
 impl Row {
     fn position_at(&self, x: Pixels) -> (usize, bool) {
+        #[cfg(target_os = "macos")]
+        if let Some(hit) = self.isolated_hit(x, self.height / 2.) {
+            return (hit.head(), self.soft_end && hit.head() == self.end);
+        }
         let offset = self
             .items
             .iter()
             .find(|item| x < item.left + item.width)
             .map_or(self.end, |item| item.offset(x));
         (offset, self.soft_end && offset == self.end)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn isolated_item(&self) -> Option<(&Item, &IsolatedRow)> {
+        let [item] = self.items.as_slice() else {
+            return None;
+        };
+        let ItemPaint::Isolated(native) = &item.paint else {
+            return None;
+        };
+        Some((item, native))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn isolated_hit(&self, x: Pixels, y: Pixels) -> Option<SelectionRange> {
+        let (item, native) = self.isolated_item()?;
+        if x < item.left || !(px(0.)..self.height).contains(&y) {
+            return None;
+        }
+        native.hit(point(x - item.left, y))
+    }
+
+    fn caret_at(&self, x: Pixels) -> SelectionRange {
+        #[cfg(target_os = "macos")]
+        if let Some(hit) = self.isolated_hit(x, self.height / 2.) {
+            return hit;
+        }
+        if let [item] = self.items.as_slice()
+            && let Some(bidi) = &item.bidi
+            && (item.left..=item.left + item.width).contains(&x)
+        {
+            let hit = bidi.hit(x - item.left);
+            return EditorSelection::cursor(
+                item.source.start + hit.head(),
+                hit.assoc(),
+                hit.bidi_level(),
+                None,
+            );
+        }
+        let (head, upstream) = self.position_at(x);
+        let assoc = if upstream {
+            Assoc::Before
+        } else {
+            Assoc::After
+        };
+        EditorSelection::cursor(head, Some(assoc), None, None)
     }
 
     fn x_at(&self, offset: usize) -> Pixels {
@@ -138,6 +369,7 @@ pub(super) struct Item {
     pub(super) source: Range<usize>,
     pub(super) target: Option<Section>,
     atomic: bool,
+    bidi: Option<Box<BidiRow>>,
     pub(super) left: Pixels,
     pub(super) width: Pixels,
     pub(super) paint: ItemPaint,
@@ -145,6 +377,9 @@ pub(super) struct Item {
 
 pub(super) enum ItemPaint {
     Text(Box<ShapedLine>),
+    #[cfg(target_os = "macos")]
+    Isolated(Rc<IsolatedRow>),
+    Fold(Box<ShapedLine>),
     Graphic(Graphic),
     Block(Box<BlockLayout>),
 }
@@ -161,7 +396,14 @@ impl Item {
         if x <= px(0.) {
             return self.source.start;
         }
+        if let Some(bidi) = &self.bidi {
+            return self.source.start + bidi.hit(x).head();
+        }
         match &self.paint {
+            #[cfg(target_os = "macos")]
+            ItemPaint::Isolated(native) => native
+                .hit(point(x, native.height() / 2.))
+                .map_or(self.source.start, SelectionRange::head),
             ItemPaint::Text(line) if !self.atomic => {
                 let index = line.closest_index_for_x(x);
                 self.source.start
@@ -185,9 +427,17 @@ impl Item {
         }
     }
 
-    pub(super) fn x(&self, offset: usize) -> Pixels {
+    fn x(&self, offset: usize) -> Pixels {
+        if let Some(x) = offset
+            .checked_sub(self.source.start)
+            .and_then(|local| self.bidi.as_ref()?.x_at(local, None, None))
+        {
+            return self.left + x;
+        }
         self.left
             + match &self.paint {
+                #[cfg(target_os = "macos")]
+                ItemPaint::Isolated(native) => native.x_at(offset, None),
                 ItemPaint::Text(line) if !self.atomic => line.x_for_index(
                     offset.clamp(self.source.start, self.source.end) - self.source.start,
                 ),
@@ -201,8 +451,63 @@ impl Item {
             }
     }
 
+    pub(super) fn is_text(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        if matches!(self.paint, ItemPaint::Isolated(_)) {
+            return true;
+        }
+        matches!(self.paint, ItemPaint::Text(_))
+    }
+
+    fn uses_bidi_carets(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        if matches!(self.paint, ItemPaint::Isolated(_)) {
+            return true;
+        }
+        self.bidi.is_some()
+    }
+
+    pub(super) fn selection_source(&self) -> Range<usize> {
+        #[cfg(target_os = "macos")]
+        if let ItemPaint::Isolated(native) = &self.paint {
+            return native.selection_source();
+        }
+        self.source.clone()
+    }
+
+    /// Horizontal intervals of a selected source range. Bidi runs can put
+    /// parts of a logical range at nonadjacent positions on the same row.
+    pub(super) fn x_spans(
+        &self,
+        source: Range<usize>,
+    ) -> impl Iterator<Item = Range<Pixels>> + use<> {
+        let start = source.start.max(self.source.start);
+        let end = source.end.min(self.source.end);
+        let (plain, bidi) = match (&self.paint, &self.bidi) {
+            #[cfg(target_os = "macos")]
+            (ItemPaint::Isolated(native), _) => (None, native.x_spans(source)),
+            _ if start >= end => (None, Vec::new()),
+            (_, Some(bidi)) => (
+                None,
+                bidi.selection_spans(start - self.source.start..end - self.source.start),
+            ),
+            _ => {
+                let x = self.x(start);
+                let y = self.x(end);
+                (Some(x.min(y)..x.max(y)), Vec::new())
+            }
+        };
+        let left = self.left;
+        plain.into_iter().chain(
+            bidi.into_iter()
+                .map(move |span| left + span.start..left + span.end),
+        )
+    }
+
     fn stops(&self) -> Vec<usize> {
         match &self.paint {
+            #[cfg(target_os = "macos")]
+            ItemPaint::Isolated(native) => native.logical_stops(),
             ItemPaint::Text(line) if !self.atomic => line
                 .text
                 .grapheme_indices(true)
@@ -215,10 +520,58 @@ impl Item {
 }
 
 impl Layout {
+    pub(super) fn paint_placeholders(&mut self, window: &mut Window, cx: &mut App) {
+        if self.placeholders.is_empty() {
+            return;
+        }
+        let row = &self.rows[0];
+        let mut origin = self.origin + point(px(1.), row.y);
+        let clip = window.content_mask().bounds;
+        for placeholder in &mut self.placeholders {
+            let bounds = Bounds::new(origin, size(placeholder.line.width, row.height));
+            if clip.intersects(&bounds) {
+                let result = placeholder.line.paint(origin, row.height, window, cx);
+                #[cfg(test)]
+                if result.is_ok() {
+                    placeholder.painted_at = Some(origin);
+                }
+                let _ = result;
+            }
+            origin.x += bounds.size.width;
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn painted_placeholders(&self) -> impl Iterator<Item = (&str, Point<Pixels>)> {
+        self.placeholders.iter().filter_map(|placeholder| {
+            Some((placeholder.line.text.as_ref(), placeholder.painted_at?))
+        })
+    }
+
     pub(super) fn row_at(&self, position: Point<Pixels>) -> &Row {
         let y = position.y - self.origin.y;
         let index = self.rows.partition_point(|row| row.y + row.height <= y);
         &self.rows[index.min(self.rows.len() - 1)]
+    }
+
+    pub(super) fn scroll_block_at_height(&self, height: f64) -> ScrollBlock {
+        let height = Pixels::from(height);
+        let index = self.rows.partition_point(|row| row.y + row.height < height);
+        let row = &self.rows[index.min(self.rows.len() - 1)];
+        ScrollBlock {
+            from: row.start,
+            top: row.y.into(),
+        }
+    }
+
+    pub(super) fn scroll_block_top(&self, from: usize) -> f64 {
+        let index = self.rows.partition_point(|row| row.start < from);
+        let row = self
+            .rows
+            .get(index)
+            .filter(|row| row.start == from)
+            .unwrap_or(&self.rows[index.saturating_sub(1)]);
+        row.y.into()
     }
 
     pub(super) fn source_frame_contains(&self, position: Point<Pixels>) -> bool {
@@ -257,7 +610,14 @@ impl Layout {
                 return (frame.content.end, false);
             }
         }
-        let (offset, upstream) = self.row_at(position).position_at(local.x);
+        let row = self.row_at(position);
+        #[cfg(not(target_os = "macos"))]
+        let (offset, upstream) = row.position_at(local.x);
+        #[cfg(target_os = "macos")]
+        let (offset, upstream) = row.isolated_hit(local.x, local.y - row.y).map_or_else(
+            || row.position_at(local.x),
+            |hit| (hit.head(), row.soft_end && hit.head() == row.end),
+        );
         (
             frame.map_or(offset, |frame| {
                 offset.clamp(frame.content.start, frame.content.end)
@@ -266,9 +626,208 @@ impl Layout {
         )
     }
 
+    // GPUI's test platform has no text shaper. Tests can install the glyph
+    // positions of a shaped row without substituting the movement algorithm.
+    #[cfg(test)]
+    pub(super) fn set_bidi_test_geometry(
+        &mut self,
+        start: usize,
+        width: Pixels,
+        glyphs: impl IntoIterator<Item = (usize, Pixels)>,
+    ) {
+        let index = self.row_index(start, false).unwrap();
+        let row = &mut self.rows[index];
+        let [item] = row.items.as_mut_slice() else {
+            panic!("one item for a source row");
+        };
+        let ItemPaint::Text(line) = &item.paint else {
+            panic!("a shaped source row");
+        };
+        item.bidi = Some(Box::new(
+            BidiRow::measure(&line.text, width, glyphs).unwrap(),
+        ));
+        item.width = width;
+        row.width = item.left + width;
+    }
+
+    pub(super) fn bidi_hit_at(&self, position: Point<Pixels>) -> Option<SelectionRange> {
+        #[cfg(target_os = "macos")]
+        if self.source_frame_contains(position) {
+            let row = self.row_at(position);
+            let local = position - self.origin;
+            if let Some(hit) = row.isolated_hit(local.x, local.y - row.y) {
+                return Some(hit);
+            }
+        }
+        let item = self.item_at(position)?;
+        let hit = item
+            .bidi
+            .as_ref()?
+            .hit(position.x - self.origin.x - item.left);
+        Some(EditorSelection::cursor(
+            item.source.start + hit.head(),
+            hit.assoc(),
+            hit.bidi_level(),
+            None,
+        ))
+    }
+
+    pub(super) fn uses_bidi_carets(&self, head: usize) -> bool {
+        self.row_index(head, false).is_some_and(|row| {
+            self.rows[row].items.iter().any(|item| {
+                item.uses_bidi_carets() && (item.source.start..=item.source.end).contains(&head)
+            })
+        })
+    }
+
+    pub(super) fn bidi_step<'a>(
+        &self,
+        text: &'a Text,
+        start: SelectionRange,
+        forward: bool,
+    ) -> Option<(SelectionRange, &'a str)> {
+        let row = self.rows.get(self.row_index(start.head(), false)?)?;
+        let [item] = row.items.as_slice() else {
+            return None;
+        };
+        #[cfg(target_os = "macos")]
+        if let ItemPaint::Isolated(native) = &item.paint
+            && !native.has_visual_motion()
+        {
+            // On wrapped or visually ambiguous rows, keep logical motion but
+            // do not discard the native association of the current selection.
+            let start = start.head();
+            let head = self.step(start, forward);
+            let crossed = text.slice(start.min(head)..start.max(head))?;
+            let assoc = if forward { Assoc::Before } else { Assoc::After };
+            return (head != start).then(|| {
+                (
+                    EditorSelection::cursor(head, Some(assoc), None, None),
+                    if crossed == "\r\n" { "\n" } else { crossed },
+                )
+            });
+        }
+        let line = text.line_at(start.head())?;
+        if line.range != item.source {
+            return None;
+        }
+        #[cfg(target_os = "macos")]
+        let use_gpui = if let ItemPaint::Isolated(native) = &item.paint {
+            if let Some(step) = native.visual_step(text, start, forward) {
+                return Some(step);
+            }
+            false
+        } else {
+            true
+        };
+        #[cfg(not(target_os = "macos"))]
+        let use_gpui = true;
+        if use_gpui {
+            let bidi = item.bidi.as_ref()?;
+            bidi.x_at(
+                start.head() - line.range.start,
+                start.assoc(),
+                start.bidi_level(),
+            )?;
+            if let Some(moved) = move_visually(&line, bidi.spans(), Direction::Ltr, start, forward)
+            {
+                let next = moved.selection;
+                bidi.x_at(
+                    next.head() - line.range.start,
+                    next.assoc(),
+                    next.bidi_level(),
+                )?;
+                return Some((next, moved.moved_over));
+            }
+        }
+        let adjacent = text.line(if forward {
+            line.number + 1
+        } else {
+            line.number - 1
+        })?;
+        let next = if forward {
+            EditorSelection::cursor(adjacent.range.start, Some(Assoc::Before), None, None)
+        } else {
+            EditorSelection::cursor(adjacent.range.end, Some(Assoc::After), None, None)
+        };
+        self.bounds_at_selection(next, false)?;
+        Some((next, "\n"))
+    }
+
+    pub(super) fn fold_hides(&self, offset: usize) -> bool {
+        self.row_index(offset, false).is_some_and(|index| {
+            self.rows[index].items.iter().any(|item| {
+                matches!(item.paint, ItemPaint::Fold(_))
+                    && item.source.start < offset
+                    && offset < item.source.end
+            })
+        })
+    }
+
     pub(super) fn bounds_at(&self, offset: usize, upstream: bool) -> Option<Bounds<Pixels>> {
         let row = &self.rows[self.row_index(offset, upstream)?];
         Some(self.bounds_in_row(row, offset))
+    }
+
+    pub(super) fn bounds_at_selection(
+        &self,
+        range: SelectionRange,
+        upstream: bool,
+    ) -> Option<Bounds<Pixels>> {
+        let index = self.row_index(range.head(), upstream)?;
+        #[cfg(target_os = "macos")]
+        let index = if let Some(assoc) = range.assoc()
+            && (assoc == Assoc::Before) != upstream
+            && let Some(other) = self.row_index(range.head(), !upstream)
+            && index != other
+            && self.rows[index.min(other)].isolated_item().is_some()
+        {
+            other
+        } else {
+            index
+        };
+        let row = &self.rows[index];
+        #[cfg(target_os = "macos")]
+        if let Some((item, native)) = row.isolated_item() {
+            return Some(Bounds::new(
+                self.origin + point(item.left + native.x_at(range.head(), range.assoc()), row.y),
+                size(px(1.), row.height),
+            ));
+        }
+        if let [item] = row.items.as_slice()
+            && let Some(local) = range.head().checked_sub(item.source.start)
+            && let Some(x) = item
+                .bidi
+                .as_ref()
+                .and_then(|bidi| bidi.x_at(local, range.assoc(), range.bidi_level()))
+        {
+            return Some(Bounds::new(
+                self.origin + point(item.left + x, row.y),
+                size(px(1.), row.height),
+            ));
+        }
+        Some(self.bounds_in_row(row, range.head()))
+    }
+
+    pub(super) fn drop_cursor_bounds(&self, offset: usize) -> Option<Bounds<Pixels>> {
+        let row = &self.rows[self.row_index(offset, false)?];
+        // Selection geometry can snap through source gaps or use atomic preview
+        // edges. Require a real projected text stop instead.
+        let stop = if row.items.is_empty() {
+            offset == row.start && offset == row.end
+        } else {
+            row.items.iter().any(|item| {
+                !item.atomic
+                    && item.is_text()
+                    && (item.source.start..=item.source.end).contains(&offset)
+                    && item.stops().contains(&offset)
+            })
+        };
+        if !stop {
+            return None;
+        }
+        let caret = EditorSelection::cursor(offset, Some(Assoc::After), None, None);
+        self.bounds_at_selection(caret, false)
     }
 
     fn bounds_in_row(&self, row: &Row, offset: usize) -> Bounds<Pixels> {
@@ -319,7 +878,109 @@ impl Layout {
         let index = self.rows.partition_point(|row| {
             row.end < offset || (!upstream && row.soft_end && row.end == offset)
         });
+        // A programmatic selection can address the middle of CRLF even
+        // though no pointer or keyboard stop can. Keep it on the break's row.
+        #[cfg(target_os = "macos")]
+        if let Some(previous) = index.checked_sub(1) {
+            let row = &self.rows[previous];
+            if row.end < offset && offset <= row.hidden_end && row.isolated_item().is_some() {
+                return Some(previous);
+            }
+        }
         (index < self.rows.len()).then_some(index)
+    }
+
+    pub(super) fn line_block(&self, head: usize) -> Option<Range<usize>> {
+        let row = self.row_index(head, false)?;
+        let first = self.rows[..row]
+            .iter()
+            .rposition(|row| !row.soft_end)
+            .map_or(0, |previous| previous + 1);
+        let last = self.rows[row..].iter().find(|row| !row.soft_end)?;
+        Some(self.rows[first].start..last.end)
+    }
+
+    pub(super) fn active_source_highlights(
+        &self,
+        state: &EditorState,
+        focused: bool,
+        input_enabled: bool,
+    ) -> ActiveSourceHighlights {
+        // The workspace freezes the source canvas during operations. The
+        // explicit extensions themselves are still installed in that state.
+        if !input_enabled || self.source_frame.is_none() {
+            return ActiveSourceHighlights::default();
+        }
+        let line = ViewHighlight::ActiveLine.enabled(state);
+        let gutter = highlight_active_line_gutter_enabled(state);
+        if line || gutter {
+            return ActiveSourceHighlights {
+                content: if line {
+                    self.active_content_blocks(state)
+                } else {
+                    Vec::new()
+                },
+                gutter: if gutter {
+                    self.active_gutter_blocks(state.selection())
+                } else {
+                    Vec::new()
+                },
+                legacy: false,
+            };
+        }
+        // Customizing either channel replaces the shared GPUI default. The
+        // original focused, themed highlight returns when neither is installed.
+        if focused && self.theme.view.is_some() {
+            return ActiveSourceHighlights {
+                content: self.active_source_lines(state.text(), state.selection()),
+                legacy: true,
+                ..Default::default()
+            };
+        }
+        ActiveSourceHighlights::default()
+    }
+
+    fn active_content_blocks(&self, state: &EditorState) -> Vec<Range<usize>> {
+        let Some(scope) = self
+            .source_frame
+            .as_ref()
+            .and_then(|frame| frame.editable.as_ref())
+        else {
+            return Vec::new();
+        };
+        let text = state.text().as_str().as_bytes();
+        let blocks = state.selection().ranges().iter().filter_map(|range| {
+            let head = range.head();
+            if !(scope.start..=scope.end).contains(&head) {
+                return None;
+            }
+            let block = self
+                .line_block(head)
+                .filter(|block| (block.start..=block.end).contains(&head))
+                // A programmatic head can be between CR and LF. Use the
+                // preceding measured block, but never cross a fence separator.
+                .or_else(|| {
+                    (head > scope.start && text.get(head - 1..=head) == Some(b"\r\n"))
+                        .then(|| self.line_block(head - 1))
+                        .flatten()
+                })?;
+            (scope.start <= block.start && block.end <= scope.end).then_some(block)
+        });
+        distinct_line_blocks(blocks)
+    }
+
+    pub(super) fn row_edge(
+        &self,
+        offset: usize,
+        upstream: bool,
+        forward: bool,
+    ) -> Option<(usize, bool)> {
+        let row = &self.rows[self.row_index(offset, upstream)?];
+        Some(if forward {
+            (row.end, row.soft_end)
+        } else {
+            (row.start, false)
+        })
     }
 
     pub(super) fn vertical(
@@ -336,17 +997,62 @@ impl Layout {
         Some((next.position_at(x), x))
     }
 
+    pub(super) fn vertical_caret(
+        &self,
+        caret: SelectionRange,
+        preferred_x: Option<Pixels>,
+        page: Option<Pixels>,
+        down: bool,
+    ) -> Option<(SelectionRange, Pixels)> {
+        let upstream = caret.assoc() == Some(Assoc::Before);
+        let index = self.row_index(caret.head(), upstream)?;
+        let row = &self.rows[index];
+        let x = preferred_x.or_else(|| {
+            self.bounds_at_selection(caret, upstream)
+                .map(|bounds| bounds.left() - self.origin.x)
+        })?;
+        let next = if let Some(distance) = page {
+            let distance = distance.max(row.height);
+            let y = if down {
+                row.y + row.height + distance
+            } else {
+                row.y - distance
+            };
+            self.rows
+                .partition_point(|row| row.y + row.height <= y)
+                .min(self.rows.len() - 1)
+        } else if down {
+            index + 1
+        } else {
+            index.checked_sub(1)?
+        };
+        Some((self.rows.get(next)?.caret_at(x), x))
+    }
+
     pub(super) fn step(&self, offset: usize, right: bool) -> usize {
-        let stops = self.rows.iter().flat_map(|row| {
-            row.items
+        fn in_row(row: &Row, offset: usize, right: bool) -> Option<usize> {
+            let stops = row
+                .items
                 .iter()
                 .flat_map(Item::stops)
-                .chain([row.start, row.end])
-        });
+                .chain([row.start, row.end]);
+            if right {
+                stops.filter(|&stop| stop > offset).min()
+            } else {
+                stops.filter(|&stop| stop < offset).max()
+            }
+        }
         if right {
-            stops.filter(|stop| *stop > offset).min()
+            let first = self.rows.partition_point(|row| row.end <= offset);
+            self.rows[first..]
+                .iter()
+                .find_map(|row| in_row(row, offset, true))
         } else {
-            stops.filter(|stop| *stop < offset).max()
+            let end = self.rows.partition_point(|row| row.start < offset);
+            self.rows[..end]
+                .iter()
+                .rev()
+                .find_map(|row| in_row(row, offset, false))
         }
         .unwrap_or(offset)
     }
@@ -357,83 +1063,34 @@ struct LayoutBuilder<'a> {
     row: Row,
     window: &'a Window,
     theme: Theme,
+    highlights: &'a [(Range<usize>, HighlightProperties)],
     wrap_width: Pixels,
     inset: Pixels,
     source_frame: Option<SourceFrame>,
     marked: Option<Range<usize>>,
-    syntax: &'a [highlight::Span],
-}
-
-#[derive(Clone, Copy)]
-struct TextDecorations<'a> {
-    marked: Option<&'a Range<usize>>,
-    syntax: &'a [highlight::Span],
-    theme: Theme,
-}
-
-impl TextDecorations<'_> {
-    fn runs(self, source: Range<usize>, template: &TextRun) -> Vec<TextRun> {
-        let mut runs = Vec::new();
-        let mut push = |range: Range<usize>, color| {
-            let pieces = if let Some(marked) = self
-                .marked
-                .filter(|marked| marked.start < range.end && range.start < marked.end)
-            {
-                let start = range.start.max(marked.start);
-                let end = range.end.min(marked.end);
-                [
-                    (start - range.start, false),
-                    (end - start, true),
-                    (range.end - end, false),
-                ]
-            } else {
-                [(range.len(), false), (0, false), (0, false)]
-            };
-            for (len, marked) in pieces.into_iter().filter(|(len, _)| *len > 0) {
-                let mut run = TextRun {
-                    len,
-                    color,
-                    ..template.clone()
-                };
-                if marked {
-                    run.underline = Some(UnderlineStyle {
-                        color: Some(color),
-                        thickness: px(1.),
-                        wavy: false,
-                    });
-                }
-                runs.push(run);
-            }
-        };
-        let mut at = source.start;
-        let first = self.syntax.partition_point(|span| span.range.end <= at);
-        for span in &self.syntax[first..] {
-            if span.range.start >= source.end {
-                break;
-            }
-            let start = span.range.start.max(at);
-            let end = span.range.end.min(source.end);
-            push(at..start, template.color);
-            push(start..end, span.kind.color(self.theme));
-            at = end;
-        }
-        push(at..source.end, template.color);
-        runs
-    }
+    #[cfg(target_os = "macos")]
+    isolation_cache: Option<BodyCache>,
 }
 
 impl<'a> LayoutBuilder<'a> {
-    fn new(window: &'a Window, marked: Option<Range<usize>>, wrap_width: Pixels) -> Self {
+    fn new(
+        window: &'a Window,
+        theme: Theme,
+        marked: Option<Range<usize>>,
+        wrap_width: Pixels,
+    ) -> Self {
         Self {
             rows: Vec::new(),
             row: Self::row(0, px(0.)),
             window,
-            theme: Theme::for_window(window),
+            theme,
+            highlights: &[],
             wrap_width,
             inset: px(0.),
             source_frame: None,
             marked,
-            syntax: &[],
+            #[cfg(target_os = "macos")]
+            isolation_cache: None,
         }
     }
 
@@ -445,7 +1102,7 @@ impl<'a> LayoutBuilder<'a> {
             hidden_end: 0,
             soft_end: false,
             y,
-            height: px(26.),
+            height: DEFAULT_LINE_HEIGHT,
             width: px(0.),
         }
     }
@@ -476,8 +1133,12 @@ impl<'a> LayoutBuilder<'a> {
     }
 
     fn add_text(&mut self, source: &str, range: Range<usize>, face: Face) {
-        let mut start = range.start;
-        for text in source[range].split_inclusive('\n') {
+        let start = range.start;
+        self.add_text_at(&source[range], start, face);
+    }
+
+    fn add_text_at(&mut self, source: &str, mut start: usize, face: Face) {
+        for text in source.split_inclusive('\n') {
             let newline = text.ends_with('\n');
             let visible = if newline {
                 text.trim_end_matches('\n')
@@ -496,7 +1157,8 @@ impl<'a> LayoutBuilder<'a> {
         }
     }
 
-    fn add_source(&mut self, source: &str, section: &Section) {
+    fn add_source(&mut self, section: &Section, projection: &Projection<'_>) {
+        let state = projection.state;
         let content = section.content.clone();
         if !self.row.items.is_empty() {
             self.wrap_row(content.start);
@@ -507,8 +1169,65 @@ impl<'a> LayoutBuilder<'a> {
         self.row.width = SOURCE_PADDING;
         self.inset = SOURCE_PADDING;
         let width = self.wrap_width;
-        self.wrap_width = (width - SOURCE_PADDING).max(SOURCE_PADDING + px(1.));
-        self.add_text(source, content.clone(), Face::default());
+        let source_width = (width - SOURCE_PADDING).max(SOURCE_PADDING + px(1.));
+        self.wrap_width = source_width;
+        let body_lines = projection.body_lines.as_ref();
+        let gutter = projection.gutter_body.as_ref().and_then(|body| {
+            SourceGutter::new(state, body.clone(), body_lines, self.theme, self.window)
+        });
+        let source = state.text().as_str();
+        let body = gutter.as_ref().map_or(&content, |gutter| &gutter.body);
+        self.add_text(source, content.start..body.start, Face::default());
+        if let Some(gutter) = &gutter {
+            self.inset = SOURCE_PADDING + gutter.width;
+            self.row.width = self.inset;
+            self.wrap_width = source_width.max(self.inset + px(1.));
+        }
+        let body_text = body_lines
+            .filter(|_| gutter.is_some())
+            .map_or(&source[body.clone()], Text::as_str);
+        #[cfg(not(target_os = "macos"))]
+        let isolated = false;
+        #[cfg(target_os = "macos")]
+        let isolated = gutter.is_some()
+            && projection.folds.is_empty()
+            && self.marked.is_none()
+            && projection
+                .isolates
+                .as_deref()
+                .is_some_and(|marks| self.add_isolated(source, body.clone(), marks).is_some());
+        if !isolated {
+            let mut start = body.start;
+            for fold in &projection.folds {
+                self.add_text_at(
+                    &body_text[start - body.start..fold.start - body.start],
+                    start,
+                    Face::default(),
+                );
+                self.fold_placeholder(state, fold.clone());
+                start = fold.end;
+            }
+            self.add_text_at(&body_text[start - body.start..], start, Face::default());
+        }
+        self.inset = SOURCE_PADDING;
+        self.wrap_width = source_width;
+        self.add_text(source, body.end..content.end, Face::default());
+        if section.kind == SectionKind::DraftCode && self.marked.is_none() {
+            for row in self.rows[first..].iter_mut().chain([&mut self.row]) {
+                let [item] = row.items.as_mut_slice() else {
+                    continue;
+                };
+                let suffix = &source[row.end..];
+                if !row.soft_end
+                    && item.source == (row.start..row.end)
+                    && (row.start == 0 || source.as_bytes()[row.start - 1] == b'\n')
+                    && (suffix.is_empty() || suffix.starts_with('\n') || suffix.starts_with("\r\n"))
+                    && let ItemPaint::Text(line) = &item.paint
+                {
+                    item.bidi = BidiRow::new(line).map(Box::new);
+                }
+            }
+        }
         self.wrap_width = width;
         self.inset = px(0.);
 
@@ -543,11 +1262,52 @@ impl<'a> LayoutBuilder<'a> {
             .map(|row| row.width + SOURCE_PADDING)
             .fold(width.max(label.width + SOURCE_PADDING * 2.), Pixels::max);
         let bottom = self.row.y + self.row.height + SOURCE_PADDING;
+        let editable = if section.kind == SectionKind::DraftCode {
+            projection.editable_fence_body.clone()
+        } else {
+            Some(content.clone())
+        };
         self.source_frame = Some(SourceFrame {
             bounds: Bounds::new(point(px(0.), top), size(right, bottom - top)),
             content,
+            editable,
             label,
+            gutter,
         });
+    }
+
+    fn fold_placeholder(&mut self, state: &EditorState, source: Range<usize>) {
+        use gpui_editor_codemirror::language::fold::fold_placeholder;
+
+        let style = self.window.text_style();
+        let text = fold_placeholder(state, &source);
+        let label = text.as_ref().map_or("…", |widget| widget.text.as_ref());
+        let label = format!(" {} ", one_line(label));
+        let length = label.len();
+        let color = self.theme.view.map_or(self.theme.accent, |style| {
+            rgba(style.fold_placeholder.foreground.rgba32())
+        });
+        let line = self.window.text_system().shape_line(
+            label.into(),
+            px(16.),
+            &[TextRun {
+                len: length,
+                font: style.font(),
+                color: color.into(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            }],
+            None,
+        );
+        self.item(
+            source,
+            None,
+            true,
+            line.width,
+            DEFAULT_LINE_HEIGHT,
+            ItemPaint::Fold(Box::new(line)),
+        );
     }
 
     fn text(
@@ -593,19 +1353,29 @@ impl<'a> LayoutBuilder<'a> {
             strikethrough: None,
         };
         let font_size = px(if face.heading { 28. } else { 16. });
-        let height = px(if face.heading { 42. } else { 26. });
+        let height = if face.heading {
+            px(42.)
+        } else {
+            DEFAULT_LINE_HEIGHT
+        };
         let window = self.window;
-        let marked = self.marked.clone();
-        let decorations = (!atomic).then_some(TextDecorations {
-            marked: marked.as_ref(),
-            syntax: self.syntax,
-            theme: self.theme,
-        });
+        let marked = self.marked.clone().filter(|_| !atomic);
+        let highlights = if atomic {
+            &[]
+        } else {
+            let start = self
+                .highlights
+                .partition_point(|(range, _)| range.end <= source.start);
+            let end = self
+                .highlights
+                .partition_point(|(range, _)| range.start < source.end);
+            &self.highlights[start..end]
+        };
         let shape = |text: &str, source: Range<usize>| {
-            let runs = match decorations {
-                Some(decorations) => decorations.runs(source, &template),
-                None => vec![template.clone()],
-            };
+            let source = if atomic { 0..text.len() } else { source };
+            let runs = text_runs(&template, source, marked.as_ref(), highlights);
+            #[cfg(test)]
+            super::one_dark_tests::record_fonts(false, text, &runs);
             window.text_system().shape_line(
                 SharedString::from(text.to_owned()),
                 font_size,
@@ -727,6 +1497,7 @@ impl<'a> LayoutBuilder<'a> {
             source,
             target,
             atomic,
+            bidi: None,
             left: self.row.width,
             width,
             paint,
@@ -735,14 +1506,206 @@ impl<'a> LayoutBuilder<'a> {
         self.row.height = self.row.height.max(height);
     }
 
-    fn build(mut self) -> Layout {
+    fn shape_placeholders(&self, state: &EditorState) -> Vec<Placeholder> {
+        // Use the visual projection only. GPUI does not expose an accessibility
+        // placeholder attribute on the editor's input surface.
+        let Ok(projection) = placeholder_projection(state) else {
+            return Vec::new();
+        };
+        projection
+            .widgets
+            .iter()
+            .flat_map(|set| set.iter(0))
+            .filter_map(|range| range.value.widget_value())
+            .map(|label| {
+                // Keep hard breaks on the single empty document row.
+                let label = label.replace("\r\n", " ").replace(
+                    ['\r', '\n', '\x0b', '\x0c', '\u{85}', '\u{2028}', '\u{2029}'],
+                    " ",
+                );
+                let run = TextRun {
+                    len: label.len(),
+                    font: self.window.text_style().font(),
+                    color: self.theme.muted.into(),
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                };
+                Placeholder {
+                    line: self
+                        .window
+                        .text_system()
+                        .shape_line(label.into(), px(16.), &[run], None),
+                    #[cfg(test)]
+                    painted_at: None,
+                }
+            })
+            .collect()
+    }
+
+    fn build(mut self, placeholders: Vec<Placeholder>) -> Layout {
         self.rows.push(self.row);
         Layout {
+            theme: self.theme,
             origin: point(px(0.), px(0.)),
             rows: self.rows,
             source_frame: self.source_frame,
+            placeholders,
+            #[cfg(test)]
+            painted_drop_cursor: None,
+            #[cfg(test)]
+            painted_carets: Vec::new(),
+            #[cfg(test)]
+            painted_find_quads: Vec::new(),
+            #[cfg(test)]
+            painted_bracket_quads: Vec::new(),
+            #[cfg(test)]
+            painted_active_lines: PaintedActiveLines::default(),
         }
     }
+}
+
+fn distinct_line_blocks(blocks: impl Iterator<Item = Range<usize>>) -> Vec<Range<usize>> {
+    let mut blocks: Vec<_> = blocks.collect();
+    blocks.sort_unstable_by_key(|block| block.start);
+    blocks.dedup_by_key(|block| block.start);
+    blocks
+}
+
+fn code_highlights<'a>(
+    document: &'a SupportedDocument,
+    spans: impl IntoIterator<Item = HighlightSpan<'a>>,
+    mut resolve: impl FnMut(&[HighlightTag], Option<HighlightContext>) -> HighlightProperties,
+) -> Vec<(Range<usize>, HighlightProperties)> {
+    let mut highlights = Vec::new();
+    let mut push = |range, tags: &[HighlightTag]| {
+        let scope = document.highlight_context(&range);
+        // Prove scope for the whole gap before either renderer clips it to a row.
+        if tags.is_empty() && scope.is_none() {
+            return;
+        }
+        let style = resolve(tags, scope);
+        if !tags.is_empty() || style != HighlightProperties::default() {
+            highlights.push((range, style));
+        }
+    };
+    let mut end = 0;
+    for span in spans.into_iter().filter(|span| !span.range.is_empty()) {
+        if end < span.range.start {
+            push(end..span.range.start, &[]);
+        }
+        end = end.max(span.range.end);
+        push(span.range, span.tags);
+    }
+    if end < document.text().len() {
+        push(end..document.text().len(), &[]);
+    }
+    highlights
+}
+
+fn apply_highlight(run: &mut TextRun, style: HighlightProperties) {
+    if let Some(color) = style.foreground {
+        run.color = rgba(color.rgba32()).into();
+    }
+    if style.bold {
+        run.font.weight = FontWeight::BOLD;
+    }
+    if style.italic {
+        run.font.style = FontStyle::Italic;
+    }
+    match style.text_decoration {
+        Some(TextDecoration::Underline) => {
+            run.underline = Some(UnderlineStyle {
+                thickness: px(1.),
+                color: None,
+                wavy: false,
+            })
+        }
+        Some(TextDecoration::LineThrough) => {
+            run.strikethrough = Some(StrikethroughStyle {
+                thickness: px(1.),
+                color: None,
+            })
+        }
+        None => {}
+    }
+}
+
+fn plain_text_highlights(
+    spans: &[highlight::Span],
+    theme: Theme,
+) -> Vec<(Range<usize>, HighlightProperties)> {
+    spans
+        .iter()
+        .map(|span| {
+            let foreground = Color::from_rgba32(span.kind.color(theme).into());
+            (
+                span.range.clone(),
+                HighlightProperties {
+                    foreground: Some(foreground),
+                    ..Default::default()
+                },
+            )
+        })
+        .collect()
+}
+
+fn text_runs(
+    template: &TextRun,
+    source: Range<usize>,
+    marked: Option<&Range<usize>>,
+    highlights: &[(Range<usize>, HighlightProperties)],
+) -> Vec<TextRun> {
+    let mut runs = Vec::new();
+    let mut push = |range: Range<usize>, style| {
+        if range.is_empty() {
+            return;
+        }
+        let mut run = template.clone();
+        apply_highlight(&mut run, style);
+        if let Some(marked) = marked.filter(|m| m.start < range.end && range.start < m.end) {
+            let start = marked.start.max(range.start);
+            let end = marked.end.min(range.end);
+            if range.start < start {
+                runs.push(TextRun {
+                    len: start - range.start,
+                    ..run.clone()
+                });
+            }
+            runs.push(TextRun {
+                len: end - start,
+                underline: Some(UnderlineStyle {
+                    color: Some(run.color),
+                    thickness: px(1.),
+                    wavy: false,
+                }),
+                ..run.clone()
+            });
+            if end < range.end {
+                runs.push(TextRun {
+                    len: range.end - end,
+                    ..run
+                });
+            }
+        } else {
+            runs.push(TextRun {
+                len: range.len(),
+                ..run
+            });
+        }
+    };
+    let mut start = source.start;
+    for (range, style) in highlights {
+        let from = start.max(range.start);
+        let to = source.end.min(range.end);
+        if from < to {
+            push(start..from, HighlightProperties::default());
+            push(from..to, *style);
+            start = to;
+        }
+    }
+    push(start..source.end, HighlightProperties::default());
+    runs
 }
 
 impl Editor {
@@ -764,6 +1727,9 @@ impl Editor {
     }
 
     fn projected_sections(&self) -> Vec<Section> {
+        if !self.is_markdown() {
+            return Vec::new();
+        }
         let mut sections = self.markdown().sections();
         if let Some(active) = &self.active {
             sections.retain(|section| section.source != active.source);
@@ -810,7 +1776,7 @@ impl Editor {
     }
 
     #[cfg(test)]
-    pub(super) fn shape(&mut self, window: &Window, cx: &mut Context<Self>) -> Layout {
+    pub(super) fn shape(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Layout {
         self.shape_for_width(
             window,
             cx,
@@ -818,20 +1784,40 @@ impl Editor {
         )
     }
 
+    #[cfg(test)]
     pub(super) fn shape_for_width(
         &mut self,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
         width: Pixels,
     ) -> Layout {
-        let markdown = self.is_markdown();
-        if !markdown {
+        self.shape_layout(window, cx, width, false).0
+    }
+
+    pub(super) fn shape_for_paint(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        width: Pixels,
+    ) -> (Layout, Option<BodyCache>) {
+        self.shape_layout(window, cx, width, true)
+    }
+
+    fn shape_layout(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        width: Pixels,
+        for_paint: bool,
+    ) -> (Layout, Option<BodyCache>) {
+        if !self.is_markdown() {
             self.request_highlighting(cx);
-        }
-        let source = self.history.state().text().as_str();
-        let mut builder = LayoutBuilder::new(window, self.marked.clone(), width);
-        if !markdown {
-            builder.syntax = self.highlighting.spans();
+            let state = self.view.state();
+            let source = state.text().as_str();
+            let theme = Theme::for_editor(window, state);
+            let highlights = plain_text_highlights(self.highlighting.spans(), theme);
+            let mut builder = LayoutBuilder::new(window, theme, self.marked.clone(), width);
+            builder.highlights = &highlights;
             builder.add_text(
                 source,
                 0..source.len(),
@@ -840,10 +1826,36 @@ impl Editor {
                     ..Face::default()
                 },
             );
-            return builder.build();
+            let placeholders = builder.shape_placeholders(state);
+            return (builder.build(placeholders), None);
         }
-
         let scale = window.scale_factor();
+        let highlights = self.source_highlights();
+        let body_lines = self.source_body_line_projection();
+        let folds = self.source_fold_ranges();
+        #[cfg(target_os = "macos")]
+        let isolates = if folds.is_empty() {
+            self.source_isolates()
+        } else {
+            None
+        };
+        #[cfg(target_os = "macos")]
+        let isolation_cache = (for_paint && isolates.is_some())
+            .then(|| CachedBody::for_window(cx.entity_id(), window, cx));
+        #[cfg(not(target_os = "macos"))]
+        let isolation_cache = {
+            let _ = for_paint;
+            None
+        };
+        let state = self.view.state();
+        let source = state.text().as_str();
+        let theme = Theme::for_editor(window, state);
+        let mut builder = LayoutBuilder::new(window, theme, self.marked.clone(), width);
+        builder.highlights = &highlights;
+        #[cfg(target_os = "macos")]
+        {
+            builder.isolation_cache = isolation_cache.clone();
+        }
         let sections = self.projected_sections();
         let visible_previews = self.preview_sections(&sections);
         let mut previews = std::collections::HashMap::new();
@@ -960,16 +1972,59 @@ impl Editor {
             };
             previews.insert(section.source.start, preview);
         }
+        let gutter_body = self.source_fence().map(|fence| fence.body);
+        let editable_fence_body = gutter_body.clone().or_else(|| {
+            self.source_fence_with_unlabeled(true)
+                .map(|fence| fence.body)
+        });
         let projection = Projection {
-            source,
+            state,
             active: self.active.as_ref(),
+            gutter_body,
+            editable_fence_body,
+            body_lines,
+            #[cfg(target_os = "macos")]
+            isolates,
+            folds,
             inline_caret: (self.focus.is_focused(window)
                 && (self.selection().is_empty() || self.is_composing()))
             .then(|| self.cursor()),
             previews,
         };
         projection.add(&mut builder, 0..source.len(), &sections, Face::default(), 0);
-        builder.build()
+        let placeholders = builder.shape_placeholders(state);
+        (builder.build(placeholders), isolation_cache)
+    }
+
+    fn source_highlights(&mut self) -> Vec<(Range<usize>, HighlightProperties)> {
+        let Some(fence) = self.source_fence() else {
+            return Vec::new();
+        };
+        let Some(parser) = fence.parser else {
+            return Vec::new();
+        };
+        let body = fence.body;
+        let state = self.view.state().clone();
+        let settings = StreamSettings {
+            tab_size: state.tab_size(),
+            ..Default::default()
+        };
+        let Some(document) = self.source_document(&body, &parser, settings) else {
+            return Vec::new();
+        };
+        let Some(spans) = document.highlights(0..body.len()) else {
+            return Vec::new();
+        };
+        let (layers, appearance) = highlight_configuration(&state);
+        let mut highlights = code_highlights(document, spans, |tags, scope| {
+            highlighting_for_context(&layers, tags, scope, appearance)
+        });
+        highlights.retain_mut(|(range, style)| {
+            range.start += body.start;
+            range.end += body.start;
+            *style != HighlightProperties::default()
+        });
+        highlights
     }
 
     pub(super) fn complete_image_request(
@@ -1047,8 +2102,14 @@ fn preview_error(kind: SectionKind, error: &str) -> &'static str {
 }
 
 struct Projection<'a> {
-    source: &'a str,
+    state: &'a EditorState,
     active: Option<&'a Section>,
+    gutter_body: Option<Range<usize>>,
+    editable_fence_body: Option<Range<usize>>,
+    body_lines: Option<Text>,
+    #[cfg(target_os = "macos")]
+    isolates: Option<Vec<BidiIsolate>>,
+    folds: Vec<Range<usize>>,
     inline_caret: Option<usize>,
     previews: std::collections::HashMap<usize, Result<Graphic, &'static str>>,
 }
@@ -1063,8 +2124,9 @@ impl Projection<'_> {
         depth: usize,
     ) {
         use SectionKind as K;
+        let text = self.state.text().as_str();
         if depth >= 32 {
-            builder.add_text(self.source, range, face);
+            builder.add_text(text, range, face);
             return;
         }
         let mut start = range.start;
@@ -1072,16 +2134,16 @@ impl Projection<'_> {
             if section.source.start < start || section.source.end > range.end {
                 continue;
             }
-            builder.add_text(self.source, start..section.source.start, face);
+            builder.add_text(text, start..section.source.start, face);
 
-            let source = &self.source[section.source.clone()];
-            let body = &self.source[section.content.clone()];
+            let source = &text[section.source.clone()];
+            let body = &text[section.content.clone()];
             let face_muted = Face {
                 muted: true,
                 ..face
             };
             if let Some(active) = self.active.filter(|active| active.source == section.source) {
-                builder.add_source(self.source, active);
+                builder.add_source(active, self);
                 self.finish_line(builder, active.content.end, section);
             } else {
                 match section.kind {
@@ -1118,7 +2180,7 @@ impl Projection<'_> {
                         if matches!(section.kind, K::Strong | K::Emphasis) {
                             builder.row.end = section.source.end;
                         } else if section.kind == K::Heading {
-                            let suffix = &self.source[section.content.end..section.source.end];
+                            let suffix = &text[section.content.end..section.source.end];
                             let same_line =
                                 suffix.split('\n').next().unwrap().trim_end_matches('\r');
                             builder.row.end =
@@ -1131,20 +2193,25 @@ impl Projection<'_> {
                         if self.inline_caret.is_some_and(|caret| {
                             section.source.start < caret && caret < section.source.end
                         }) {
-                            builder.add_text(self.source, section.source.clone(), face);
+                            builder.add_text(text, section.source.clone(), face);
                         } else {
                             if let Some(code) = &section.inline_code {
                                 builder.text(code, section.content.clone(), face, None, true);
                             } else {
-                                builder.add_text(self.source, section.content.clone(), face);
+                                builder.add_text(text, section.content.clone(), face);
                             }
                             builder.row.end = section.source.end;
                         }
                     }
-                    K::DraftCode => builder.add_text(self.source, section.source.clone(), face),
+                    K::DraftCode => builder.add_text(text, section.source.clone(), face),
                     K::ReadOnly => {
                         if let Some(preview) = &section.preview {
-                            let block = BlockLayout::new(preview, builder.window);
+                            let block = BlockLayout::new(
+                                preview,
+                                self.state,
+                                builder.theme,
+                                builder.window,
+                            );
                             builder.item(
                                 section.source.clone(),
                                 None,
@@ -1155,7 +2222,7 @@ impl Projection<'_> {
                             );
                             self.finish_line(builder, section.source.start, section);
                         } else {
-                            builder.add_text(self.source, section.source.clone(), face_muted);
+                            builder.add_text(text, section.source.clone(), face_muted);
                         }
                     }
                     K::Link => {
@@ -1230,12 +2297,13 @@ impl Projection<'_> {
             }
             start = section.source.end;
         }
-        builder.add_text(self.source, start..range.end, face);
+        builder.add_text(text, start..range.end, face);
     }
 
     fn finish_line(&self, builder: &mut LayoutBuilder<'_>, content_end: usize, section: &Section) {
         let end = section.source.end;
-        let ends_line = end > content_end && self.source.as_bytes().get(end - 1) == Some(&b'\n');
+        let ends_line =
+            end > content_end && self.state.text().as_str().as_bytes().get(end - 1) == Some(&b'\n');
         if section.kind == SectionKind::Heading {
             // Source navigation includes the hidden Setext underline, but caret motion does not.
             builder.row.hidden_end = end - usize::from(ends_line);
@@ -1276,6 +2344,47 @@ mod tests {
     use gpui::TestAppContext;
 
     use super::*;
+    use crate::document::BlockPreview;
+
+    #[test]
+    fn code_gap_scope_requires_the_whole_html_mount_interval() {
+        use gpui_editor_codemirror::{
+            language::{HighlightLayer, HighlightStyle, HighlightTheme},
+            language_data::NativeLanguage,
+        };
+
+        let source = "<style> a  { } </style>";
+        let document = NativeLanguage::Html
+            .support()
+            .parse(Text::new(source))
+            .unwrap();
+        let name = source.find("a ").unwrap();
+        let brace = source.find('{').unwrap();
+        let tags = [HighlightTag::new("content")];
+        // The gap between the two spans is in CSS. The outer gaps cross the mount edges.
+        let spans =
+            [name..name + 1, brace..brace + 1].map(|range| HighlightSpan { range, tags: &tags });
+        let underline = HighlightProperties {
+            text_decoration: Some(TextDecoration::Underline),
+            ..Default::default()
+        };
+        let layers = [HighlightLayer::Active(
+            HighlightStyle::define(&[])
+                .with_native_scope(NativeLanguage::Css)
+                .with_all(underline),
+        )];
+        let highlights = code_highlights(&document, spans, |tags, scope| {
+            highlighting_for_context(&layers, tags, scope, HighlightTheme::Light)
+        });
+        assert_eq!(
+            highlights,
+            [
+                (name..name + 1, underline),
+                (name + 1..brace, underline),
+                (brace..brace + 1, underline),
+            ]
+        );
+    }
 
     #[test]
     fn local_preview_checks_the_selected_workspace_identity() {
@@ -1296,12 +2405,13 @@ mod tests {
         cx.update(|window, _| {
             let prefix = "First word ";
             let text = "First word continuation";
-            let mut probe = LayoutBuilder::new(window, None, px(300.));
+            let theme = Theme::for_editor(window, &EditorState::new(""));
+            let mut probe = LayoutBuilder::new(window, theme, None, px(300.));
             probe.add_text(text, 0..prefix.len(), Face::default());
             let width = probe.row.width + px(14.);
-            let mut builder = LayoutBuilder::new(window, None, width);
+            let mut builder = LayoutBuilder::new(window, theme, None, width);
             builder.add_text(text, 0..text.len(), Face::default());
-            let layout = builder.build();
+            let layout = builder.build(Vec::new());
             assert_eq!(layout.rows[0].end, prefix.len());
             assert_eq!(layout.rows[1].start, prefix.len());
             assert_eq!(layout.step(prefix.len(), false), prefix.len() - 1);
@@ -1323,16 +2433,15 @@ mod tests {
             };
             // Width is measured on one set of runs; a wrap can clip that run around `字`.
             let source = "ab字cd";
-            let decorations = TextDecorations {
-                marked: Some(&(5..7)),
-                syntax: &[highlight::Span {
+            let highlights = plain_text_highlights(
+                &[highlight::Span {
                     range: 1..6,
                     kind: highlight::Kind::String,
                 }],
                 theme,
-            };
-            let runs = decorations.runs(2..source.len(), &template);
-            let string = highlight::Kind::String.color(theme);
+            );
+            let runs = text_runs(&template, 2..source.len(), Some(&(5..7)), &highlights);
+            let string = highlight::Kind::String.color(theme).into();
             let actual: Vec<_> = runs
                 .iter()
                 .map(|run| (run.len, run.color, run.underline.is_some()))
@@ -1486,6 +2595,206 @@ mod tests {
                 });
             });
         }
+    }
+
+    #[gpui::test]
+    fn active_source_line_covers_wrapped_rows_but_not_other_lines(cx: &mut TestAppContext) {
+        let source = "Before\r\n\r\n```js\r\n// first line with enough words to wrap at least once\r\nconst other = 1;\r\n```\r\n\r\nAfter";
+        let start = source.find("// first").unwrap();
+        let end = start + source[start..].find('\r').unwrap();
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source.into(), window, cx));
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                let section = editor
+                    .markdown()
+                    .sections()
+                    .into_iter()
+                    .find(|section| matches!(section.preview, Some(BlockPreview::Code { .. })))
+                    .unwrap();
+                let scope = section.source;
+                editor.activate(
+                    Section::new(SectionKind::DraftCode, scope.clone(), scope),
+                    false,
+                    cx,
+                );
+                let layout = editor.shape_for_width(window, cx, px(130.));
+                let frame = layout.source_frame.as_ref().unwrap();
+                let gutter = frame.gutter.as_ref().unwrap();
+                assert_eq!(gutter.body.start, start);
+                let mut line_numbers = Vec::new();
+                let mut painted = 0;
+                for row in &layout.rows {
+                    if let Some((number, first_row)) = gutter.line_at_row(row) {
+                        let item = row.items.first().unwrap();
+                        assert_eq!(item.left, SOURCE_PADDING + gutter.width);
+                        assert_eq!(
+                            layout.index_at(point(SOURCE_PADDING, row.y + px(5.))),
+                            row.start
+                        );
+                        if first_row {
+                            line_numbers.push(gutter.label(number).unwrap());
+                        }
+                    } else if let Some(item) = row.items.first()
+                        && item.source.start >= frame.content.start
+                        && item.source.end <= frame.content.end
+                    {
+                        assert_eq!(item.left, SOURCE_PADDING);
+                    }
+                    let bounds = frame.active_line_bounds(
+                        layout.origin,
+                        row,
+                        std::slice::from_ref(&(start..end)),
+                    );
+                    if (start..=end).contains(&row.start) {
+                        let bounds = bounds.unwrap();
+                        assert_eq!(bounds.top(), layout.origin.y + row.y);
+                        assert_eq!(bounds.size.height, row.height);
+                        painted += 1;
+                    } else {
+                        assert!(bounds.is_none());
+                    }
+                }
+                assert!(painted > 1, "expected multiple visual rows");
+                assert_eq!(line_numbers, ["1", "2"]);
+                assert_eq!(editor.source(), source);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn source_line_numbers_and_caret_stops_use_mixed_editor_breaks(cx: &mut TestAppContext) {
+        let prefix = "Intro\r\n\r\n```json\r\n";
+        let body = "{\r  \"word\": \"字\",\r\n\r  \"other\": false\r}";
+        let source = format!("{prefix}{body}\r\n```\r\n\r\nAfter");
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source.clone(), window, cx));
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                let block = editor
+                    .markdown()
+                    .sections()
+                    .into_iter()
+                    .find(|section| matches!(section.preview, Some(BlockPreview::Code { .. })))
+                    .unwrap();
+                let scope = block.source;
+                editor.activate(
+                    Section::new(SectionKind::DraftCode, scope.clone(), scope),
+                    false,
+                    cx,
+                );
+                let layout = editor.shape_for_width(window, cx, px(450.));
+                let frame = layout.source_frame.as_ref().unwrap();
+                let gutter = frame.gutter.as_ref().unwrap();
+                let actual: Vec<_> = layout
+                    .rows
+                    .iter()
+                    .filter_map(|row| {
+                        let (number, first) = gutter.line_at_row(row)?;
+                        first.then(|| (gutter.label(number).unwrap(), row.start..row.end))
+                    })
+                    .collect();
+                let mut starts = [0; 5];
+                let mut ends = [0; 5];
+                let mut cursor = 0;
+                for (index, (line, separator)) in [
+                    ("{", "\r"),
+                    ("  \"word\": \"字\",", "\r\n"),
+                    ("", "\r"),
+                    ("  \"other\": false", "\r"),
+                    ("}", ""),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    starts[index] = prefix.len() + cursor;
+                    cursor += line.len();
+                    ends[index] = prefix.len() + cursor;
+                    cursor += separator.len();
+                }
+                let expected: Vec<_> = (0..5)
+                    .map(|index| ((index + 1).to_string(), starts[index]..ends[index]))
+                    .collect();
+                assert_eq!(actual, expected);
+                let selection = EditorSelection::single(starts[3], starts[3]);
+                let lines = layout.active_source_lines(editor.view.state().text(), &selection);
+                assert_eq!(
+                    lines,
+                    std::iter::once(starts[3]..ends[3]).collect::<Vec<_>>()
+                );
+                let painted: Vec<_> = layout
+                    .rows
+                    .iter()
+                    .filter(|row| {
+                        frame
+                            .active_line_bounds(layout.origin, row, &lines)
+                            .is_some()
+                    })
+                    .map(|row| row.start)
+                    .collect();
+                assert_eq!(painted, [starts[3]]);
+                for (end, next) in ends[..4].iter().copied().zip(starts[1..].iter().copied()) {
+                    assert_eq!(layout.step(end, true), next);
+                    assert_eq!(layout.step(next, false), end);
+                }
+                assert_eq!(editor.source(), source);
+                assert_eq!(editor.view.revision(), 0);
+                assert!(!editor.view.can_undo());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn collapsed_source_rows_keep_the_original_line_numbers(cx: &mut TestAppContext) {
+        let source =
+            "```js\r\nconst data = {\r\n  a: '漢',\r\n  b: 2,\r\n};\r\n\r\nconst next = 0;\r\n```";
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source.into(), window, cx));
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                let section = editor
+                    .markdown()
+                    .sections()
+                    .into_iter()
+                    .find(|section| matches!(section.preview, Some(BlockPreview::Code { .. })))
+                    .unwrap();
+                let layout = editor.shape_for_width(window, cx, px(600.));
+                assert!(layout.source_frame.is_none());
+                let scope = section.source;
+                editor.activate(
+                    Section::new(SectionKind::DraftCode, scope.clone(), scope),
+                    false,
+                    cx,
+                );
+                let numbers = |layout: &Layout| {
+                    let gutter = layout
+                        .source_frame
+                        .as_ref()
+                        .unwrap()
+                        .gutter
+                        .as_ref()
+                        .unwrap();
+                    layout
+                        .rows
+                        .iter()
+                        .filter_map(|row| {
+                            let (number, first) = gutter.line_at_row(row)?;
+                            first.then(|| gutter.label(number).unwrap())
+                        })
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(
+                    numbers(&editor.shape_for_width(window, cx, px(600.))),
+                    ["1", "2", "3", "4", "5", "6"]
+                );
+                let offset = source.find('{').unwrap() + 1;
+                editor.set_selection(offset, offset);
+                assert!(editor.toggle_source_fold(cx));
+                assert_eq!(
+                    numbers(&editor.shape_for_width(window, cx, px(600.))),
+                    ["1", "5", "6"]
+                );
+                assert_eq!(editor.source(), source);
+                assert!(!editor.view.can_undo());
+            });
+        });
     }
 
     #[gpui::test]

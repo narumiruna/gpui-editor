@@ -1,0 +1,25 @@
+{"mode":"js","doc":"","regions":[{"range":[0,0],"raw":"","dialect":"js"}]}
+{"mode":"js","doc":"α😀\rβ\r\nγ\n","regions":[{"range":[0,14],"raw":"α😀\rβ\r\nγ\n","dialect":"js"}]}
+{"mode":"jsx","doc":"<p/>","regions":[{"range":[0,4],"raw":"<p/>","dialect":"jsx"}]}
+{"mode":"ts","doc":"let a: T;","regions":[{"range":[0,9],"raw":"let a: T;","dialect":"ts"}]}
+{"mode":"tsx","doc":"<T/>","regions":[{"range":[0,4],"raw":"<T/>","dialect":"tsx"}]}
+{"mode":"json","doc":"{\"x\":\"😀\"}","regions":[]}
+{"mode":"html","doc":"<p>😀</p><script>😀 alpha;\r\nbeta;</script><style>x{}</style><script type=\"text/typescript\">typed</script><script type=\"application/json\">{}</script>","regions":[{"range":[19,37],"raw":"😀 alpha;\r\nbeta;","dialect":"js"},{"range":[95,100],"raw":"typed","dialect":"ts"},{"range":[141,143],"raw":"{}","dialect":"js"}]}
+{"mode":"html","doc":"<p onclick=\"😀\r\nrun()\" onblur=hide() ONCLICK=\"no()\" onload=\"\" style=\"color:red\"></p>","regions":[{"range":[12,23],"raw":"😀\r\nrun()","dialect":"js"},{"range":[32,38],"raw":"hide()","dialect":"js"}]}
+{"mode":"html","doc":"<script></script><script>\r\n</script><script type=\"x-unknown\">ignored</script><script type=\"importmap\">{}</script><script type=\"APPLICATION/LD+JSON\">[]</script><script lang=\"ts\" type=\"text/babel\">a</script><script type=\"text/babel\">b</script><script type=\"text/typescript-jsx\">c</script><script type=\"module\">d</script>","regions":[{"range":[8,8],"raw":"","dialect":"js"},{"range":[25,27],"raw":"\r\n","dialect":"js"},{"range":[102,104],"raw":"{}","dialect":"js"},{"range":[148,150],"raw":"[]","dialect":"js"},{"range":[195,196],"raw":"a","dialect":"ts"},{"range":[231,232],"raw":"b","dialect":"jsx"},{"range":[276,277],"raw":"c","dialect":"tsx"},{"range":[308,309],"raw":"d","dialect":"js"}]}
+{"mode":"html","doc":"<script>let x =","regions":[{"range":[8,15],"raw":"let x =","dialect":"js"}]}
+{"mode":"html","doc":"<p onclick=\"let x =","regions":[{"range":[12,18],"raw":"let x ","dialect":null}]}
+{"mode":"markdown","doc":"> ```js\r\n> first\r\n> second\r\n> ```\r\n\r\n```tsx\r\nlast\r\n```\r\n\r\n```css\r\nignored\r\n```\r\n","regions":[{"range":[11,18],"raw":"first\r\n","dialect":"js"},{"range":[20,26],"raw":"second","dialect":"js"},{"range":[45,49],"raw":"last","dialect":"tsx"}]}
+{"mode":"markdown","doc":"> ```js\n> one\n>\n> two\n> ```\n","regions":[{"range":[10,14],"raw":"one\n","dialect":"js"},{"range":[15,16],"raw":"\n","dialect":"js"},{"range":[18,21],"raw":"two","dialect":"js"}]}
+{"mode":"markdown","doc":"```js\n```\n\n```js\n\n```\n\n```json\n{}\n```\n\n```unknown\nx\n```","regions":[{"range":[17,18],"raw":"\n","dialect":"js"}]}
+{"mode":"markdown","doc":"```javascript extra\r\n😀;\r\nsecond;\r\n```\r\n\r\n<p onclick=\"open()\">text</p>\r\n\r\n<script>\r\nrun();\r\n</script>\r\n\r\ninline <b onblur=\"hide()\">bold</b>\r\n","regions":[{"range":[21,35],"raw":"😀;\r\nsecond;","dialect":"js"},{"range":[56,62],"raw":"open()","dialect":"js"},{"range":[84,94],"raw":"\r\nrun();\r\n","dialect":"js"},{"range":[125,131],"raw":"hide()","dialect":"js"}]}
+{"mode":"markdownDefault","doc":"```js\nx\n```\n\n<script>x;</script>","regions":[{"range":[21,23],"raw":"x;","dialect":"js"}]}
+{"mode":"markdown","doc":"> <script>one;</script>\r\n","regions":[{"range":[10,14],"raw":"one;","dialect":"js"}]}
+{"mode":"markdown","doc":"```html\r\n<script>\r\nrun()\r\n</script>\r\n```\r\n","regions":[{"range":[17,26],"raw":"\r\nrun()\r\n","dialect":"js"}]}
+{"mode":"markdown","doc":"> <script>\r\n> first;\r\n> second;\r\n> </script>\r\n","regions":[{"range":[10,35],"raw":"\r\n> first;\r\n> second;\r\n> ","dialect":null}]}
+{"mode":"markdown","doc":"> ```html\r\n> <script>\r\n> run()\r\n> </script>\r\n> ```\r\n","regions":[{"range":[21,32],"raw":"\r\n> run()\r\n","dialect":null}]}
+{"mode":"markdown","doc":"```js\rlet a;\r```\r","regions":[{"range":[6,12],"raw":"let a;","dialect":"js"}]}
+{"mode":"markdown","doc":"```js\nfirst;\r```\nshouldNotLint;\n```\n","regions":[{"range":[6,12],"raw":"first;","dialect":"js"}]}
+{"mode":"markdown","doc":"> ```js\r> 😀 first;\r\n> second;\r> ```\r\r```tsx\r<T/>\r```","regions":[{"range":[10,23],"raw":"😀 first;\r\n","dialect":"js"},{"range":[25,32],"raw":"second;","dialect":"js"},{"range":[47,51],"raw":"<T/>","dialect":"tsx"}]}
+{"mode":"markdown","doc":"```html\r\n<script>😀;\rnext;</script>\r\n```","regions":[{"range":[17,28],"raw":"😀;\rnext;","dialect":"js"}]}
+{"mode":"markdown","doc":"> <script>\r> first;\r> second;\r> </script>","regions":[{"range":[10,32],"raw":"\r> first;\r> second;\r> ","dialect":null}]}

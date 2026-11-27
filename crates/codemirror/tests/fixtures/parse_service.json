@@ -1,0 +1,114 @@
+{
+  "partial": {
+    "document": "abcdefgh",
+    "initialEnd": 2,
+    "target": 5,
+    "ensuredEnd": 5,
+    "targets": [
+      0,
+      2,
+      3,
+      5,
+      6,
+      99
+    ],
+    "before": [
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ],
+    "after": [
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "deferred": {
+    "prefix": 200,
+    "child": "[1]",
+    "suffix": 200,
+    "targets": [
+      0,
+      200,
+      201,
+      403,
+      404
+    ],
+    "before": [
+      true,
+      true,
+      false,
+      false,
+      false
+    ],
+    "after": [
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "mapping": {
+    "document": "abcdefghijklmnopqrst",
+    "oldViewport": {
+      "from": 3,
+      "to": 8
+    },
+    "oldSkips": [
+      {
+        "from": 10,
+        "to": 16
+      },
+      {
+        "from": 17,
+        "to": 20
+      }
+    ],
+    "changes": [
+      {
+        "from": 3,
+        "insert": "["
+      },
+      {
+        "from": 8,
+        "insert": "]"
+      },
+      {
+        "from": 10,
+        "insert": "!"
+      },
+      {
+        "from": 14,
+        "to": 15,
+        "insert": "++"
+      },
+      {
+        "from": 16,
+        "insert": "?"
+      },
+      {
+        "from": 17,
+        "to": 20
+      }
+    ],
+    "newViewport": {
+      "from": 3,
+      "to": 10
+    },
+    "newSkips": [
+      {
+        "from": 13,
+        "to": 20
+      }
+    ],
+    "beforeTouch": false,
+    "afterOverlap": true
+  }
+}

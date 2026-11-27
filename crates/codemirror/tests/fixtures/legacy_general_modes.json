@@ -1,0 +1,386 @@
+{
+  "after": ["","next","}","{",")","]","case X:","case_extra","default:","defaultλ"],
+  "triggers": ["","{}","{","}"," \t }","﻿{","\n{","}","{ ","{\n","x}"],
+  "modes": {
+    "haxe#haxe": {
+      "data": {"name":"haxe","merge":true,"comments":{"line":"//","block":{"open":"/*","close":"*/"}},"autocomplete":null,"triggers":[false,false,true,true,true,true,true,false,false,false,false]},
+      "cases": {
+        "empty": {
+          "source": "",
+          "tokens": [
+            []
+          ],
+          "indents": [0],
+          "after": [[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1]]
+        },
+        "functions": {
+          "source": "package demo;\nimport tools.Helper;\nusing Tool;\nclass Demo {\n\tpublic static function make(arg:Int, other:Array<String>):{out:Int} {\n\t\tvar score:Int = arg, result = other[0];\n\t\tvar object = {value: score, 'next': this.next};\n\t\tlabel: while (object.value > 1) object.value--;\n\t\tif (true) {\n\t\t\tfunction Inner(score:Int) { return this.object + score + arg; }\n\t\t} else object.if = new Demo();\n\t\treturn {out: score};\n\t}\n}\nthis.member; arg; score;\n",
+          "tokens": [
+            [[0,7,"variable"],[7,8,null],[8,12,"variable"],[12,13,null]],
+            [[14,20,"keyword"],[20,21,null],[21,26,"variable"],[26,27,null],[27,33,"type"],[33,34,null]],
+            [[35,40,"keyword"],[40,41,null],[41,45,"type"],[45,46,null]],
+            [[47,52,"keyword"],[52,53,null],[53,57,"type"],[57,58,null],[58,59,null]],
+            [[60,61,null],[61,67,"attribute"],[67,68,null],[68,74,"attribute"],[74,75,null],[75,83,"keyword"],[83,84,null],[84,88,"def"],[88,89,null],[89,92,"def"],[92,93,null],[93,96,"type"],[96,97,null],[97,98,null],[98,103,"def"],[103,104,null],[104,117,"type"],[117,118,null],[118,119,null],[119,120,null],[120,123,"variable"],[123,124,null],[124,127,"type"],[127,128,null],[128,129,null],[129,130,null]],
+            [[131,133,null],[133,136,"keyword"],[136,137,null],[137,142,"def"],[142,143,null],[143,146,"type"],[146,147,null],[147,148,null],[148,149,null],[149,152,"variableName.local"],[152,153,null],[153,154,null],[154,160,"def"],[160,161,null],[161,162,null],[162,163,null],[163,168,"variableName.local"],[168,169,null],[169,170,"number"],[170,171,null],[171,172,null]],
+            [[173,175,null],[175,178,"keyword"],[178,179,null],[179,185,"def"],[185,186,null],[186,187,null],[187,188,null],[188,189,null],[189,194,"property"],[194,195,null],[195,196,null],[196,201,"variableName.local"],[201,202,null],[202,203,null],[203,209,"string"],[209,210,null],[210,211,null],[211,215,"variableName.local"],[215,216,null],[216,220,"property"],[220,221,null],[221,222,null]],
+            [[223,225,null],[225,230,"variable"],[230,231,null],[231,232,null],[232,237,"keyword"],[237,238,null],[238,239,null],[239,245,"variableName.local"],[245,246,null],[246,251,"property"],[251,252,null],[252,253,null],[253,254,null],[254,255,"number"],[255,256,null],[256,257,null],[257,263,"variableName.local"],[263,264,null],[264,269,"property"],[269,271,null],[271,272,null]],
+            [[273,275,null],[275,277,"keyword"],[277,278,null],[278,279,null],[279,283,"atom"],[283,284,null],[284,285,null],[285,286,null]],
+            [[287,290,null],[290,298,"keyword"],[298,299,null],[299,304,"def"],[304,305,null],[305,310,"def"],[310,311,null],[311,314,"type"],[314,315,null],[315,316,null],[316,317,null],[317,318,null],[318,324,"keyword"],[324,325,null],[325,329,"variableName.local"],[329,330,null],[330,336,"property"],[336,337,null],[337,338,null],[338,339,null],[339,344,"variableName.local"],[344,345,null],[345,346,null],[346,347,null],[347,350,"variableName.local"],[350,351,null],[351,352,null],[352,353,null]],
+            [[354,356,null],[356,357,null],[357,358,null],[358,362,"keyword"],[362,363,null],[363,369,"variableName.local"],[369,370,null],[370,372,"property"],[372,373,null],[373,374,null],[374,375,null],[375,378,"keyword"],[378,379,null],[379,383,"type"],[383,384,null],[384,385,null],[385,386,null]],
+            [[387,389,null],[389,395,"keyword"],[395,396,null],[396,397,null],[397,400,"property"],[400,401,null],[401,402,null],[402,407,"variableName.local"],[407,408,null],[408,409,null]],
+            [[410,411,null],[411,412,null]],
+            [[413,414,null]],
+            [[415,419,"variableName.local"],[419,420,null],[420,426,"property"],[426,427,null],[427,428,null],[428,431,"variable"],[431,432,null],[432,433,null],[433,438,"variable"],[438,439,null]],
+            []
+          ],
+          "indents": [0,0,0,0,2,6,6,6,6,10,8,6,4,0,0,0],
+          "after": [[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1]]
+        },
+        "loops": {
+          "source": "function f() {\n  for (item in list) {\n    try { check(item); }\n    catch (error:Dynamic) { trace(error); }\n    error;\n  }\n  item;\n  do { run(); } while (true);\n}\n",
+          "tokens": [
+            [[0,8,"keyword"],[8,9,null],[9,10,"variable"],[10,11,null],[11,12,null],[12,13,null],[13,14,null]],
+            [[15,17,null],[17,20,"keyword"],[20,21,null],[21,22,null],[22,26,"def"],[26,27,null],[27,29,"keyword"],[29,30,null],[30,34,"variable"],[34,35,null],[35,36,null],[36,37,null]],
+            [[38,42,null],[42,45,"keyword"],[45,46,null],[46,47,null],[47,48,null],[48,53,"variable"],[53,54,null],[54,58,"variableName.local"],[58,59,null],[59,60,null],[60,61,null],[61,62,null]],
+            [[63,67,null],[67,72,"keyword"],[72,73,null],[73,74,null],[74,79,"def"],[79,80,null],[80,87,"type"],[87,88,null],[88,89,null],[89,90,null],[90,91,null],[91,96,"keyword"],[96,97,null],[97,102,"variableName.local"],[102,103,null],[103,104,null],[104,105,null],[105,106,null]],
+            [[107,111,null],[111,116,"variable"],[116,117,null]],
+            [[118,120,null],[120,121,null]],
+            [[122,124,null],[124,128,"variableName.local"],[128,129,null]],
+            [[130,132,null],[132,134,"keyword"],[134,135,null],[135,136,null],[136,137,null],[137,140,"variable"],[140,141,null],[141,142,null],[142,143,null],[143,144,null],[144,145,null],[145,146,null],[146,151,"keyword"],[151,152,null],[152,153,null],[153,157,"atom"],[157,158,null],[158,159,null]],
+            [[160,161,null]],
+            []
+          ],
+          "indents": [0,2,4,4,4,2,2,2,0,0],
+          "after": [[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1],[0,1]]
+        },
+        "switching": {
+          "source": "switch value {\ncase 1:\n  run(1);\ndefault:\n  run(0);\n  // only comment\n",
+          "tokens": [
+            [[0,6,"keyword"],[6,7,null],[7,12,"variable"],[12,13,null],[13,14,null]],
+            [[15,19,"keyword"],[19,20,null],[20,21,"number"],[21,22,null]],
+            [[23,25,null],[25,28,"variable"],[28,29,null],[29,30,"number"],[30,31,null],[31,32,null]],
+            [[33,40,"keyword"],[40,41,null]],
+            [[42,44,null],[44,47,"variable"],[47,48,null],[48,49,"number"],[49,50,null],[50,51,null]],
+            [[52,54,null],[54,69,"comment"]],
+            []
+          ],
+          "indents": [0,2,4,2,4,4,4],
+          "after": [[4,6],[4,6],[0,0],[4,6],[4,6],[4,6],[2,3],[4,6],[2,3],[2,3]]
+        },
+        "statements": {
+          "source": "if (ready)\n{ run(); }\n  while (more)\n  next();\nvar one =\n  call(a,\n      b, [1,\n          2]);\nvar open =\n",
+          "tokens": [
+            [[0,2,"keyword"],[2,3,null],[3,4,null],[4,9,"variable"],[9,10,null]],
+            [[11,12,null],[12,13,null],[13,16,"variable"],[16,17,null],[17,18,null],[18,19,null],[19,20,null],[20,21,null]],
+            [[22,24,null],[24,29,"keyword"],[29,30,null],[30,31,null],[31,35,"variable"],[35,36,null]],
+            [[37,39,null],[39,43,"variable"],[43,44,null],[44,45,null],[45,46,null]],
+            [[47,50,"keyword"],[50,51,null],[51,54,"variable"],[54,55,null],[55,56,null]],
+            [[57,59,null],[59,63,"variable"],[63,64,null],[64,65,"variable"],[65,66,null]],
+            [[67,73,null],[73,74,"variable"],[74,75,null],[75,76,null],[76,77,null],[77,78,"number"],[78,79,null]],
+            [[80,90,null],[90,91,"number"],[91,92,null],[92,93,null],[93,94,null]],
+            [[95,98,"keyword"],[98,99,null],[99,103,"variable"],[103,104,null],[104,105,null]],
+            []
+          ],
+          "indents": [0,0,0,4,0,4,7,10,0,4],
+          "after": [[4,4],[4,4],[4,4],[4,4],[4,4],[4,4],[4,4],[4,4],[4,4],[4,4]]
+        },
+        "aligned-paren": {
+          "source": "f(first,\n",
+          "tokens": [
+            [[0,1,"variable"],[1,2,null],[2,7,"variable"],[7,8,null]],
+            []
+          ],
+          "indents": [0,2],
+          "after": [[2,2],[2,2],[2,2],[2,2],[1,1],[2,2],[2,2],[2,2],[2,2],[2,2]]
+        },
+        "nonaligned-array": {
+          "source": "var n = [\n\tfirst,\n",
+          "tokens": [
+            [[0,3,"keyword"],[3,4,null],[4,5,"variable"],[5,6,null],[6,7,null],[7,8,null],[8,9,null]],
+            [[10,11,null],[11,16,"variable"],[16,17,null]],
+            []
+          ],
+          "indents": [0,2,2],
+          "after": [[2,3],[2,3],[2,3],[2,3],[2,3],[0,0],[2,3],[2,3],[2,3],[2,3]]
+        },
+        "open-form": {
+          "source": "if (true)\n",
+          "tokens": [
+            [[0,2,"keyword"],[2,3,null],[3,4,null],[4,8,"atom"],[8,9,null]],
+            []
+          ],
+          "indents": [0,2],
+          "after": [[2,3],[2,3],[2,3],[0,0],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3]]
+        },
+        "strings": {
+          "source": "@:keep @tag(x) #if debug\n// leading comment\nvar r = ~/ab\\/c/gis;\nvar s = 'begin\n   still 🙂 \\'quoted\\' here';\nvar t = \"then\";\n/* open\n  still 🙂 */ var n = 0;\nvar bad = \"line\n",
+          "tokens": [
+            [[0,6,"meta"],[6,7,null],[7,11,"meta"],[11,12,null],[12,13,"variable"],[13,14,null],[14,15,null],[15,24,"meta"]],
+            [[25,43,"comment"]],
+            [[44,47,"keyword"],[47,48,null],[48,49,"variable"],[49,50,null],[50,51,null],[51,52,null],[52,63,"string.special"],[63,64,null]],
+            [[65,68,"keyword"],[68,69,null],[69,70,"variable"],[70,71,null],[71,72,null],[72,73,null],[73,79,"string"]],
+            [[80,83,null],[83,110,"string"],[110,111,null]],
+            [[112,115,"keyword"],[115,116,null],[116,117,"variable"],[117,118,null],[118,119,null],[119,120,null],[120,126,"string"],[126,127,null]],
+            [[128,135,"comment"]],
+            [[136,138,null],[138,151,"comment"],[151,152,null],[152,155,"keyword"],[155,156,null],[156,157,"variable"],[157,158,null],[158,159,null],[159,160,null],[160,161,"number"],[161,162,null]],
+            [[163,166,"keyword"],[166,167,null],[167,170,"variable"],[170,171,null],[171,172,null],[172,173,null],[173,178,"string"]],
+            []
+          ],
+          "indents": [0,2,2,0,0,0,0,0,0,0],
+          "after": [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]
+        },
+        "open-comment": {
+          "source": "if (x) { /* test\n",
+          "tokens": [
+            [[0,2,"keyword"],[2,3,null],[3,4,null],[4,5,"variable"],[5,6,null],[6,7,null],[7,8,null],[8,9,null],[9,16,"comment"]],
+            []
+          ],
+          "indents": [0,0],
+          "after": [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]
+        },
+        "numbers": {
+          "source": "0x 0XAfG -0x1 -2e+3 1e- 1. 1..2 1.2.3 1.12.3 1.0e+03 .5 +5 --9\nfoo ~/no/g ; ~/yes/u ~/end\nλ 𝛑 Foo<Bar>> foo.class /+=\n",
+          "tokens": [
+            [[0,2,"number"],[2,3,null],[3,7,"number"],[7,8,"type"],[8,9,null],[9,11,"number"],[11,13,"variable"],[13,14,null],[14,19,"number"],[19,20,null],[20,21,"number"],[21,22,"variable"],[22,23,null],[23,24,null],[24,26,"number"],[26,27,null],[27,28,"number"],[28,29,null],[29,30,null],[30,31,"number"],[31,32,null],[32,34,"number"],[34,37,"number"],[37,38,null],[38,41,"number"],[41,44,"number"],[44,45,null],[45,52,"number"],[52,53,null],[53,54,null],[54,55,"number"],[55,56,null],[56,57,null],[57,58,"number"],[58,59,null],[59,61,null],[61,62,"number"]],
+            [[63,66,"variable"],[66,67,null],[67,68,"variable"],[68,69,null],[69,71,"variable"],[71,72,null],[72,73,"variable"],[73,74,null],[74,75,null],[75,76,null],[76,83,"string.special"],[83,84,null],[84,85,"variable"],[85,86,null],[86,89,"variable"]],
+            [[90,92,"variable"],[92,93,null],[93,97,"variable"],[97,98,null],[98,107,"type"],[107,108,null],[108,111,"variable"],[111,112,null],[112,117,"property"],[117,118,null],[118,121,null]],
+            []
+          ],
+          "indents": [0,2,2,2],
+          "after": [[2,3],[2,3],[0,1],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3]]
+        },
+        "unfinished": {
+          "source": "function() {\n\tvar closed = call(value == 4, function(z) { return z; });\n\tvar o:{field:Float, child:{value:Int}} = {field: 1.5};\n    o.field\n",
+          "tokens": [
+            [[0,8,"keyword"],[8,9,null],[9,10,null],[10,11,null],[11,12,null]],
+            [[13,14,null],[14,17,"keyword"],[17,18,null],[18,24,"def"],[24,25,null],[25,26,null],[26,27,null],[27,31,"variable"],[31,32,null],[32,37,"variable"],[37,38,null],[38,40,null],[40,41,null],[41,42,"number"],[42,43,null],[43,44,null],[44,52,"keyword"],[52,53,null],[53,54,"def"],[54,55,null],[55,56,null],[56,57,null],[57,58,null],[58,64,"keyword"],[64,65,null],[65,66,"variableName.local"],[66,67,null],[67,68,null],[68,69,null],[69,70,null],[70,71,null]],
+            [[72,73,null],[73,76,"keyword"],[76,77,null],[77,78,"def"],[78,79,null],[79,80,null],[80,85,"variable"],[85,86,null],[86,91,"type"],[91,92,null],[92,93,null],[93,98,"variable"],[98,99,null],[99,100,null],[100,105,"variable"],[105,106,null],[106,109,"type"],[109,110,null],[110,111,null],[111,112,null],[112,113,null],[113,114,null],[114,115,null],[115,120,"property"],[120,121,null],[121,122,null],[122,125,"number"],[125,126,null],[126,127,null]],
+            [[128,132,null],[132,133,"variableName.local"],[133,134,null],[134,139,"property"]],
+            []
+          ],
+          "indents": [0,2,2,2,6],
+          "after": [[6,7],[6,7],[0,0],[6,7],[6,7],[6,7],[6,7],[6,7],[6,7],[6,7]]
+        },
+        "malformed": {
+          "source": ") } ; ]\nfunction { var } )\n  var foo = (1, ;\n",
+          "tokens": [
+            [[0,1,null],[1,2,null],[2,3,null],[3,4,null],[4,5,null],[5,6,null],[6,7,null]],
+            [[8,16,"keyword"],[16,17,null],[17,18,null],[18,19,null],[19,22,"keyword"],[22,23,null],[23,24,null],[24,25,null],[25,26,null]],
+            [[27,29,null],[29,32,"keyword"],[32,33,null],[33,36,"def"],[36,37,null],[37,38,null],[38,39,null],[39,40,null],[40,41,"number"],[41,42,null],[42,43,null],[43,44,null]],
+            []
+          ],
+          "indents": [0,2,2,13],
+          "after": [[13,13],[13,13],[13,13],[13,13],[12,12],[13,13],[13,13],[13,13],[13,13],[13,13]]
+        }
+      }
+    },
+    "haxe#hxml": {
+      "data": {"name":"hxml","merge":true,"comments":{"line":"#"},"autocomplete":null,"triggers":null},
+      "cases": {
+        "options": {
+          "source": "# comment\n-cp src\n--macro value\n-Ddebug=test\n--Define\n-D1\na-Ddebug\n --wait\n",
+          "tokens": [
+            [[0,9,"comment"]],
+            [[10,13,"variable-2"],[13,14,null],[14,15,null],[15,16,null],[16,17,null]],
+            [[18,25,"keyword a"],[25,26,null],[26,27,null],[27,28,null],[28,29,null],[29,30,null],[30,31,null]],
+            [[32,39,"keyword c"],[39,40,null],[40,41,null],[41,42,null],[42,43,null],[43,44,null]],
+            [[45,53,"keyword c"]],
+            [[54,56,"keyword c"],[56,57,null]],
+            [[58,59,null],[59,60,null],[60,61,null],[61,62,null],[62,63,null],[63,64,null],[64,65,null],[65,66,null]],
+            [[67,68,null],[68,69,null],[69,70,null],[70,71,null],[71,72,null],[72,73,null],[73,74,null]],
+            []
+          ],
+          "indents": [null,null,null,null,null,null,null,null,null],
+          "after": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        },
+        "strings": {
+          "source": "-cmd 'one two' raw \"double\"\n'open\n# whole line\n--flag tail # inside string\nresumed' # trailing\n'escaped-looking\\' after\n'-' ''\n'🙂\n",
+          "tokens": [
+            [[0,4,"variable-2"],[4,5,null],[5,14,"string"],[14,15,null],[15,16,null],[16,17,null],[17,18,null],[18,19,null],[19,20,null],[20,21,null],[21,22,null],[22,23,null],[23,24,null],[24,25,null],[25,26,null],[26,27,null]],
+            [[28,33,"string"]],
+            [[34,46,"comment"]],
+            [[47,53,"keyword a"],[53,74,"string"]],
+            [[75,83,"string"],[83,84,null],[84,94,"comment"]],
+            [[95,113,"string"],[113,114,null],[114,115,null],[115,116,null],[116,117,null],[117,118,null],[118,119,null]],
+            [[120,123,"string"],[123,124,null],[124,126,"string"]],
+            [[127,132,"string"]],
+            []
+          ],
+          "indents": [null,null,null,null,null,null,null,null,null],
+          "after": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        },
+        "unicode": {
+          "source": "-Dé 空🙂\n--foo_bar\n",
+          "tokens": [
+            [[0,2,"keyword c"],[2,4,null],[4,5,null],[5,8,null],[8,12,null]],
+            [[13,18,"keyword a"],[18,19,null],[19,20,null],[20,21,null],[21,22,null]],
+            []
+          ],
+          "indents": [null,null,null],
+          "after": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        }
+      }
+    },
+    "spreadsheet#spreadsheet": {
+      "data": {"name":"spreadsheet","merge":true,"comments":null,"autocomplete":null,"triggers":null},
+      "cases": {
+        "expressions": {
+          "source": "=SUM(Sheet1.A1:$B$2, 23a, 8, 1E7); IF(A1<>0, 2^3, -4)*3/2\nfunction () Func.name A.A _ref 0_abc 2abc3 123 8.0\n{} > & _ [alpha] [] abc\n",
+          "tokens": [
+            [[0,1,"atom"],[1,4,"keyword"],[4,5,"bracket"],[5,11,"keyword"],[11,12,"atom"],[12,14,"variable"],[14,15,"operator"],[15,16,"builtin"],[16,17,"variable"],[17,18,"builtin"],[18,19,"number"],[19,20,"atom"],[20,21,null],[21,24,"error"],[24,25,"atom"],[25,26,null],[26,27,"number"],[27,28,"atom"],[28,29,null],[29,32,"error"],[32,33,"bracket"],[33,34,"atom"],[34,35,null],[35,37,"keyword"],[37,38,"bracket"],[38,40,"variable"],[40,41,"atom"],[41,42,null],[42,43,"number"],[43,44,"atom"],[44,45,null],[45,46,"number"],[46,47,"atom"],[47,48,"number"],[48,49,"atom"],[49,50,null],[50,51,"atom"],[51,52,"number"],[52,53,"bracket"],[53,54,"atom"],[54,55,"number"],[55,56,"atom"],[56,57,"number"]],
+            [[58,66,"variable"],[66,67,null],[67,68,"bracket"],[68,69,"bracket"],[69,70,null],[70,74,"keyword"],[74,75,"atom"],[75,79,"variable"],[79,80,null],[80,81,"keyword"],[81,82,"atom"],[82,83,"variable"],[83,84,null],[84,88,"variable"],[88,89,null],[89,94,"error"],[94,95,null],[95,100,"error"],[100,101,null],[101,104,"number"],[104,105,null],[105,106,"number"],[106,107,"atom"],[107,108,"number"]],
+            [[109,110,"bracket"],[110,111,"bracket"],[111,112,null],[112,113,null],[113,114,null],[114,115,null],[115,116,null],[116,117,"variable"],[117,118,null],[118,119,"bracket"],[119,124,"operator"],[124,125,"bracket"],[125,126,null],[126,127,"bracket"],[127,128,"bracket"],[128,129,null],[129,132,"variable"]],
+            []
+          ],
+          "indents": [null,null,null,null],
+          "after": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        },
+        "strings": {
+          "source": "\"text\\\"🙂\" + 'other\"quote' + 'first\n second \\' in string' + \"last\n",
+          "tokens": [
+            [[0,12,"string"],[12,13,null],[13,14,"atom"],[14,15,null],[15,28,"string"],[28,29,null],[29,30,"atom"],[30,31,null],[31,37,"string"]],
+            [[38,59,"string"],[59,60,null],[60,61,"atom"],[61,62,null],[62,67,"string"]],
+            []
+          ],
+          "indents": [null,null,null],
+          "after": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        },
+        "classes": {
+          "source": "[a\\]b] [^\\-\\]] [] [\\] [abc\\\nnext]\n\\alpha \\ABC \\aBc 𝛑 é\n",
+          "tokens": [
+            [[0,1,"bracket"],[1,5,"operator"],[5,6,"bracket"],[6,7,null],[7,8,"bracket"],[8,13,"operator"],[13,14,"bracket"],[14,15,null],[15,16,"bracket"],[16,17,"bracket"],[17,18,null],[18,19,"bracket"],[19,26,"operator"],[26,27,"atom"]],
+            [[28,32,"variable"],[32,33,"bracket"]],
+            [[34,40,"string.special"],[40,41,null],[41,42,"atom"],[42,45,"variable"],[45,46,null],[46,48,"string.special"],[48,50,"variable"],[50,51,null],[51,55,null],[55,56,null],[56,57,"variable"],[57,59,null]],
+            []
+          ],
+          "indents": [null,null,null,null],
+          "after": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        },
+        "open-class": {
+          "source": "[[abcd\n more",
+          "tokens": [
+            [[0,1,"bracket"],[1,6,"operator"]],
+            [[7,12,"operator"]]
+          ],
+          "indents": [null,null],
+          "after": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        },
+        "separate-class-lines": {
+          "source": "[\r\n\r\nrow\r\n]\n[\n] before",
+          "tokens": [
+            [[0,1,"bracket"]],
+            [],
+            [[5,8,"operator"]],
+            [[10,11,"bracket"]],
+            [[12,13,"bracket"]],
+            [[14,15,"bracket"],[15,16,null],[16,22,"variable"]]
+          ],
+          "indents": [null,null,null,null,null,null],
+          "after": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        }
+      }
+    },
+    "ttcn#ttcn": {
+      "data": {"name":"ttcn","merge":true,"comments":{"line":"//","block":{"open":"/*","close":"*/"}},"autocomplete":["activate","address","alive","all","alt","altstep","and","and4b","any","break","case","component","const","continue","control","deactivate","display","do","else","encode","enumerated","except","exception","execute","extends","extension","external","for","from","function","goto","group","if","import","in","infinity","inout","interleave","label","language","length","log","match","message","mixed","mod","modifies","module","modulepar","mtc","noblock","not","not4b","nowait","of","on","optional","or","or4b","out","override","param","pattern","port","procedure","record","recursive","rem","repeat","return","runs","select","self","sender","set","signature","system","template","testcase","to","type","union","value","valueof","var","variant","while","with","xor","xor4b","bit2hex","bit2int","bit2oct","bit2str","char2int","char2oct","encvalue","decomp","decvalue","float2int","float2str","hex2bit","hex2int","hex2oct","hex2str","int2bit","int2char","int2float","int2hex","int2oct","int2str","int2unichar","isbound","ischosen","ispresent","isvalue","lengthof","log2str","oct2bit","oct2char","oct2hex","oct2int","oct2str","regexp","replace","rnd","sizeof","str2bit","str2float","str2hex","str2int","str2oct","substr","unichar2int","unichar2char","enum2int","read","running","start","stop","timeout","call","catch","check","clear","getcall","getreply","halt","raise","receive","reply","send","trigger"],"triggers":[false,false,true,true,true,true,true,false,false,false,false]},
+      "cases": {
+        "syntax": {
+          "source": "module Demo {\n  type component Handler { port integer data; timer t; }\n  private testcase run() runs on Handler {\n    var charstring msg := int2str(23);\n    t.start; data.send(msg); self.create; map(self:data, system:data);\n    setverdict(pass); action(\"work\"); f.apply;\n    if (true and not false) { valueof(msg); }\n  }\n}\n#include \"foo\"\n%word %!value ? \\ [] 123abc 5.6e+7 $$v @try @catcher @lazy @soon\n",
+          "tokens": [
+            [[0,6,"keyword"],[6,7,null],[7,11,"variable"],[11,12,null],[12,13,"punctuation"]],
+            [[14,16,null],[16,20,"keyword"],[20,21,null],[21,30,"keyword"],[30,31,null],[31,38,"variable"],[38,39,null],[39,40,"punctuation"],[40,41,null],[41,45,"keyword"],[45,46,null],[46,53,"typeName.standard"],[53,54,null],[54,58,"variable"],[58,59,"punctuation"],[59,60,null],[60,65,"typeName.standard"],[65,66,null],[66,67,"variable"],[67,68,"punctuation"],[68,69,null],[69,70,"punctuation"]],
+            [[71,73,null],[73,80,"modifier"],[80,81,null],[81,89,"keyword"],[89,90,null],[90,93,"variable"],[93,94,"punctuation"],[94,95,"punctuation"],[95,96,null],[96,100,"keyword"],[100,101,null],[101,103,"keyword"],[103,104,null],[104,111,"variable"],[111,112,null],[112,113,"punctuation"]],
+            [[114,118,null],[118,121,"keyword"],[121,122,null],[122,132,"typeName.standard"],[132,133,null],[133,136,"variable"],[136,137,null],[137,138,"punctuation"],[138,139,"operator"],[139,140,null],[140,147,"builtin"],[147,148,"punctuation"],[148,150,"number"],[150,151,"punctuation"],[151,152,"punctuation"]],
+            [[153,157,null],[157,158,"variable"],[158,159,"punctuation"],[159,164,"def"],[164,165,"punctuation"],[165,166,null],[166,170,"variable"],[170,171,"punctuation"],[171,175,"def"],[175,176,"punctuation"],[176,179,"variable"],[179,180,"punctuation"],[180,181,"punctuation"],[181,182,null],[182,186,"keyword"],[186,187,"punctuation"],[187,193,"def"],[193,194,"punctuation"],[194,195,null],[195,198,"def"],[198,199,"punctuation"],[199,203,"keyword"],[203,204,"punctuation"],[204,208,"variable"],[208,209,"punctuation"],[209,210,null],[210,216,"keyword"],[216,217,"punctuation"],[217,221,"variable"],[221,222,"punctuation"],[222,223,"punctuation"]],
+            [[224,228,null],[228,238,"def"],[238,239,"punctuation"],[239,243,"string"],[243,244,"punctuation"],[244,245,"punctuation"],[245,246,null],[246,252,"def"],[252,253,"punctuation"],[253,259,"string"],[259,260,"punctuation"],[260,261,"punctuation"],[261,262,null],[262,263,"variable"],[263,264,"punctuation"],[264,269,"def"],[269,270,"punctuation"]],
+            [[271,275,null],[275,277,"keyword"],[277,278,null],[278,279,"punctuation"],[279,283,"string"],[283,284,null],[284,287,"keyword"],[287,288,null],[288,291,"keyword"],[291,292,null],[292,297,"string"],[297,298,"punctuation"],[298,299,null],[299,300,"punctuation"],[300,301,null],[301,308,"keyword"],[308,309,"punctuation"],[309,312,"variable"],[312,313,"punctuation"],[313,314,"punctuation"],[314,315,null],[315,316,"punctuation"]],
+            [[317,319,null],[319,320,"punctuation"]],
+            [[321,322,"punctuation"]],
+            [[323,337,"atom"]],
+            [[338,343,"atom"],[343,344,null],[344,345,"atom"],[345,346,"operator"],[346,351,"keyword"],[351,352,null],[352,353,"punctuation"],[353,354,null],[354,355,"punctuation"],[355,356,null],[356,357,"punctuation"],[357,358,"punctuation"],[358,359,null],[359,365,"number"],[365,366,null],[366,370,"number"],[370,371,"operator"],[371,372,"number"],[372,373,null],[373,376,"variable"],[376,377,null],[377,381,"keyword"],[381,382,null],[382,388,"keyword"],[388,390,"variable"],[390,391,null],[391,396,"keyword"],[396,397,null],[397,398,"operator"],[398,402,"variable"]],
+            []
+          ],
+          "indents": [null,null,null,null,null,null,null,null,null,null,null,null],
+          "after": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        },
+        "categories": {
+          "source": "address and4b default break enum2int float2str running getreply connect setverdict derefers\nerror fail inconc none pass true false null NULL omit anytype bitstring objid verdicttype universal friend\ncomplement ifpresent subset superset permutation complementx log constructor __proto__ $name a§b élève 名🙂\n",
+          "tokens": [
+            [[0,7,"keyword"],[7,8,null],[8,13,"keyword"],[13,14,null],[14,21,"typeName.standard"],[21,22,null],[22,27,"keyword"],[27,28,null],[28,36,"builtin"],[36,37,null],[37,46,"builtin"],[46,47,null],[47,54,"def"],[54,55,null],[55,63,"def"],[63,64,null],[64,71,"def"],[71,72,null],[72,82,"def"],[82,83,null],[83,91,"def"]],
+            [[92,97,"string"],[97,98,null],[98,102,"string"],[102,103,null],[103,109,"string"],[109,110,null],[110,114,"string"],[114,115,null],[115,119,"string"],[119,120,null],[120,124,"string"],[124,125,null],[125,130,"string"],[130,131,null],[131,135,"string"],[135,136,null],[136,140,"string"],[140,141,null],[141,145,"string"],[145,146,null],[146,153,"typeName.standard"],[153,154,null],[154,163,"typeName.standard"],[163,164,null],[164,169,"typeName.standard"],[169,170,null],[170,181,"typeName.standard"],[181,182,null],[182,191,"typeName.standard"],[191,192,null],[192,198,"modifier"]],
+            [[199,209,"atom"],[209,210,null],[210,219,"atom"],[219,220,null],[220,226,"atom"],[226,227,null],[227,235,"atom"],[235,236,null],[236,247,"atom"],[247,248,null],[248,259,"variable"],[259,260,null],[260,263,"keyword"],[263,264,null],[264,275,"variable"],[275,276,null],[276,285,"variable"],[285,286,null],[286,291,"variable"],[291,292,null],[292,296,"variable"],[296,297,null],[297,304,"variable"],[304,305,null],[305,312,"variable"]],
+            []
+          ],
+          "indents": [null,null,null,null],
+          "after": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        },
+        "strings": {
+          "source": "x := '101'B; h := 'fe'h; oct := '71'O; no := 'test'q;\nvar txt := \"one\\\"two\n    next 🙂 \"; // tail\n/* open\n    continues */ run();\n/* unfinished",
+          "tokens": [
+            [[0,1,"variable"],[1,2,null],[2,3,"punctuation"],[3,4,"operator"],[4,5,null],[5,11,"string"],[11,12,"punctuation"],[12,13,null],[13,14,"variable"],[14,15,null],[15,16,"punctuation"],[16,17,"operator"],[17,18,null],[18,23,"string"],[23,24,"punctuation"],[24,25,null],[25,28,"variable"],[28,29,null],[29,30,"punctuation"],[30,31,"operator"],[31,32,null],[32,37,"string"],[37,38,"punctuation"],[38,39,null],[39,41,"variable"],[41,42,null],[42,43,"punctuation"],[43,44,"operator"],[44,45,null],[45,51,"string"],[51,52,"variable"],[52,53,"punctuation"]],
+            [[54,57,"keyword"],[57,58,null],[58,61,"variable"],[61,62,null],[62,63,"punctuation"],[63,64,"operator"],[64,65,null],[65,74,"string"]],
+            [[75,79,null],[79,90,"string"],[90,91,"punctuation"],[91,92,null],[92,99,"comment"]],
+            [[100,107,"comment"]],
+            [[108,112,null],[112,124,"comment"],[124,125,null],[125,128,"variable"],[128,129,"punctuation"],[129,130,"punctuation"],[130,131,"punctuation"]],
+            [[132,145,"comment"]]
+          ],
+          "indents": [null,null,null,null,null,null],
+          "after": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        },
+        "borders": {
+          "source": "/*/\n* isolated star*\n/ rest\nlast */ @tryagain /== / / /=\n",
+          "tokens": [
+            [[0,3,"comment"]],
+            [[4,20,"comment"]],
+            [[21,27,"comment"]],
+            [[28,35,"comment"],[35,36,null],[36,40,"keyword"],[40,45,"variable"],[45,46,null],[46,49,"operator"],[49,50,null],[50,51,"operator"],[51,52,null],[52,53,"operator"],[53,54,null],[54,56,"operator"]],
+            []
+          ],
+          "indents": [null,null,null,null,null],
+          "after": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        }
+      }
+    },
+    "ttcn-cfg#ttcnCfg": {
+      "data": {"name":"ttcn","merge":true,"comments":{"line":"#"},"autocomplete":null,"triggers":[false,false,true,true,true,true,true,false,false,false,false]},
+      "cases": {
+        "syntax": {
+          "source": "[LOGGING]\nLogFile := \"output.log\"\nFileMask := TTCN_ERROR | TTCN_ACTION || LOG_ALL\nConsoleMask := PORTEVENT_STATE | MATCHING_MCUNSUCC | DEFAULTOP_EXIT\nAppendFile := Yes # tail\nBeginControlPart := '101'B\nEndTestCase := '1'o\n[MODULE_PARAMETERS] foo.bar := 0xff TtCn $VALUE\n",
+          "tokens": [
+            [[0,9,"number"]],
+            [[10,17,"keyword"],[17,18,null],[18,19,"punctuation"],[19,20,"punctuation"],[20,21,null],[21,33,"string"]],
+            [[34,42,"keyword"],[42,43,null],[43,44,"punctuation"],[44,45,"punctuation"],[45,46,null],[46,56,"atom"],[56,57,null],[57,58,"operator"],[58,59,null],[59,70,"atom"],[70,71,null],[71,73,"operator"],[73,74,null],[74,81,"atom"]],
+            [[82,93,"keyword"],[93,94,null],[94,95,"punctuation"],[95,96,"punctuation"],[96,97,null],[97,112,"atom"],[112,113,null],[113,114,"operator"],[114,115,null],[115,132,"atom"],[132,133,null],[133,134,"operator"],[134,135,null],[135,149,"atom"]],
+            [[150,160,"keyword"],[160,161,null],[161,162,"punctuation"],[162,163,"punctuation"],[163,164,null],[164,167,"keyword"],[167,168,null],[168,174,"comment"]],
+            [[175,191,"deleted"],[191,192,null],[192,193,"punctuation"],[193,194,"punctuation"],[194,195,null],[195,201,"string"]],
+            [[202,213,"deleted"],[213,214,null],[214,215,"punctuation"],[215,216,"punctuation"],[216,217,null],[217,221,"string"]],
+            [[222,241,"number"],[241,242,null],[242,245,"variable"],[245,249,"variable"],[249,250,null],[250,251,"punctuation"],[251,252,"punctuation"],[252,253,null],[253,257,"number"],[257,258,null],[258,262,"variable"],[262,263,null],[263,269,"variable"]],
+            []
+          ],
+          "indents": [null,null,null,null,null,null,null,null,null],
+          "after": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        },
+        "strings": {
+          "source": "Time := \"one\\\"next\n   # not a comment in string\"H\nLocalAddress := \"last\n",
+          "tokens": [
+            [[0,4,"keyword"],[4,5,null],[5,6,"punctuation"],[6,7,"punctuation"],[7,8,null],[8,18,"string"]],
+            [[19,22,null],[22,49,"string"]],
+            [[50,62,"keyword"],[62,63,null],[63,64,"punctuation"],[64,65,"punctuation"],[65,66,null],[66,71,"string"]],
+            []
+          ],
+          "indents": [null,null,null,null],
+          "after": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        },
+        "categories": {
+          "source": "No Detailed Compact Stack Retry TCPPort UnixSocketsEnabled DEBUG_ENCDEC TESTCASE_UNQUALIFIED WARNING_UNQUALIFIED EndControlPart BeginTestCase\nfoo ≈bar éx [unchecked][x] [abc-xyz] : = //not-a-comment\n",
+          "tokens": [
+            [[0,2,"keyword"],[2,3,null],[3,11,"keyword"],[11,12,null],[12,19,"keyword"],[19,20,null],[20,25,"keyword"],[25,26,null],[26,31,"keyword"],[31,32,null],[32,39,"keyword"],[39,40,null],[40,58,"keyword"],[58,59,null],[59,71,"atom"],[71,72,null],[72,92,"atom"],[92,93,null],[93,112,"atom"],[112,113,null],[113,127,"deleted"],[127,128,null],[128,141,"deleted"]],
+            [[142,145,"variable"],[145,146,null],[146,152,"variable"],[152,153,null],[153,156,"variable"],[156,157,null],[157,168,"number"],[168,171,"number"],[171,172,null],[172,176,"number"],[176,180,"variable"],[180,181,"variable"],[181,182,null],[182,183,"punctuation"],[183,184,null],[184,185,"punctuation"],[185,186,null],[186,187,"variable"],[187,191,"variable"],[191,193,"variable"],[193,201,"variable"]],
+            []
+          ],
+          "indents": [null,null,null],
+          "after": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]
+        }
+      }
+    }
+  }
+}

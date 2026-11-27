@@ -1,0 +1,347 @@
+//! Synchronous host collaboration for one existing unclosed code draft.
+
+use gpui::Context;
+use gpui_editor_codemirror::{
+    ChangeSet, ConfigurationError, EditError, EditorState, Text, Transaction,
+    collab::{collab_state, prepare_text_update_group, receive_updates},
+};
+
+use super::Editor;
+use crate::document::{Markdown, Section, SectionKind};
+
+pub use gpui_editor_codemirror::collab::{CollabConfig, CollabError, Update, collab};
+
+/// A snapshot of the native pending queue at its authority version.
+#[derive(Debug, PartialEq, Eq)]
+pub struct SourceCollabQueue {
+    pub version: usize,
+    pub updates: Vec<Update>,
+}
+
+/// A rejected host operation. The editor and collaboration state are unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceCollabError {
+    Collaboration(CollabError),
+    InputBlocked,
+    ImeUnsupported,
+    EffectsUnsupported,
+    OutsideDraft,
+    ChangedTopology,
+}
+
+impl From<CollabError> for SourceCollabError {
+    fn from(error: CollabError) -> Self {
+        Self::Collaboration(error)
+    }
+}
+
+impl From<EditError> for SourceCollabError {
+    fn from(error: EditError) -> Self {
+        CollabError::from(error).into()
+    }
+}
+
+pub(super) struct SourceCollab {
+    // The synchronized bytes are needed to check individual authority updates.
+    // The view's text can include pending local edits, and composition of a
+    // batch can hide an out-of-scope edit that a later update cancels.
+    authority: Text,
+    mapped_history: bool,
+    ime_start: Option<EditorState>,
+    ime_blocked: bool,
+}
+
+impl SourceCollab {
+    pub(super) fn install(state: &EditorState) -> Result<Option<Self>, ConfigurationError> {
+        Ok(collab_state(state)?.map(|_| Self {
+            authority: state.text().clone(),
+            mapped_history: false,
+            ime_start: None,
+            ime_blocked: false,
+        }))
+    }
+}
+
+impl Editor {
+    /// Read the pending text updates without acknowledging or transforming
+    /// them. Reject the entire queue if an update changes protected Markdown,
+    /// changes the draft structure, or carries an effect. Install `collab`
+    /// with `with_native_extensions` and keep it for the editor's lifetime.
+    /// The host owns the authority and submits in order at the returned version.
+    ///
+    /// Do not read the queue during marked-text composition. After completion,
+    /// a validated composition supplies only the grouped text edit.
+    pub fn source_collab_queue(&self) -> Result<SourceCollabQueue, SourceCollabError> {
+        let host = self.source_collab_input()?;
+        let state = self.view.state();
+        let session = collab_state(state)
+            .map_err(EditError::from)?
+            .ok_or(CollabError::NotConfigured)?;
+        let mut optimistic = host.authority.clone();
+        for update in session.sendable_updates() {
+            if !update.effects().is_empty() {
+                return Err(SourceCollabError::EffectsUnsupported);
+            }
+            check_collab_text_update(&mut optimistic, update)?;
+        }
+        if &optimistic != state.text() {
+            return Err(CollabError::StateMismatch.into());
+        }
+        Ok(SourceCollabQueue {
+            version: session.synced_version(),
+            updates: session.sendable_updates().to_vec(),
+        })
+    }
+
+    /// Receive an exact-base authority batch in whole-document UTF-8 bytes.
+    /// Text from peers can change only one existing, unclosed code draft at
+    /// the end of the document, outside other Markdown sections. Its opening
+    /// line must already end in LF or CRLF. This does not require an active
+    /// source frame. Empty batches need no draft body.
+    /// Shared effects and transport are not supported. Receive no updates
+    /// while marked text is active.
+    pub fn receive_source_collab_updates(
+        &mut self,
+        version: usize,
+        updates: &[Update],
+        cx: &mut Context<Self>,
+    ) -> Result<(), SourceCollabError> {
+        let host = self.source_collab_input()?;
+        if updates.iter().any(|update| !update.effects().is_empty()) {
+            return Err(SourceCollabError::EffectsUnsupported);
+        }
+        let state = self.view.state();
+        let transaction = receive_updates(state, version, updates)?;
+        let session = collab_state(state)
+            .map_err(EditError::from)?
+            .ok_or(CollabError::NotConfigured)?;
+        let mut optimistic = host.authority.clone();
+        for pending in session.sendable_updates() {
+            pending.apply_to(&mut optimistic)?;
+        }
+        if &optimistic != state.text() {
+            return Err(CollabError::StateMismatch.into());
+        }
+        let mut authority = host.authority.clone();
+        for update in updates {
+            check_collab_text_update(&mut authority, update)?;
+        }
+        let changed = check_draft_edit(&mut optimistic, transaction.changes())?;
+        let before = self.active.clone();
+        let mut after = before.clone();
+        if let Some((old, new)) = &changed
+            && before.as_ref() == Some(old)
+        {
+            after = Some(new.clone());
+        }
+        let proposed = transaction.clone();
+        // Use the prepared transaction itself. Rebuilding or filtering it can
+        // lose the typed receipt. Extenders may run, but cannot alter its edit,
+        // selection, history policy, effects, or scroll behavior.
+        self.active = self.view.update_checked(
+            transaction,
+            before,
+            |resolved| check_receipt(&proposed, resolved),
+            |_| (None, after),
+        )?;
+        let host = self
+            .source_collab
+            .as_mut()
+            .expect("collaboration installed");
+        host.authority = authority;
+        if changed.is_some() {
+            host.mapped_history = true;
+            // Rebuild text layout without starting a reveal or moving focus.
+            self.layout = None;
+            self.rectangle = None;
+            self.completion = None;
+        }
+        if !updates.is_empty() {
+            cx.notify();
+        }
+        Ok(())
+    }
+
+    fn source_collab_input(&self) -> Result<&SourceCollab, SourceCollabError> {
+        let host = self
+            .source_collab
+            .as_ref()
+            .ok_or(CollabError::NotConfigured)?;
+        if !self.input_enabled
+            || self.view.state().read_only()
+            || self.is_composing()
+            || host.ime_start.is_some()
+        {
+            return Err(SourceCollabError::InputBlocked);
+        }
+        if host.ime_blocked {
+            return Err(SourceCollabError::ImeUnsupported);
+        }
+        Ok(host)
+    }
+
+    pub(super) fn start_source_collab_composition(&mut self) {
+        if let Some(host) = &mut self.source_collab
+            && !host.ime_blocked
+            && host.ime_start.is_none()
+        {
+            host.ime_start = Some(self.view.state().clone());
+        }
+    }
+
+    pub(super) fn finish_source_collab_composition(&mut self) {
+        let Some(start) = self
+            .source_collab
+            .as_mut()
+            .and_then(|host| host.ime_start.take())
+        else {
+            return;
+        };
+        if self.publish_source_collab_composition(&start).is_err() {
+            self.source_collab
+                .as_mut()
+                .expect("collaboration installed")
+                .ime_blocked = true;
+        }
+    }
+
+    fn publish_source_collab_composition(
+        &mut self,
+        start: &EditorState,
+    ) -> Result<(), SourceCollabError> {
+        let state = self.view.state();
+        let Some((receipt, changes)) = prepare_text_update_group(start, state)? else {
+            return Ok(());
+        };
+        // The host never sends intermediate revisions. Require all their
+        // edits to stay in the original draft body, and check the final
+        // structure using the same rule as a received text update.
+        let before = collab_state(start)
+            .map_err(EditError::from)?
+            .ok_or(CollabError::NotConfigured)?;
+        let current = collab_state(state)
+            .map_err(EditError::from)?
+            .ok_or(CollabError::NotConfigured)?;
+        let markdown = Markdown::new(start.text().as_str());
+        let sections = markdown.sections();
+        let (_, body_start) =
+            draft_body(start.text().as_str(), &sections).ok_or(SourceCollabError::OutsideDraft)?;
+        for update in &current.sendable_updates()[before.sendable_updates().len()..] {
+            if update.changes().changes().any(|(range, _)| {
+                range.start < body_start || range.end > update.change_desc().length()
+            }) {
+                return Err(SourceCollabError::OutsideDraft);
+            }
+        }
+        let mut text = start.text().clone();
+        check_draft_edit(&mut text, &changes)?;
+        if &text != state.text() {
+            return Err(CollabError::StateMismatch.into());
+        }
+        let active = self.active.clone();
+        let proposed = receipt.clone();
+        self.view.update_checked(
+            receipt,
+            active.clone(),
+            |resolved| check_receipt(&proposed, resolved),
+            |_| (None, active),
+        )?;
+        Ok(())
+    }
+
+    pub(super) fn restore_source_collab_frame(&self, active: Section) -> Section {
+        if active.kind == SectionKind::DraftCode
+            && self
+                .source_collab
+                .as_ref()
+                .is_some_and(|host| host.mapped_history)
+        {
+            // Native history maps text and selection, not opaque host metadata.
+            // Only refresh the restored unclosed draft's bounds. Keep synthetic
+            // closed source frames and non-code metadata under the native rules.
+            let source = self.source();
+            let sections = self.markdown().sections();
+            if let Some((draft, _)) = draft_body(source, &sections)
+                && active.source.start == draft.source.start
+                && active.content.start == draft.content.start
+            {
+                return draft.clone();
+            }
+        }
+        active
+    }
+}
+
+fn check_receipt(proposed: &Transaction, resolved: &Transaction) -> Result<(), EditError> {
+    if resolved.changes() != proposed.changes()
+        || resolved.selection().is_some()
+        || !resolved.effects().is_empty()
+        || resolved.scroll_into_view()
+        || resolved.add_to_history()
+        || resolved.is_remote() != proposed.is_remote()
+        || resolved.history_isolation().is_some()
+    {
+        return Err(EditError::Configuration(
+            ConfigurationError::InvalidFieldData,
+        ));
+    }
+    Ok(())
+}
+
+fn check_collab_text_update(text: &mut Text, update: &Update) -> Result<(), SourceCollabError> {
+    if update.change_desc().length() != text.len() {
+        return Err(EditError::MismatchedLength.into());
+    }
+    check_draft_edit(text, update.changes()).map(|_| ())
+}
+
+fn check_draft_edit(
+    text: &mut Text,
+    changes: &ChangeSet,
+) -> Result<Option<(Section, Section)>, SourceCollabError> {
+    if changes.is_empty() {
+        return Ok(None);
+    }
+    let markdown = Markdown::new(text.as_str());
+    let mut sections = markdown.sections();
+    let (draft, start) =
+        draft_body(text.as_str(), &sections).ok_or(SourceCollabError::OutsideDraft)?;
+    for (range, insert) in changes.changes() {
+        if range.start < start || range.end > draft.source.end {
+            return Err(SourceCollabError::OutsideDraft);
+        }
+        let (actual, planned) = markdown
+            .plan_replacement(range.clone(), insert, Some(draft))
+            .map_err(|_| SourceCollabError::OutsideDraft)?;
+        if actual != *range || planned != insert {
+            return Err(SourceCollabError::OutsideDraft);
+        }
+    }
+    let old = draft.clone();
+    changes.apply_to(text)?;
+    let expected = sections.last_mut().expect("checked draft section");
+    expected.source.end = text.len();
+    expected.content.end = text.len();
+    let new = expected.clone();
+    if sections != Markdown::new(text.as_str()).sections() {
+        return Err(SourceCollabError::ChangedTopology);
+    }
+    Ok(Some((old, new)))
+}
+
+fn draft_body<'a>(source: &str, sections: &'a [Section]) -> Option<(&'a Section, usize)> {
+    let (draft, before) = sections.split_last()?;
+    if draft.kind != SectionKind::DraftCode
+        || draft.source.end != source.len()
+        || before.iter().any(|section| {
+            section.kind == SectionKind::DraftCode || section.source.end > draft.source.start
+        })
+    {
+        return None;
+    }
+    let (header, _) = source.get(draft.source.clone())?.split_once('\n')?;
+    Some((draft, draft.source.start + header.len() + 1))
+}
+
+#[cfg(test)]
+mod tests;

@@ -1,0 +1,9 @@
+{"language":"wat","body":"(module\n (func))","ranges":[[1,1],[10,10]],"marks":[[0,1,true],[9,10,true],[14,15,true],[15,16,true]]}
+{"language":"lezer","body":"@top T { A }\nA { \"x\" }","ranges":[[8,8],[16,16]],"marks":[[7,8,true],[11,12,true],[15,16,true],[21,22,true]]}
+{"language":"json","body":"[0, [1], [2]]","ranges":[[1,1],[5,5],[10,10]],"marks":[[0,1,true],[4,5,true],[6,7,true],[9,10,true],[11,12,true],[12,13,true]]}
+{"language":"json","body":"[0, [1], [2]]","ranges":[[1,2],[5,5],[10,10]],"marks":[[4,5,true],[6,7,true],[9,10,true],[11,12,true]]}
+{"language":"html","body":"<main>\r\n<script>f(1)</script>\r\n</main>","ranges":[[2,2],[19,19]],"marks":[[1,5,true],[17,18,true],[19,20,true],[33,37,true]]}
+{"language":"xml","body":"<root>🐈<Kid></kid></root>","ranges":[[2,2],[12,12]],"marks":[[1,5,true],[11,14,false],[23,27,true]]}
+{"language":"text","body":"🐈 (x) (y] (z","ranges":[[6,6],[12,12],[14,14]],"marks":[[5,6,true],[7,8,true],[9,10,false],[11,12,false],[13,14,false]]}
+{"language":"text","body":"(a)","ranges":[[1,1],[3,3]],"marks":[[0,1,true],[0,1,true],[2,3,true],[2,3,true]]}
+{"language":"json","body":"[\"אב (x]\", [1], [2]]","ranges":[[8,8],[14,14],[19,19]],"marks":[[7,8,false],[9,10,false],[13,14,true],[15,16,true],[18,19,true],[20,21,true]]}

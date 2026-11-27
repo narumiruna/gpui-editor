@@ -1,0 +1,15 @@
+{"mode":"cpp","name":"inside a string","source":"const char *s = \"😀  \";","head":22,"key":"\"","after":"const char *s = \"😀 \" \";","position":23,"handled":false}
+{"mode":"cpp","name":"inside a wide string","source":"const auto s = L\"字  \";","head":21,"key":"\"","after":"const auto s = L\"字 \" \";","position":22,"handled":false}
+{"mode":"cpp","name":"inside a UTF-8 string","source":"const auto s = u8\"字  \";","head":22,"key":"\"","after":"const auto s = u8\"字 \" \";","position":23,"handled":false}
+{"mode":"cpp","name":"inside a raw string","source":"const auto s = R\"tag(字  )tag\";","head":25,"key":"\"","after":"const auto s = R\"tag(字 \" )tag\";","position":26,"handled":false}
+{"mode":"cpp","name":"inside a prefixed raw string","source":"const auto s = u8R\"tag(字  )tag\";","head":27,"key":"\"","after":"const auto s = u8R\"tag(字 \" )tag\";","position":28,"handled":false}
+{"mode":"cpp","name":"raw literal across CRLF","source":"const auto s = R\"tag(x\r\n😀 )tag\";","head":28,"key":"\"","after":"const auto s = R\"tag(x\r\n😀\" )tag\";","position":29,"handled":false}
+{"mode":"cpp","name":"before an unprefixed string opener","source":"const auto s = \"字\";","head":15,"key":"\"","after":"const auto s = \"\"\"字\";","position":16,"handled":true}
+{"mode":"cpp","name":"before an untracked closer","source":"const auto s = \"x\";","head":17,"key":"\"","after":"const auto s = \"x\"\";","position":18,"handled":false}
+{"mode":"cpp","name":"inside an escape context","source":"const auto s = \"\\\" \";","head":18,"key":"\"","after":"const auto s = \"\\\"\" \";","position":19,"handled":false}
+{"mode":"cpp","name":"paired quote after a complete prefix","source":"const auto s = u8R;","head":18,"key":"\"","after":"const auto s = u8R\"\";","position":19,"handled":true}
+{"mode":"cpp","name":"wide character literal interior","source":"auto c = L'字  ';","head":15,"key":"'","after":"auto c = L'字 ' ';","position":16,"handled":false}
+{"mode":"cpp","name":"quote in comment","source":"// \" \r\nint x;","head":5,"key":"\"","after":"// \" \"\"\r\nint x;","position":6,"handled":true}
+{"mode":"c","name":"C include angle is not a string opener","source":"#include <stdio.h>","head":9,"key":"\"","after":"#include \"\"<stdio.h>","position":10,"handled":true}
+{"mode":"c","name":"C wide string interior","source":"const wchar_t *s = L\"字  \";","head":25,"key":"\"","after":"const wchar_t *s = L\"字 \" \";","position":26,"handled":false}
+{"mode":"c","name":"C unprefixed character opener","source":"char c = 'q';","head":9,"key":"'","after":"char c = '''q';","position":10,"handled":true}

@@ -1,0 +1,32 @@
+{
+  "pin": {"name":"@codemirror/state","version":"6.7.6","integrity":"sha512-kAz+AncRtKuIknedxT1bq4XwXv4UowhbkHU1myPrtVb/jZtImWuV5BXzv5vK6i3kYACsdiZiQKFQQ5Mq7elW8w=="},
+  "lines": [
+    {"id":"default","inputs":[],"source":"a\rb\r\nc\n","insert":"\r字\r\n","created":{"configured":null,"line_break":"\n","lines":["a","b","c",""],"internal":"a\nb\nc\n","display":"a\nb\nc\n"},"parsed":["","字",""],"edited":{"configured":null,"line_break":"\n","lines":["a","b","c","","字",""],"internal":"a\nb\nc\n\n字\n","display":"a\nb\nc\n\n字\n"}},
+    {"id":"crlf","inputs":[{"value":"\r\n","high":false}],"source":"é\r\n\r\n😀\r\n","insert":"字\r\n末\r\n","created":{"configured":"\r\n","line_break":"\r\n","lines":["é","","😀",""],"internal":"é\n\n😀\n","display":"é\r\n\r\n😀\r\n"},"parsed":["字","末",""],"edited":{"configured":"\r\n","line_break":"\r\n","lines":["é","","😀","字","末",""],"internal":"é\n\n😀\n字\n末\n","display":"é\r\n\r\n😀\r\n字\r\n末\r\n"}},
+    {"id":"unicode-exact-and-precedence","inputs":[{"value":"|","high":false},{"value":"🟩:","high":true},{"value":":","high":false}],"source":"🟩:a||🟩:b🟩:","insert":"字:🟩:🟩:末","created":{"configured":"🟩:","line_break":"🟩:","lines":["","a||","b",""],"internal":"\na||\nb\n","display":"🟩:a||🟩:b🟩:"},"parsed":["字:","","末"],"edited":{"configured":"🟩:","line_break":"🟩:","lines":["","a||","b","字:","","末"],"internal":"\na||\nb\n字:\n\n末","display":"🟩:a||🟩:b🟩:字:🟩:🟩:末"}},
+    {"id":"first-at-equal-precedence","inputs":[{"value":"::","high":false},{"value":":","high":false}],"source":"a::b:c","insert":"字::末","created":{"configured":"::","line_break":"::","lines":["a","b:c"],"internal":"a\nb:c","display":"a::b:c"},"parsed":["字","末"],"edited":{"configured":"::","line_break":"::","lines":["a","b:c字","末"],"internal":"a\nb:c字\n末","display":"a::b:c字::末"}},
+    {"id":"bare-cr","inputs":[{"value":"\r","high":false}],"source":"\r字\ra\r","insert":"x\ry","created":{"configured":"\r","line_break":"\r","lines":["","字","a",""],"internal":"\n字\na\n","display":"\r字\ra\r"},"parsed":["x","y"],"edited":{"configured":"\r","line_break":"\r","lines":["","字","a","x","y"],"internal":"\n字\na\nx\ny","display":"\r字\ra\rx\ry"}},
+    {"id":"empty-first","inputs":[{"value":"","high":false},{"value":"|","high":false}],"source":"a|b\rc","insert":"\r末","created":{"configured":"","line_break":"\n","lines":["a|b","c"],"internal":"a|b\nc","display":"a|b\nc"},"parsed":["","末"],"edited":{"configured":"","line_break":"\n","lines":["a|b","c","末"],"internal":"a|b\nc\n末","display":"a|b\nc\n末"}},
+    {"id":"unmatched-lf-is-content","inputs":[{"value":"\r\n","high":false}],"source":"a\nb\r\nc","insert":"\n末","created":{"configured":"\r\n","line_break":"\r\n","lines":["a\nb","c"],"internal":"a\nb\nc","display":"a\nb\r\nc"},"parsed":["\n末"],"edited":{"configured":"\r\n","line_break":"\r\n","lines":["a\nb","c\n末"],"internal":"a\nb\nc\n末","display":"a\nb\r\nc\n末"}},
+    {"id":"trailing-cr-is-content","inputs":[{"value":"|","high":false}],"source":"a\r|b","insert":"\r|末","created":{"configured":"|","line_break":"|","lines":["a\r","b"],"internal":"a\r\nb","display":"a\r|b"},"parsed":["\r","末"],"edited":{"configured":"|","line_break":"|","lines":["a\r","b\r","末"],"internal":"a\r\nb\r\n末","display":"a\r|b\r|末"}},
+    {"id":"cr-at-edit-seam","inputs":[{"value":"|","high":false}],"source":"a\r","insert":"|b","created":{"configured":"|","line_break":"|","lines":["a\r"],"internal":"a\r","display":"a\r"},"parsed":["","b"],"edited":{"configured":"|","line_break":"|","lines":["a\r","b"],"internal":"a\r\nb","display":"a\r|b"}}
+  ],
+  "line_reconfigure": [
+    {"configured":"|","line_break":"|","lines":["a","字"],"internal":"a\n字","display":"a|字"},
+    {"configured":"::","line_break":"::","lines":["a","字","b::x"],"internal":"a\n字\nb::x","display":"a::字::b::x"},
+    {"configured":"::","line_break":"::","lines":["a","字","b::x","末"],"internal":"a\n字\nb::x\n末","display":"a::字::b::x::末"},
+    {"configured":"::","line_break":"::","lines":["a","字","b::x","末::raw"],"internal":"a\n字\nb::x\n末::raw","display":"a::字::b::x::末::raw"}
+  ],
+  "selection_steps": [
+    {"enabled":false,"selection":{"ranges":[{"anchor":5,"head":3}],"main":0}},
+    {"enabled":true,"selection":{"ranges":[{"anchor":5,"head":3}],"main":0}},
+    {"enabled":true,"selection":{"ranges":[{"anchor":1,"head":1},{"anchor":5,"head":3}],"main":1}},
+    {"enabled":false,"selection":{"ranges":[{"anchor":1,"head":1},{"anchor":5,"head":3}],"main":1}},
+    {"enabled":false,"selection":{"ranges":[{"anchor":5,"head":3}],"main":0}}
+  ],
+  "read_only_steps": [
+    {"read_only":false,"text":"a","head":0},
+    {"read_only":true,"text":"a","head":0},
+    {"read_only":true,"text":"Xa","head":1}
+  ]
+}

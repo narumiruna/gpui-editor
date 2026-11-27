@@ -1,0 +1,8 @@
+{"name":"line caret","source":"before\r  😀é\r\nafter","command":"toggleComment","line":"//","readOnly":false,"input":[[13,13]],"calls":[[7,1],[7,1]],"output":"before\r  // 😀é\r\nafter","select":[[16,16]]}
+{"name":"line range ends at next line","source":"before\r  字\r\n    β\rafter","command":"toggleComment","line":"//","readOnly":false,"input":[[9,21]],"calls":[[7,1],[7,1]],"output":"before\r  // 字\r\n  //   β\rafter","select":[[12,27]]}
+{"name":"line removal","source":"before\r  // 😀é\r\nafter","command":"lineUncomment","line":"//","readOnly":false,"input":[[16,16]],"calls":[[7,1]],"output":"before\r  😀é\r\nafter","select":[[13,13]]}
+{"name":"block fallback","source":"before\r  😀é\r\nafter","command":"toggleComment","line":null,"readOnly":false,"input":[[13,13]],"calls":[[7,1],[9,1]],"output":"before\r  /* 😀é */\r\nafter","select":[[16,16]]}
+{"name":"block line removal","source":"before\r  /* 😀é */\r\nafter","command":"toggleBlockCommentByLine","line":null,"readOnly":false,"input":[[16,16]],"calls":[[9,1]],"output":"before\r  😀é\r\nafter","select":[[13,13]]}
+{"name":"block range","source":"before\r  😀é\r    🦀β\r\nafter","command":"toggleBlockCommentByLine","line":null,"readOnly":false,"input":[[13,24]],"calls":[[9,1]],"output":"before\r  /* 😀é\r    🦀β */\r\nafter","select":[[16,27]]}
+{"name":"two carets","source":"first\r  α\r\nsecond\r    😀é\nend","command":"toggleComment","line":"//","readOnly":false,"input":[[8,10],[27,29]],"calls":[[6,1],[6,1],[19,1]],"output":"first\r  // α\r\nsecond\r    // 😀é\nend","select":[[11,13],[33,35]]}
+{"name":"read only","source":"before\r  // 😀é\r\nafter","command":"lineUncomment","line":"//","readOnly":true,"input":[[16,16]],"calls":[],"output":null,"select":null}

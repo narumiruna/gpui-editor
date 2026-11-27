@@ -112,6 +112,164 @@ fn answer(cx: &mut VisualTestContext, button: &str) {
 }
 
 #[gpui::test]
+fn document_find_uses_the_draft_and_replaces_all_in_one_undo_step(cx: &mut TestAppContext) {
+    const DRAFT: &str = "🐱 cat\r\n\r\nCat and catalog";
+    const REPLACED: &str = "🐱 狗\r\n\r\n狗 and catalog";
+    let fixture = Fixture::new();
+    let first = fixture.document("first.md", "Disk copy\r\n");
+    let second = fixture.document("second.md", "Other tab");
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    cx.simulate_resize(size(px(800.), px(480.)));
+    cx.update(|_, cx| editor::bind_keys(cx));
+    fixture.open(cx, &shell);
+    start(cx, &shell, Intent::Open(first.clone()));
+    let (first_id, editor) = replace_current(cx, &shell, DRAFT);
+    cx.run_until_parked();
+
+    cx.simulate_keystrokes("cmd-f");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("document-find-panel").is_some());
+    cx.simulate_input("cat");
+    click_tool(cx, "document-find-word");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert_eq!(selection(cx, &editor), 3..6);
+    cx.simulate_keystrokes("shift-enter");
+    cx.run_until_parked();
+    assert_eq!(selection(cx, &editor), 10..13);
+    cx.update(|_, cx| assert_eq!(editor.read(cx).source(), DRAFT));
+
+    start(cx, &shell, Intent::Open(second.clone()));
+    cx.update(|_, cx| {
+        let current = shell.read(cx).current().unwrap().editor.read(cx);
+        assert_eq!(current.source(), "Other tab");
+        assert!(!current.find_is_open());
+    });
+    cx.update(|window, cx| shell.update(cx, |shell, cx| shell.select_tab(first_id, window, cx)));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("document-find-panel").is_some());
+    click_tool(cx, "document-find-show-replacement");
+    cx.simulate_input("狗");
+    click_tool(cx, "document-find-replace-all");
+    cx.update(|_, cx| assert_eq!(editor.read(cx).source(), REPLACED));
+    assert_eq!(fs::read(&first).unwrap(), b"Disk copy\r\n");
+    assert_eq!(fs::read(&second).unwrap(), b"Other tab");
+
+    click_tool(cx, "document-find-close");
+    cx.update(|_, cx| assert!(!editor.read(cx).find_is_open()));
+    cx.simulate_keystrokes("secondary-z");
+    cx.update(|_, cx| assert_eq!(editor.read(cx).source(), DRAFT));
+    cx.simulate_keystrokes("secondary-shift-z");
+    cx.update(|_, cx| assert_eq!(editor.read(cx).source(), REPLACED));
+}
+
+#[gpui::test]
+fn document_replace_expands_regex_captures_and_selects_the_next_match(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let path = fixture.document("note.md", "字=1 and 字=2");
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    cx.simulate_resize(size(px(800.), px(480.)));
+    cx.update(|_, cx| editor::bind_keys(cx));
+    fixture.open(cx, &shell);
+    start(cx, &shell, Intent::Open(path));
+    let editor = cx.update(|_, cx| shell.read(cx).current().unwrap().editor.clone());
+    cx.simulate_keystrokes("cmd-f");
+    cx.run_until_parked();
+    click_tool(cx, "document-find-regex");
+    cx.simulate_input(r"字=(\d)");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert_eq!(selection(cx, &editor), 0..3);
+
+    click_tool(cx, "document-find-show-replacement");
+    cx.simulate_input("v$1");
+    click_tool(cx, "document-find-replace");
+    cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "v1 and 字=2"));
+    assert_eq!(selection(cx, &editor), 7..10);
+}
+
+#[gpui::test]
+fn document_replace_all_uses_bounded_regex_captures(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let path = fixture.document("note.md", "🐱 ab:ab\r\n\r\ncd:cd ef:eg");
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    cx.simulate_resize(size(px(800.), px(480.)));
+    cx.update(|_, cx| editor::bind_keys(cx));
+    fixture.open(cx, &shell);
+    start(cx, &shell, Intent::Open(path.clone()));
+    let editor = cx.update(|_, cx| shell.read(cx).current().unwrap().editor.clone());
+    cx.simulate_keystrokes("cmd-f");
+    cx.run_until_parked();
+    click_tool(cx, "document-find-regex");
+    cx.simulate_input(r"([a-z]{2}):\1");
+    click_tool(cx, "document-find-show-replacement");
+    cx.simulate_input("$1");
+    click_tool(cx, "document-find-replace-all");
+    cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "🐱 ab\r\n\r\ncd ef:eg"));
+    click_tool(cx, "document-find-close");
+    cx.simulate_keystrokes("secondary-z");
+    cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "🐱 ab:ab\r\n\r\ncd:cd ef:eg"));
+    assert_eq!(
+        fs::read_to_string(path).unwrap(),
+        "🐱 ab:ab\r\n\r\ncd:cd ef:eg"
+    );
+}
+
+#[gpui::test]
+fn document_replace_accepts_an_overlapping_match_selected_by_find_previous(
+    cx: &mut TestAppContext,
+) {
+    let fixture = Fixture::new();
+    let path = fixture.document("note.md", "aaa");
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    cx.simulate_resize(size(px(800.), px(480.)));
+    cx.update(|_, cx| editor::bind_keys(cx));
+    fixture.open(cx, &shell);
+    start(cx, &shell, Intent::Open(path));
+    let editor = cx.update(|_, cx| shell.read(cx).current().unwrap().editor.clone());
+    cx.simulate_keystrokes("cmd-f");
+    cx.run_until_parked();
+    cx.simulate_input("aa");
+    cx.simulate_keystrokes("shift-enter");
+    cx.run_until_parked();
+    assert_eq!(selection(cx, &editor), 1..3);
+
+    click_tool(cx, "document-find-show-replacement");
+    cx.simulate_input("X");
+    click_tool(cx, "document-find-replace");
+    cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "aX"));
+}
+
+#[gpui::test]
+fn document_replace_all_rejects_a_read_only_match_without_a_partial_edit(cx: &mut TestAppContext) {
+    const SOURCE: &str = "term outside\n\n```rust\nterm\n```\n";
+    let fixture = Fixture::new();
+    let path = fixture.document("note.md", SOURCE);
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    cx.simulate_resize(size(px(560.), px(360.)));
+    cx.update(|_, cx| editor::bind_keys(cx));
+    fixture.open(cx, &shell);
+    start(cx, &shell, Intent::Open(path.clone()));
+    cx.simulate_keystrokes("cmd-f");
+    cx.run_until_parked();
+    cx.simulate_input("term");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    let editor = cx.update(|_, cx| shell.read(cx).current().unwrap().editor.clone());
+    assert_eq!(selection(cx, &editor), 0..4);
+    click_tool(cx, "document-find-show-replacement");
+    cx.simulate_input("word");
+    click_tool(cx, "document-find-replace-all");
+    assert!(cx.debug_bounds("document-find-message").is_some());
+    cx.update(|_, cx| {
+        let tab = shell.read(cx).current().unwrap();
+        assert_eq!(tab.editor.read(cx).source(), SOURCE);
+        assert!(!tab.dirty(cx));
+    });
+    assert_eq!(fs::read(path).unwrap(), SOURCE.as_bytes());
+}
+
+#[gpui::test]
 fn unified_toolbar_formats_and_saves_the_current_document(cx: &mut TestAppContext) {
     let directory = tempfile::tempdir().unwrap();
     let workspace = Workspace::open(directory.path()).unwrap();
@@ -144,6 +302,42 @@ fn unified_toolbar_formats_and_saves_the_current_document(cx: &mut TestAppContex
         "**note**\n\n$$\nx^2\n$$\n\n"
     );
     cx.update(|_, cx| assert!(!shell.read(cx).current().unwrap().dirty(cx)));
+}
+
+#[gpui::test]
+fn change_review_uses_the_tabs_saved_snapshot_and_closes_after_save(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(directory.path()).unwrap();
+    let path = workspace.root().join("note.md");
+    fs::write(&path, "saved\r\n").unwrap();
+    let file = workspace.read_document(&path).unwrap();
+    let (shell, cx) = cx.add_window_view(Shell::new);
+    cx.update(|window, cx| {
+        editor::bind_keys(cx);
+        shell.update(cx, |shell, cx| {
+            shell.open_editor(Some(file), window, cx);
+        });
+    });
+    cx.run_until_parked();
+    cx.simulate_keystrokes("secondary-a");
+    cx.simulate_input("draft");
+    click_tool(cx, "More tools");
+    click_tool(cx, "Review changes");
+    assert!(cx.debug_bounds("merge-review").is_some());
+    assert_eq!(fs::read_to_string(&path).unwrap(), "saved\r\n");
+    cx.update(|_, cx| {
+        let tab = shell.read(cx).current().unwrap();
+        assert!(tab.dirty(cx));
+        assert_eq!(tab.editor.read(cx).source(), "draft");
+    });
+    click_tool(cx, "Save");
+    cx.run_until_parked();
+    assert_eq!(fs::read_to_string(&path).unwrap(), "draft");
+    cx.update(|_, cx| {
+        let tab = shell.read(cx).current().unwrap();
+        assert!(!tab.dirty(cx));
+        assert!(!tab.editor.read(cx).is_reviewing_changes());
+    });
 }
 
 #[gpui::test]

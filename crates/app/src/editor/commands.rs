@@ -86,6 +86,7 @@ impl Editor {
         let selection = source_selection(&mut section, select);
         self.set_selection(selection.anchor(), selection.head());
         self.active = Some(section);
+        self.source_syntax = None;
         self.upstream = false;
         self.reveal_caret = true;
         self.preferred_x = None;
@@ -443,7 +444,7 @@ mod tests {
                     assert_eq!(editor.source(), source);
                     assert_eq!(editor.selection(), selection);
                     assert!(editor.active.is_none());
-                    assert!(!editor.history.can_undo());
+                    assert!(!editor.view.can_undo());
                     assert!(editor.message.as_deref().unwrap().contains("inline math"));
                 });
             });

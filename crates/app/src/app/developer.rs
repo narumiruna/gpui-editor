@@ -8,7 +8,8 @@ use super::{Shell, toolbar};
 use crate::theme::Theme;
 use bridge::{Attachment, Bridge, Event, Target};
 pub(crate) use picker::Picker;
-pub(super) use text_field::{PaletteInput, SearchSubmitted, TextField};
+pub(crate) use text_field::{FieldColors, FindInput, TextField};
+pub(super) use text_field::{PaletteInput, SearchSubmitted};
 
 mod bridge;
 mod picker;

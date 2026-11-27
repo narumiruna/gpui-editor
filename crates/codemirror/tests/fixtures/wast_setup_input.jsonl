@@ -1,0 +1,13 @@
+{"name":"parenthesis pairs and skips","source":"(module )","initial":[8,8],"steps":[{"input":"(","body":"(module ())","selection":[9,9]},{"input":")","body":"(module ())","selection":[10,10]}]}
+{"name":"square opener stays single","source":"(module )","initial":[8,8],"steps":[{"input":"[","body":"(module [)","selection":[9,9]}]}
+{"name":"brace opener stays single","source":"\r(module )","initial":[9,9],"steps":[{"input":"{","body":"\r(module {)","selection":[10,10]}]}
+{"name":"apostrophe stays single","source":"(module )","initial":[8,8],"steps":[{"input":"'","body":"(module ')","selection":[9,9]}]}
+{"name":"double quote pairs and skips","source":"(module\r\n  (data )\r\n)","initial":[17,17],"steps":[{"input":"\"","body":"(module\r\n  (data \"\")\r\n)","selection":[18,18]},{"input":"\"","body":"(module\r\n  (data \"\")\r\n)","selection":[19,19]}]}
+{"name":"inside a parsed string","source":"(module\r\n  (data \"😀  \"))","initial":[23,23],"steps":[{"input":"\"","body":"(module\r\n  (data \"😀 \" \"))","selection":[24,24]}]}
+{"name":"inside a line comment","source":"(module\r  ;; \"é  \r)","initial":[17,17],"steps":[{"input":"\"","body":"(module\r  ;; \"é \"\" \r)","selection":[18,18]}]}
+{"name":"before a parsed string opener","source":"(module (data \"字\"))","initial":[14,14],"steps":[{"input":"\"","body":"(module (data \"\"\"字\"))","selection":[15,15]}]}
+{"name":"surround a reverse selection","source":"(data 字😀)","initial":[13,6],"steps":[{"input":"\"","body":"(data \"字😀\")","selection":[14,7]}]}
+{"name":"delete a parenthesis pair","source":"(module ())","initial":[9,9],"steps":[{"input":null,"body":"(module )","selection":[8,8]}]}
+{"name":"delete only the square opener","source":"(module [])","initial":[9,9],"steps":[{"input":null,"body":"(module ])","selection":[8,8]}]}
+{"name":"delete only the apostrophe opener","source":"(module '' )","initial":[9,9],"steps":[{"input":null,"body":"(module ' )","selection":[8,8]}]}
+{"name":"delete a double quote pair","source":"(data \"\")","initial":[7,7],"steps":[{"input":null,"body":"(data )","selection":[6,6]}]}

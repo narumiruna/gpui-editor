@@ -1,0 +1,23 @@
+{"kind":"enter","name":"body with space after the caret","source":"@top Main { }","head":11,"after":"@top Main {\r\n  \r\n}","position":15}
+{"kind":"enter","name":"body with space before the caret","source":"@top Main { }","head":12,"after":"@top Main {\r\n  \r\n}","position":15}
+{"kind":"enter","name":"empty body","source":"@top Main {}","head":11,"after":"@top Main {\r\n  \r\n}","position":15}
+{"kind":"enter","name":"space and tab","source":"@top Main { \t  }","head":13,"after":"@top Main {\r\n  \r\n}","position":15}
+{"kind":"enter","name":"tokens body","source":"@tokens { }","head":9,"after":"@tokens {\r\n  \r\n}","position":13}
+{"kind":"enter","name":"skip body","source":"@skip {  }","head":8,"after":"@skip {\r\n  \r\n}","position":11}
+{"kind":"enter","name":"precedence body","source":"@precedence {  }","head":14,"after":"@precedence {\r\n  \r\n}","position":17}
+{"kind":"enter","name":"parentheses in a nested expression","source":"@top Main { ( ) }","head":13,"after":"@top Main { (\r\n  \r\n) }","position":17}
+{"kind":"enter","name":"angles are not a matching pair","source":"@top Main { Word< > }","head":17,"after":"@top Main { Word<\r\n            > }","position":31}
+{"kind":"enter","name":"token between the braces","source":"@top Main { Word }","head":12,"after":"@top Main { \r\n  Word }","position":16}
+{"kind":"enter","name":"surrounded by a literal","source":"@top Main { \"( )\" }","head":14,"after":"@top Main { \"(\r\n            )\" }","position":28}
+{"kind":"enter","name":"comment between the braces","source":"@top Main { /* comment */ }","head":11,"after":"@top Main {\r\n  /* comment */ }","position":15}
+{"kind":"enter","name":"braces on different lines","source":"@top Main {\r\n}","head":11,"after":"@top Main {\r\n  \r\n}","position":15}
+{"kind":"enter","name":"unicode before the line","source":"// 😀\r\n@top Main {  }","head":21,"after":"// 😀\r\n@top Main {\r\n  \r\n}","position":24}
+{"kind":"snapshot","name":"before edit","source":"// 😀\r\n@top Main {\r  Word\n}\n","root":"Grammar","indentAt":21,"indent":2,"block":[9,20],"fold":[20,28],"comments":[{"block":{"open":"/*","close":"*/"},"line":"//"}],"reindent":[[true,false,false]],"brackets":[]}
+{"kind":"snapshot","name":"selection changed","source":"// 😀\r\n@top Main {\r  Word\n}\n","root":"Grammar","indentAt":21,"indent":2,"block":[9,20],"fold":[20,28],"comments":[{"block":{"open":"/*","close":"*/"},"line":"//"}],"reindent":[[true,false,false]],"brackets":[]}
+{"kind":"snapshot","name":"edited","source":"// 😀\r\n @top Main {\r  Word\n}\n","root":"Grammar","indentAt":22,"indent":3,"block":[9,21],"fold":[21,29],"comments":[{"block":{"open":"/*","close":"*/"},"line":"//"}],"reindent":[[true,false,false]],"brackets":[]}
+{"kind":"snapshot","name":"retained","source":"// 😀\r\n@top Main {\r  Word\n}\n","root":"Grammar","indentAt":21,"indent":2,"block":[9,20],"fold":[20,28],"comments":[{"block":{"open":"/*","close":"*/"},"line":"//"}],"reindent":[[true,false,false]],"brackets":[]}
+{"kind":"snapshot","name":"detached","source":"// 😀\r\n @top Main {\r  Word\n}\n","root":"","indentAt":22,"indent":null,"block":[9,21],"fold":null,"comments":[],"reindent":[],"brackets":[]}
+{"kind":"snapshot","name":"reattached","source":"// 😀\r\n @top Main {\r  Word\n}\n","root":"Grammar","indentAt":22,"indent":3,"block":[9,21],"fold":[21,29],"comments":[{"block":{"open":"/*","close":"*/"},"line":"//"}],"reindent":[[true,false,false]],"brackets":[]}
+{"kind":"quote","name":"before literal opener","source":"@top Main { \"😀\" }","input":"\"","head":12,"after":"@top Main { \"\"\"😀\" }","position":13}
+{"kind":"quote","name":"inside a literal","source":"@top Main { \"😀  \" }","input":"\"","head":18,"after":"@top Main { \"😀 \" \" }","position":19}
+{"kind":"quote","name":"before single-quoted literal opener","source":"@top Main { 'a' }","input":"'","head":12,"after":"@top Main { '''a' }","position":13}
