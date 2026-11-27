@@ -1,0 +1,17 @@
+{"name":"inside double quotes","source":"fn f() { let s = \"😀 \"; }","head":22,"key":"\"","after":"fn f() { let s = \"😀\" \"; }","position":23,"handled":false}
+{"name":"inside byte string","source":"fn f() { let s = b\"x  \"; }","head":21,"key":"\"","after":"fn f() { let s = b\"x \" \"; }","position":22,"handled":false}
+{"name":"inside raw string","source":"fn f() { let s = r\"x  \"; }","head":21,"key":"\"","after":"fn f() { let s = r\"x \" \"; }","position":22,"handled":false}
+{"name":"inside raw byte string","source":"fn f() { let s = br\"x  \"; }","head":22,"key":"\"","after":"fn f() { let s = br\"x \" \"; }","position":23,"handled":false}
+{"name":"raw hash delimiter","source":"fn f() { let s = r#\"甲  \"#; }","head":24,"key":"\"","after":"fn f() { let s = r#\"甲 \"\" \"#; }","position":25,"handled":true}
+{"name":"after an escape","source":"fn f() { let s = \"\\\" \"; }","head":20,"key":"\"","after":"fn f() { let s = \"\\\"\" \"; }","position":21,"handled":false}
+{"name":"CRLF and Unicode","source":"fn f() {\r\n let s = \"\\\r\n 😀 \";\r\n}","head":28,"key":"\"","after":"fn f() {\r\n let s = \"\\\r\n 😀\" \";\r\n}","position":29,"handled":false}
+{"name":"before a parsed opener","source":"fn f() { let s = \"字\"; }","head":17,"key":"\"","after":"fn f() { let s = \"\"\"字\"; }","position":18,"handled":true}
+{"name":"before an untracked closer","source":"fn f() { let s = \"x\"; }","head":19,"key":"\"","after":"fn f() { let s = \"x\"\"; }","position":20,"handled":false}
+{"name":"immediately after the literal","source":"fn f() { let s = \"x\"; }","head":20,"key":"\"","after":"fn f() { let s = \"x\"\"; }","position":21,"handled":false}
+{"name":"after space outside the literal","source":"fn f() { let s = \"x\" ; }","head":21,"key":"\"","after":"fn f() { let s = \"x\" \"\"; }","position":22,"handled":true}
+{"name":"inside a character","source":"fn f() { let c = ' '; }","head":18,"key":"'","after":"fn f() { let c = '' '; }","position":19,"handled":false}
+{"name":"after a lifetime","source":"fn f<'a>() {}","head":7,"key":"'","after":"fn f<'a'>() {}","position":8,"handled":false}
+{"name":"before a byte prefix literal","source":"fn f() { let s = b\"x\"; }","head":17,"key":"\"","after":"fn f() { let s = \"b\"x\"; }","position":18,"handled":false}
+{"name":"after a byte prefix","source":"fn f() { let s = b; }","head":18,"key":"\"","after":"fn f() { let s = b\"\"; }","position":19,"handled":true}
+{"name":"line comment with a quote","source":"fn f() { // \" \r\n}","head":14,"key":"\"","after":"fn f() { // \" \"\"\r\n}","position":15,"handled":true}
+{"name":"unfinished string","source":"fn f() { let s = \"abc ;","head":22,"key":"\"","after":"fn f() { let s = \"abc \";","position":23,"handled":false}

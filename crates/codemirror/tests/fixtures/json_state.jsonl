@@ -1,0 +1,17 @@
+{"name":"initial","source":"{\r\n  \"😀\": [\r    1\n  ]\n}","head":0,"indentAt":3,"indent":2,"lineEnd":1,"fold":[1,25],"brackets":[["[","{","\""]],"diagnostics":0}
+{"name":"selection","source":"{\r\n  \"😀\": [\r    1\n  ]\n}","head":1,"indentAt":3,"indent":2,"lineEnd":1,"fold":[1,25],"brackets":[["[","{","\""]],"diagnostics":0}
+{"name":"protected","range":[6,12]}
+{"name":"edited","source":" {\r\n  \"😀\": [\r    1\n  ]\n}","head":2,"indentAt":4,"indent":3,"lineEnd":2,"fold":[2,26],"brackets":[["[","{","\""]],"diagnostics":0}
+{"name":"retained","source":"{\r\n  \"😀\": [\r    1\n  ]\n}","head":0,"indentAt":3,"indent":2,"lineEnd":1,"fold":[1,25],"brackets":[["[","{","\""]],"diagnostics":0}
+{"name":"broken","source":" {\r\n  \"😀\": [\r    1\n  ]\n","head":2,"indentAt":4,"indent":3,"lineEnd":2,"fold":[2,26],"brackets":[["[","{","\""]],"diagnostics":0}
+{"name":"repaired","source":" {\r\n  \"😀\": [\r    1\n  ]\n}","head":2,"indentAt":4,"indent":3,"lineEnd":2,"fold":[2,26],"brackets":[["[","{","\""]],"diagnostics":0}
+{"name":"undo","source":" {\r\n  \"😀\": [\r    1\n  ]\n","head":2,"indentAt":4,"indent":3,"lineEnd":2,"fold":[2,26],"brackets":[["[","{","\""]],"diagnostics":0}
+{"name":"redo","source":" {\r\n  \"😀\": [\r    1\n  ]\n}","head":2,"indentAt":4,"indent":3,"lineEnd":2,"fold":[2,26],"brackets":[["[","{","\""]],"diagnostics":0}
+{"name":"detached","source":" {\r\n  \"😀\": [\r    1\n  ]\n}","head":2,"indentAt":4,"indent":null,"lineEnd":2,"fold":null,"brackets":[],"diagnostics":0}
+{"name":"detached edit","source":"  {\r\n  \"😀\": [\r    1\n  ]\n}","head":3,"indentAt":5,"indent":null,"lineEnd":3,"fold":null,"brackets":[],"diagnostics":0}
+{"name":"reattached","source":"  {\r\n  \"😀\": [\r    1\n  ]\n}","head":3,"indentAt":5,"indent":4,"lineEnd":3,"fold":[3,27],"brackets":[["[","{","\""]],"diagnostics":0}
+{"name":"enter","source":"{}","head":1,"result":"{\n  \n}","selection":4}
+{"name":"match","source":"{\"a\":\"}\"}","head":1,"marks":[[0,1],[8,9]]}
+{"name":"string opener","source":"\"a\"","input":"\"","head":0,"result":"\"\"\"a\"","selection":1}
+{"name":"property opener","source":"{\"😀\": 0, \"a\": 1}","input":"\"","head":12,"result":"{\"😀\": 0, \"\"\"a\": 1}","selection":13}
+{"name":"inside a string","source":"\" \"","input":"\"","head":1,"result":"\"\" \"","selection":2}

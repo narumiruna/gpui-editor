@@ -1,0 +1,29 @@
+{"name":"lone-cr","source":";; 🦀\r(func)","raw":[[0,"Module",0,14],[1,"LineComment",0,14]],"editor":[[0,"Module",0,14],[1,"LineComment",0,7],[1,"App",8,14],[2,"(",8,9],[2,"Keyword",9,13],[2,")",13,14]],"error":null}
+{"name":"lone-cr-missing-close","source":"(module ;; 🦀\r  (func))","raw":[[0,"Module",0,25],[1,"App",0,25],[2,"(",0,1],[2,"Keyword",1,7],[2,"LineComment",8,25],[2,"⚠",25,25]],"editor":[[0,"Module",0,25],[1,"App",0,25],[2,"(",0,1],[2,"Keyword",1,7],[2,"LineComment",8,15],[2,"App",18,24],[3,"(",18,19],[3,"Keyword",19,23],[3,")",23,24],[2,")",24,25]],"error":25}
+{"name":"crlf","source":"(module ;; 🦀\r\n  (func \"é\r\n尾\"))","raw":[[0,"Module",0,36],[1,"App",0,36],[2,"(",0,1],[2,"Keyword",1,7],[2,"LineComment",8,16],[2,"App",19,35],[3,"(",19,20],[3,"Keyword",20,24],[3,"String",25,34],[3,")",34,35],[2,")",35,36]],"editor":[[0,"Module",0,36],[1,"App",0,36],[2,"(",0,1],[2,"Keyword",1,7],[2,"LineComment",8,15],[2,"App",19,35],[3,"(",19,20],[3,"Keyword",20,24],[3,"String",25,34],[3,")",34,35],[2,")",35,36]],"error":null}
+{"name":"mixed","source":"(; café\r尾 ;)\r( $id i32 \"🦀\r漢\" )\n","raw":[[0,"Module",0,39],[1,"BlockComment",0,15],[1,"App",16,38],[2,"(",16,17],[2,"Identifier",18,21],[2,"Type",22,25],[2,"String",26,36],[2,")",37,38]],"editor":[[0,"Module",0,39],[1,"BlockComment",0,15],[1,"App",16,38],[2,"(",16,17],[2,"Identifier",18,21],[2,"Type",22,25],[2,"String",26,36],[2,")",37,38]],"error":null}
+{"name":"before-edit","source":"(func \"🦀\"\r\n  i32)","raw":[[0,"Module",0,20],[1,"App",0,20],[2,"(",0,1],[2,"Keyword",1,5],[2,"String",6,12],[2,"Type",16,19],[2,")",19,20]],"editor":[[0,"Module",0,20],[1,"App",0,20],[2,"(",0,1],[2,"Keyword",1,5],[2,"String",6,12],[2,"Type",16,19],[2,")",19,20]],"error":null}
+{"name":"remove-close","source":"(func \"🦀\"\r\n  i32","raw":[[0,"Module",0,19],[1,"App",0,19],[2,"(",0,1],[2,"Keyword",1,5],[2,"String",6,12],[2,"Type",16,19],[2,"⚠",19,19]],"editor":[[0,"Module",0,19],[1,"App",0,19],[2,"(",0,1],[2,"Keyword",1,5],[2,"String",6,12],[2,"Type",16,19],[2,"⚠",19,19]],"error":19,"change":[19,20,""]}
+{"name":"replace-type","source":"(func \"🦀\"\r\n  @)","raw":[[0,"Module",0,18],[1,"App",0,18],[2,"(",0,1],[2,"Keyword",1,5],[2,"String",6,12],[2,"⚠",16,17],[2,")",17,18]],"editor":[[0,"Module",0,18],[1,"App",0,18],[2,"(",0,1],[2,"Keyword",1,5],[2,"String",6,12],[2,"⚠",16,17],[2,")",17,18]],"error":16,"change":[16,19,"@)"]}
+{"name":"repair","source":"(func \"🦀\"\r\n  i64)","raw":[[0,"Module",0,20],[1,"App",0,20],[2,"(",0,1],[2,"Keyword",1,5],[2,"String",6,12],[2,"Type",16,19],[2,")",19,20]],"editor":[[0,"Module",0,20],[1,"App",0,20],[2,"(",0,1],[2,"Keyword",1,5],[2,"String",6,12],[2,"Type",16,19],[2,")",19,20]],"error":null,"change":[16,17,"i64"]}
+{"name":"long","bytes":94208,"nodes":24577,"hash":1081843192}
+{"name":"deep","bytes":4107,"nodes":6146,"hash":1398280479}
+{"name":"unclosed-comment","part":"(;","repeat":256,"lookahead":{"nodes":1024,"hash":1180639004}}
+{"name":"unclosed-comment-crlf","part":"(;\r\n","repeat":256,"lookahead":{"nodes":1024,"hash":3839559605}}
+{"name":"escaped-string","part":"\"\\","repeat":512,"lookahead":{"nodes":2,"hash":584737884}}
+{"part":"(","depth":2799,"permissive":{"nodes":8398,"errors":0,"hash":519806062}}
+{"part":"(","depth":2800,"permissive":{"nodes":10003,"errors":1602,"hash":307662420}}
+{"part":"(","depth":3000,"permissive":{"nodes":10603,"errors":1602,"hash":3249529839}}
+{"part":"(","depth":4000,"permissive":{"nodes":15203,"errors":3202,"hash":2424357823}}
+{"part":"(i32 ","depth":1399,"permissive":{"nodes":5597,"errors":0,"hash":3819537390}}
+{"part":"(i32 ","depth":1400,"permissive":{"nodes":6401,"errors":800,"hash":972001224}}
+{"part":"(i32 ","depth":1800,"permissive":{"nodes":8801,"errors":1600,"hash":3399548315}}
+{"name":"before-cut","prefix":"","part":"(","depth":2799,"body":"","closes":2799,"direct":{"hash":519806062,"errors":0},"editor":{"hash":519806062,"errors":0}}
+{"name":"at-cut","prefix":"","part":"(","depth":2800,"body":"","closes":2800,"direct":{"offset":2800},"editor":{"offset":2800}}
+{"name":"cut-on-opening","prefix":"","part":"(","depth":4096,"body":"","closes":4096,"direct":{"offset":2800},"editor":{"offset":2800}}
+{"name":"cut-after-type","prefix":"","part":"(","depth":2799,"body":"i32","closes":2799,"direct":{"offset":2802},"editor":{"offset":2802}}
+{"name":"cut-multiple-frames","prefix":"","part":"(i32 ","depth":1401,"body":"","closes":1401,"direct":{"offset":8006},"editor":{"offset":8006}}
+{"name":"cut-with-space","prefix":";; 😀\r\n","part":"( ","depth":2801,"body":"","closes":2801,"direct":{"offset":5608},"editor":{"offset":5608}}
+{"name":"cut-with-cr","prefix":";; 😀\r","part":"( ","depth":2801,"body":"","closes":2801,"direct":{"hash":3765789197,"errors":0},"editor":{"offset":5607}}
+{"name":"accept-after-cut","prefix":"","part":"(i32 ","depth":1400,"body":"","closes":1000,"direct":{"hash":113091756,"errors":400},"editor":{"hash":113091756,"errors":400}}
+{"name":"edit-across-depth-cut","prefixPart":"(func)\r","prefixCount":96,"comment":";; comment 🦀\r\n","body":"\"😀\r\n尾\"","depth":2700,"extra":400,"before":{"hash":1457243082,"errors":0},"cut":{"hash":3854340064,"errors":1602},"wrapsReusedSubtree":{"hash":4263770818,"errors":0}}

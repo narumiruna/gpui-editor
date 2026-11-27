@@ -1,0 +1,8 @@
+{"step":"before","open":false,"placement":null,"renderedPlacement":null,"query":"猫","doc":"猫 kitten\n猫"}
+{"step":"open_default","open":true,"placement":"bottom","renderedPlacement":"bottom","query":"猫","doc":"猫 kitten\n猫"}
+{"step":"configure_top_while_open","open":true,"placement":"top","renderedPlacement":"bottom","query":"猫","doc":"猫 kitten\n猫"}
+{"step":"close_bottom","open":false,"placement":null,"renderedPlacement":null,"query":"猫","doc":"猫 kitten\n猫"}
+{"step":"open_top","open":true,"placement":"top","renderedPlacement":"top","query":"猫","doc":"猫 kitten\n猫"}
+{"step":"configure_bottom_while_open","open":true,"placement":"bottom","renderedPlacement":"bottom","query":"猫","doc":"猫 kitten\n猫"}
+{"step":"close_top","open":false,"placement":null,"renderedPlacement":null,"query":"猫","doc":"猫 kitten\n猫"}
+{"step":"reopen_bottom","open":true,"placement":"bottom","renderedPlacement":"bottom","query":"猫","doc":"猫 kitten\n猫"}

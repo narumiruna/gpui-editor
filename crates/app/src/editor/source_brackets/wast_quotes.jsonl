@@ -1,0 +1,21 @@
+{"name":"parsed opener","before":{"body":"(data \"字 😀 ([])\" )","selection":[6,6],"hit":null},"after":[{"body":"(data \"\"\"字 😀 ([])\" )","selection":[7,7],"hit":null}]}
+{"name":"adjacent parsed opener","before":{"body":"(data \"a\"\"b\")","selection":[9,9],"hit":null},"after":[{"body":"(data \"a\"\"\"\"b\")","selection":[10,10],"hit":null}]}
+{"name":"inside parsed string","before":{"body":"(module\r\n (data \"字 😀  []\"))","selection":[26,26],"hit":null},"after":[{"body":"(module\r\n (data \"字 😀 \" []\"))","selection":[27,27],"hit":null}]}
+{"name":"at parsed string end","before":{"body":"(data \"a\" )","selection":[9,9],"hit":null},"after":[{"body":"(data \"a\"\" )","selection":[10,10],"hit":null}]}
+{"name":"after whitespace outside string","before":{"body":"(data \"a\" )","selection":[10,10],"hit":[[10,11],[0,1],true]},"after":[{"body":"(data \"a\" \"\")","selection":[11,11],"hit":null}]}
+{"name":"after supplementary word","before":{"body":"(data 𝟙 )","selection":[10,10],"hit":null},"after":[{"body":"(data 𝟙\"\" )","selection":[11,11],"hit":null}]}
+{"name":"before supplementary word","before":{"body":"(data 𝟙 )","selection":[6,6],"hit":null},"after":[{"body":"(data \"𝟙 )","selection":[7,7],"hit":null}]}
+{"name":"untracked closer","before":{"body":"(data \"a\")","selection":[8,8],"hit":null},"after":[{"body":"(data \"a\"\")","selection":[9,9],"hit":null}]}
+{"name":"line comment","before":{"body":"(module\r\n ;; \"字  \r\n)","selection":[18,18],"hit":null},"after":[{"body":"(module\r\n ;; \"字 \"\" \r\n)","selection":[19,19],"hit":null}]}
+{"name":"quote in line comment","before":{"body":"(module\r\n ;; \"字\"\r\n)","selection":[13,13],"hit":null},"after":[{"body":"(module\r\n ;; \"\"字\"\r\n)","selection":[14,14],"hit":null}]}
+{"name":"block comment","before":{"body":"(module (; \"字  ;) )","selection":[16,16],"hit":null},"after":[{"body":"(module (; \"字 \"\" ;) )","selection":[17,17],"hit":null}]}
+{"name":"quote in block comment","before":{"body":"(module (; \"字\" ;) )","selection":[11,11],"hit":null},"after":[{"body":"(module (; \"\"字\" ;) )","selection":[12,12],"hit":null}]}
+{"name":"malformed opener","before":{"body":"(data \" )","selection":[6,6],"hit":null},"after":[{"body":"(data \"\" )","selection":[7,7],"hit":null}]}
+{"name":"space after malformed opener","before":{"body":"(data \"x  )","selection":[9,9],"hit":null},"after":[{"body":"(data \"x \"\" )","selection":[10,10],"hit":null}]}
+{"name":"string with an unknown escape","before":{"body":"(data \"bad\\q  \")","selection":[13,13],"hit":null},"after":[{"body":"(data \"bad\\q \" \")","selection":[14,14],"hit":null}]}
+{"name":"top-level opener","before":{"body":"\"abc\"","selection":[0,0],"hit":null},"after":[{"body":"\"\"\"abc\"","selection":[1,1],"hit":null}]}
+{"name":"top-level string end","before":{"body":"\"abc\"","selection":[5,5],"hit":null},"after":[{"body":"\"abc\"\"","selection":[6,6],"hit":null}]}
+{"name":"top-level whitespace after string","before":{"body":"\"abc\" ","selection":[6,6],"hit":null},"after":[{"body":"\"abc\" \"\"","selection":[7,7],"hit":null}]}
+{"name":"tracked closer before paren","before":{"body":"(data )","selection":[6,6],"hit":[[6,7],[0,1],true]},"after":[{"body":"(data \"\")","selection":[7,7],"hit":null},{"body":"(data \"\")","selection":[8,8],"hit":[[8,9],[0,1],true]}]}
+{"name":"tracked closer at fence edge","before":{"body":"(module)\r\n","selection":[10,10],"hit":null},"after":[{"body":"(module)\r\n\"\"","selection":[11,11],"hit":null},{"body":"(module)\r\n\"\"","selection":[12,12],"hit":null}]}
+{"name":"reverse selection","before":{"body":"(data 字😀)","selection":[13,6],"hit":null},"after":[{"body":"(data \"字😀\")","selection":[14,7],"hit":null}]}

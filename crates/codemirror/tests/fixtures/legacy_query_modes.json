@@ -1,0 +1,688 @@
+[
+{
+  "module": "cypher",
+  "export": "cypher",
+  "name": "cypher",
+  "label": "mixed query",
+  "source": "PROFILE MATCH (n:Person)-[r:KNOWS]->(m)\nWHERE n.age >= 30 AND exists(m.name) // note\nRETURN DISTINCT n.name, CoLlEcT(m.name), toFloat(n.age)\nshow databases YIELD name, population; !foo:two-words\nRETURN \"simple\", 'bare\\'quote', \"unterminated example\nRETURN \"double quote\", café, é 😀",
+  "unit": 2,
+  "tab": 4,
+  "mergeTokens": true,
+  "indents": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "autocomplete": null,
+  "commentTokens": null,
+  "indentOnInput": null,
+  "tokens": [
+    [[0,7,"keyword"],[7,8,null],[8,13,"keyword"],[13,14,null],[14,15,"punctuation"],[15,23,"atom"],[23,24,"punctuation"],[24,25,null],[25,26,"punctuation"],[26,33,"atom"],[33,34,"punctuation"],[34,36,null],[36,37,"punctuation"],[37,38,"variable"],[38,39,"punctuation"]],
+    [[40,45,"keyword"],[45,46,null],[46,47,"variable"],[47,48,"punctuation"],[48,51,"variable"],[51,52,null],[52,54,null],[54,55,null],[55,57,"variable"],[57,58,null],[58,61,"def"],[61,62,null],[62,68,"def"],[68,69,"punctuation"],[69,70,"variable"],[70,71,"punctuation"],[71,75,"keyword"],[75,76,"punctuation"],[76,77,null],[77,84,"comment"]],
+    [[85,91,"keyword"],[91,92,null],[92,100,"keyword"],[100,101,null],[101,102,"variable"],[102,103,"punctuation"],[103,107,"keyword"],[107,108,"punctuation"],[108,109,null],[109,116,"builtin"],[116,117,"punctuation"],[117,118,"variable"],[118,119,"punctuation"],[119,123,"keyword"],[123,124,"punctuation"],[124,125,"punctuation"],[125,126,null],[126,133,"builtin"],[133,134,"punctuation"],[134,135,"variable"],[135,136,"punctuation"],[136,139,"variable"],[139,140,"punctuation"]],
+    [[141,145,"keyword"],[145,146,null],[146,155,"keyword"],[155,156,null],[156,161,"keyword"],[161,162,null],[162,166,"keyword"],[166,167,"punctuation"],[167,168,null],[168,178,"variable"],[178,179,"punctuation"],[179,180,null],[180,194,"atom"]],
+    [[195,201,"keyword"],[201,202,null],[202,210,"string"],[210,211,"punctuation"],[211,212,null],[212,219,"string"],[219,224,"variable"],[224,225,"string"],[225,226,"punctuation"],[226,227,null],[227,228,"string"],[228,240,"variable"],[240,241,null],[241,248,"variable"]],
+    [[249,255,"keyword"],[255,256,null],[256,257,"string"],[257,263,"variable"],[263,266,null],[266,271,"variable"],[271,272,"string"],[272,273,"punctuation"],[273,274,null],[274,277,"variable"],[277,279,"variable"],[279,280,"punctuation"],[280,281,null],[281,283,"variable"],[283,284,null],[284,288,"variable"]]
+  ]
+},
+{
+  "module": "cypher",
+  "export": "cypher",
+  "name": "cypher",
+  "label": "pattern and delimiter indentation",
+  "source": "MATCH (n:Name { first: \"A\",\n\t comment: value,\n\t nest: [\n\t\t // block note\n\t\t a.b,\n\t\t c\n\t ]\n\n\t ))\n\t }\n)\nRETURN n",
+  "unit": 4,
+  "tab": 4,
+  "mergeTokens": true,
+  "indents": [
+    0,
+    24,
+    24,
+    9,
+    9,
+    13,
+    5,
+    24,
+    24,
+    14,
+    6,
+    0
+  ],
+  "autocomplete": null,
+  "commentTokens": null,
+  "indentOnInput": null,
+  "tokens": [
+    [[0,5,"keyword"],[5,6,null],[6,7,"punctuation"],[7,13,"atom"],[13,14,null],[14,15,"punctuation"],[15,16,null],[16,22,"atom"],[22,23,null],[23,26,"string"],[26,27,"punctuation"]],
+    [[28,30,null],[30,38,"atom"],[38,39,null],[39,44,"variable"],[44,45,"punctuation"]],
+    [[46,48,null],[48,53,"atom"],[53,54,null],[54,55,"punctuation"]],
+    [[56,59,null],[59,72,"comment"]],
+    [[73,76,null],[76,77,"variable"],[77,78,"punctuation"],[78,79,"variable"],[79,80,"punctuation"]],
+    [[81,84,null],[84,85,"variable"]],
+    [[86,88,null],[88,89,"punctuation"]],
+    [],
+    [[91,93,null],[93,94,"punctuation"],[94,95,"punctuation"]],
+    [[96,98,null],[98,99,"punctuation"]],
+    [[100,101,"punctuation"]],
+    [[102,108,"keyword"],[108,109,null],[109,110,"variable"]]
+  ]
+},
+{
+  "module": "solr",
+  "export": "solr",
+  "name": "solr",
+  "label": "operator and number spellings",
+  "source": "title:\"gray fox\" AND (kg:[1 TO 10] OR cat:/m.*) && x? || !y~2^4\nor and not to NULL NaN Infinity nan 0 00 01 1.0 .5 0.5 9. 9.25\n-12 +4.5 1e21 1e+21 1e-7 0.000001 0.0000001 1000000000000000100\n9007199254740992 9007199254740993 0x10 2.2250738585072014 0.10000000000000001\n2212266601421795.2 2212266601421795.3 19376806744647.312 19376806744647.313 100000000000000000000\n5: 00: NaN: AND: Café: éclair😀 ab a﻿b\n&&& ||| ?* ~^ \\ : {x y}",
+  "unit": 2,
+  "tab": 4,
+  "mergeTokens": true,
+  "indents": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "autocomplete": null,
+  "commentTokens": null,
+  "indentOnInput": null,
+  "tokens": [
+    [[0,5,"propertyName"],[5,6,null],[6,16,"string"],[16,17,null],[17,20,"operator"],[20,21,null],[21,22,null],[22,24,"propertyName"],[24,25,null],[25,26,null],[26,27,"number"],[27,28,null],[28,30,"operator"],[30,31,null],[31,33,"number"],[33,34,null],[34,35,null],[35,37,"operator"],[37,38,null],[38,41,"propertyName"],[41,42,null],[42,45,"string"],[45,46,"operator"],[46,47,null],[47,48,null],[48,50,"operator"],[50,51,null],[51,52,"string"],[52,53,"operator"],[53,54,null],[54,56,"operator"],[56,57,null],[57,58,"operator"],[58,59,"string"],[59,60,"operator"],[60,61,"number"],[61,62,"operator"],[62,63,"number"]],
+    [[64,66,"string"],[66,67,null],[67,70,"string"],[70,71,null],[71,74,"string"],[74,75,null],[75,77,"string"],[77,78,null],[78,82,"string"],[82,83,null],[83,86,"number"],[86,87,null],[87,95,"number"],[95,96,null],[96,99,"string"],[99,100,null],[100,101,"number"],[101,102,null],[102,104,"string"],[104,105,null],[105,107,"string"],[107,108,null],[108,111,"string"],[111,112,null],[112,114,"string"],[114,115,null],[115,118,"number"],[118,119,null],[119,121,"string"],[121,122,null],[122,126,"number"]],
+    [[127,128,"operator"],[128,130,"number"],[130,131,null],[131,132,"operator"],[132,135,"number"],[135,136,null],[136,140,"string"],[140,141,null],[141,143,"string"],[143,144,"operator"],[144,146,"number"],[146,147,null],[147,149,"string"],[149,150,"operator"],[150,151,"number"],[151,152,null],[152,160,"number"],[160,161,null],[161,170,"string"],[170,171,null],[171,190,"number"]],
+    [[191,207,"number"],[207,208,null],[208,224,"string"],[224,225,null],[225,229,"string"],[229,230,null],[230,248,"number"],[248,249,null],[249,268,"string"]],
+    [[269,287,"number"],[287,288,null],[288,306,"string"],[306,307,null],[307,325,"number"],[325,326,null],[326,344,"string"],[344,345,null],[345,366,"number"]],
+    [[367,368,"number"],[368,369,null],[369,370,null],[370,372,"propertyName"],[372,373,null],[373,374,null],[374,377,"number"],[377,378,null],[378,379,null],[379,382,"operator"],[382,383,null],[383,384,null],[384,389,"propertyName"],[389,390,null],[390,391,null],[391,402,"string"],[402,403,null],[403,407,"string"],[407,408,null],[408,409,"string"],[409,412,null],[412,413,"string"]],
+    [[414,416,"operator"],[416,417,"operator"],[417,418,null],[418,420,"operator"],[420,421,"operator"],[421,422,null],[422,423,"operator"],[423,424,"operator"],[424,425,null],[425,426,"operator"],[426,427,"operator"],[427,428,null],[428,429,null],[429,430,null],[430,431,null],[431,432,null],[432,433,null],[433,434,"string"],[434,435,null],[435,436,"string"],[436,437,null]]
+  ]
+},
+{
+  "module": "solr",
+  "export": "solr",
+  "name": "solr",
+  "label": "quoted continuation",
+  "source": "body:\"continued\\\n\n\t  with a \\\"quote\\\" and emoji 😀\" skipped\none:\"unterminated without escape\ntwo:ordinary \"doubled slash\\\\\nnext:line",
+  "unit": 2,
+  "tab": 4,
+  "mergeTokens": true,
+  "indents": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "autocomplete": null,
+  "commentTokens": null,
+  "indentOnInput": null,
+  "tokens": [
+    [[0,4,"propertyName"],[4,5,null],[5,16,"string"]],
+    [],
+    [[18,21,null],[21,53,"string"],[53,54,null],[54,61,"string"]],
+    [[62,65,"propertyName"],[65,66,null],[66,94,"string"]],
+    [[95,98,"propertyName"],[98,99,null],[99,107,"string"],[107,108,null],[108,124,"string"]],
+    [[125,129,"propertyName"],[129,130,null],[130,134,"string"]]
+  ]
+},
+{
+  "module": "sieve",
+  "export": "sieve",
+  "name": "sieve",
+  "label": "rules and indentation",
+  "source": "require [\"fileinto\", \"envelope\"]; # comments\nif allof (\n\t true, false, not header :contains \"from\" \"example\",\n  size :over 10K 20m 30G 40t, 14:3tag, :_other,\n ) {\n  /* first line\n    middle /* not nested\n    */ stop;\n  if (\n    FALSE elsif ELSE else\n  }\n )\n}\n}\n",
+  "unit": 3,
+  "tab": 4,
+  "mergeTokens": true,
+  "indents": [
+    0,
+    0,
+    6,
+    6,
+    6,
+    3,
+    3,
+    3,
+    3,
+    9,
+    6,
+    6,
+    0,
+    0,
+    0
+  ],
+  "autocomplete": null,
+  "commentTokens": null,
+  "indentOnInput": [
+    [
+      "}",
+      true
+    ],
+    [
+      " }",
+      true
+    ],
+    [
+      "\t}",
+      true
+    ],
+    [
+      "\n}",
+      true
+    ],
+    [
+      " }",
+      true
+    ],
+    [
+      "﻿}",
+      true
+    ],
+    [
+      "}",
+      false
+    ],
+    [
+      "  } ",
+      false
+    ],
+    [
+      "}\n",
+      false
+    ],
+    [
+      "}}",
+      false
+    ],
+    [
+      ")",
+      false
+    ],
+    [
+      " { }",
+      false
+    ]
+  ],
+  "tokens": [
+    [[0,7,"keyword"],[7,8,null],[8,9,null],[9,19,"string"],[19,20,null],[20,21,null],[21,31,"string"],[31,32,null],[32,33,null],[33,34,null],[34,44,"comment"]],
+    [[45,47,"keyword"],[47,48,null],[48,53,null],[53,54,null],[54,55,null]],
+    [[56,58,null],[58,62,"atom"],[62,63,null],[63,64,null],[64,69,"atom"],[69,70,null],[70,71,null],[71,74,"atom"],[74,75,null],[75,81,null],[81,82,null],[82,91,"operator"],[91,92,null],[92,98,"string"],[98,99,null],[99,108,"string"],[108,109,null]],
+    [[110,112,null],[112,116,null],[116,117,null],[117,122,"operator"],[122,123,null],[123,126,"number"],[126,127,null],[127,130,"number"],[130,131,null],[131,134,"number"],[134,135,null],[135,137,"number"],[137,138,null],[138,139,null],[139,140,null],[140,142,"number"],[142,147,"operator"],[147,148,null],[148,149,null],[149,156,"operator"],[156,157,null]],
+    [[158,159,null],[159,160,null],[160,161,null],[161,162,null]],
+    [[163,165,null],[165,178,"comment"]],
+    [[179,183,null],[183,203,"comment"]],
+    [[204,208,null],[208,210,"comment"],[210,211,null],[211,215,"keyword"],[215,216,null]],
+    [[217,219,null],[219,221,"keyword"],[221,222,null],[222,223,null]],
+    [[224,228,null],[228,233,null],[233,234,null],[234,239,"keyword"],[239,240,null],[240,244,null],[244,245,null],[245,249,"keyword"]],
+    [[250,252,null],[252,253,null]],
+    [[254,255,null],[255,256,null]],
+    [[257,258,null]],
+    [[259,260,null]],
+    []
+  ]
+},
+{
+  "module": "sieve",
+  "export": "sieve",
+  "name": "sieve",
+  "label": "dot-terminated text and quoted continuation",
+  "source": "if true {\n  text: # attach comment\nThis line has punctuation ! and 😀\n  .\n..\n\n.\n  \"ends in slash\\\n  continuation\" stop; \n  \"ends without a slash\n  true\n  text: rest of the first line\n.\n}",
+  "unit": 2,
+  "tab": 4,
+  "mergeTokens": true,
+  "indents": [
+    0,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    0
+  ],
+  "autocomplete": null,
+  "commentTokens": null,
+  "indentOnInput": [
+    [
+      "}",
+      true
+    ],
+    [
+      " }",
+      true
+    ],
+    [
+      "\t}",
+      true
+    ],
+    [
+      "\n}",
+      true
+    ],
+    [
+      " }",
+      true
+    ],
+    [
+      "﻿}",
+      true
+    ],
+    [
+      "}",
+      false
+    ],
+    [
+      "  } ",
+      false
+    ],
+    [
+      "}\n",
+      false
+    ],
+    [
+      "}}",
+      false
+    ],
+    [
+      ")",
+      false
+    ],
+    [
+      " { }",
+      false
+    ]
+  ],
+  "tokens": [
+    [[0,2,"keyword"],[2,3,null],[3,7,"atom"],[7,8,null],[8,9,null]],
+    [[10,12,null],[12,17,"string"],[17,18,null],[18,34,"comment"]],
+    [[35,36,"string"],[36,71,"string"]],
+    [[72,74,null],[74,75,"string"]],
+    [[76,77,"string"],[77,78,"string"]],
+    [],
+    [[80,81,"string"]],
+    [[82,84,null],[84,99,"string"]],
+    [[100,102,null],[102,115,"string"],[115,116,null],[116,120,"keyword"],[120,121,null],[121,122,null]],
+    [[123,125,null],[125,146,"string"]],
+    [[147,149,null],[149,153,"atom"]],
+    [[154,156,null],[156,161,"string"],[161,162,null],[162,184,"string"]],
+    [[185,186,"string"]],
+    [[187,188,null]]
+  ]
+},
+{
+  "module": "webidl",
+  "export": "webIDL",
+  "name": "webidl",
+  "label": "definitions, hints and inherited types",
+  "source": "[Exposed=Window, LegacyUnenumerableNamedProperties, Clamp, Unknown]\ninterface Example : DOMString {\n  readonly attribute DOMString name;\n  const double rate = -.5E+2;\n  Promise<sequence<FrozenArray<USVString?>>> _convert(optional any value);\n};\nArrayBuffer implements DOMException;\nUint8Array=thing Uint16Array= thing Uint32Array =Thing\ndictionary Sample { required boolean good = true; };\ncallback Getter = void (); enum Kind { \"a\", \"b\" };\ntypedef sequence<DOMString> Names ;\ninterface /* comment removes start definition */ Plain;\ntypedef\tlong /* ... */ long\t;\ninterface _Thing-name; interface =Token; interface [Value];",
+  "unit": 2,
+  "tab": 4,
+  "mergeTokens": true,
+  "indents": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "autocomplete": [
+    "Clamp",
+    "Constructor",
+    "EnforceRange",
+    "Exposed",
+    "ImplicitThis",
+    "Global",
+    "PrimaryGlobal",
+    "LegacyArrayClass",
+    "LegacyUnenumerableNamedProperties",
+    "LenientThis",
+    "NamedConstructor",
+    "NewObject",
+    "NoInterfaceObject",
+    "OverrideBuiltins",
+    "PutForwards",
+    "Replaceable",
+    "SameObject",
+    "TreatNonObjectAsNull",
+    "TreatNullAs",
+    "EmptyString",
+    "Unforgeable",
+    "Unscopeable",
+    "unsigned",
+    "short",
+    "long",
+    "unrestricted",
+    "float",
+    "double",
+    "boolean",
+    "byte",
+    "octet",
+    "Promise",
+    "ArrayBuffer",
+    "DataView",
+    "Int8Array",
+    "Int16Array",
+    "Int32Array",
+    "Uint8Array",
+    "Uint16Array",
+    "Uint32Array",
+    "Uint8ClampedArray",
+    "Float32Array",
+    "Float64Array",
+    "ByteString",
+    "DOMString",
+    "USVString",
+    "sequence",
+    "object",
+    "RegExp",
+    "Error",
+    "DOMException",
+    "FrozenArray",
+    "any",
+    "void",
+    "attribute",
+    "callback",
+    "const",
+    "deleter",
+    "dictionary",
+    "enum",
+    "getter",
+    "implements",
+    "inherit",
+    "interface",
+    "iterable",
+    "legacycaller",
+    "maplike",
+    "partial",
+    "required",
+    "serializer",
+    "setlike",
+    "setter",
+    "static",
+    "stringifier",
+    "typedef",
+    "optional",
+    "readonly",
+    "or",
+    "true",
+    "false",
+    "Infinity",
+    "NaN",
+    "null"
+  ],
+  "commentTokens": null,
+  "indentOnInput": null,
+  "tokens": [
+    [[0,1,null],[1,8,"builtin"],[8,9,"operator"],[9,15,"variable"],[15,16,null],[16,17,null],[17,50,"builtin"],[50,51,null],[51,52,null],[52,57,"builtin"],[57,58,null],[58,59,null],[59,66,"variable"],[66,67,null]],
+    [[68,77,"keyword"],[77,78,null],[78,85,"def"],[85,86,null],[86,87,"operator"],[87,88,null],[88,97,"builtin"],[97,98,null],[98,99,null]],
+    [[100,102,null],[102,110,"keyword"],[110,111,null],[111,120,"keyword"],[120,121,null],[121,130,"type"],[130,131,null],[131,135,"variable"],[135,136,null]],
+    [[137,139,null],[139,144,"keyword"],[144,145,null],[145,151,"type"],[151,152,null],[152,156,"variable"],[156,157,null],[157,158,"operator"],[158,159,null],[159,165,"number"],[165,166,null]],
+    [[167,169,null],[169,176,"type"],[176,177,"operator"],[177,185,"type"],[185,186,"operator"],[186,197,"type"],[197,198,"operator"],[198,207,"type"],[207,208,"operator"],[208,209,"operator"],[209,210,"operator"],[210,211,"operator"],[211,212,null],[212,220,"variable"],[220,221,null],[221,229,"keyword"],[229,230,null],[230,233,"type"],[233,234,null],[234,239,"variable"],[239,240,null],[240,241,null]],
+    [[242,243,null],[243,244,null]],
+    [[245,256,"builtin"],[256,257,null],[257,267,"keyword"],[267,268,null],[268,280,"builtin"],[280,281,null]],
+    [[282,292,"builtin"],[292,293,"operator"],[293,298,"variable"],[298,299,null],[299,310,"type"],[310,311,"operator"],[311,312,null],[312,317,"variable"],[317,318,null],[318,329,"builtin"],[329,330,null],[330,331,"operator"],[331,336,"variable"]],
+    [[337,347,"keyword"],[347,348,null],[348,354,"def"],[354,355,null],[355,356,null],[356,357,null],[357,365,"keyword"],[365,366,null],[366,373,"type"],[373,374,null],[374,378,"variable"],[378,379,null],[379,380,"operator"],[380,381,null],[381,385,"atom"],[385,386,null],[386,387,null],[387,388,null],[388,389,null]],
+    [[390,398,"keyword"],[398,399,null],[399,405,"def"],[405,406,null],[406,407,"operator"],[407,408,null],[408,412,"type"],[412,413,null],[413,414,null],[414,415,null],[415,416,null],[416,417,null],[417,421,"keyword"],[421,422,null],[422,426,"def"],[426,427,null],[427,428,null],[428,429,null],[429,432,"string"],[432,433,null],[433,434,null],[434,437,"string"],[437,438,null],[438,439,null],[439,440,null]],
+    [[441,448,"keyword"],[448,449,null],[449,457,"type"],[457,458,"operator"],[458,467,"type"],[467,468,"operator"],[468,469,null],[469,474,"def"],[474,475,null],[475,476,null]],
+    [[477,486,"keyword"],[486,487,null],[487,525,"comment"],[525,526,null],[526,531,"variable"],[531,532,null]],
+    [[533,540,"keyword"],[540,541,null],[541,545,"type"],[545,546,null],[546,555,"comment"],[555,556,null],[556,560,"def"],[560,561,null],[561,562,null]],
+    [[563,572,"keyword"],[572,573,null],[573,584,"def"],[584,585,null],[585,586,null],[586,595,"keyword"],[595,596,null],[596,597,"operator"],[597,602,"variable"],[602,603,null],[603,604,null],[604,613,"keyword"],[613,614,null],[614,615,null],[615,620,"def"],[620,621,null],[621,622,null]]
+  ]
+},
+{
+  "module": "webidl",
+  "export": "webIDL",
+  "name": "webidl",
+  "label": "number priority, comments, and literal boundaries",
+  "source": "const double x = 1.2 1e4 .25E-3 0xFE -0xAA 0129 0x -0 .e0 -.25e +5;\nInfinity NaN null false TRUE Exposed-like any_name any-name Error2 Error-name\néError 😀Error _Example -bad\n\"simple\" \"has \\\" next\" \"unterminated\n/* open still in comment\n\t   indented * / then close */ attribute long new-value;\n/* immediate */ /**/ // full line tail",
+  "unit": 2,
+  "tab": 4,
+  "mergeTokens": true,
+  "indents": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "autocomplete": [
+    "Clamp",
+    "Constructor",
+    "EnforceRange",
+    "Exposed",
+    "ImplicitThis",
+    "Global",
+    "PrimaryGlobal",
+    "LegacyArrayClass",
+    "LegacyUnenumerableNamedProperties",
+    "LenientThis",
+    "NamedConstructor",
+    "NewObject",
+    "NoInterfaceObject",
+    "OverrideBuiltins",
+    "PutForwards",
+    "Replaceable",
+    "SameObject",
+    "TreatNonObjectAsNull",
+    "TreatNullAs",
+    "EmptyString",
+    "Unforgeable",
+    "Unscopeable",
+    "unsigned",
+    "short",
+    "long",
+    "unrestricted",
+    "float",
+    "double",
+    "boolean",
+    "byte",
+    "octet",
+    "Promise",
+    "ArrayBuffer",
+    "DataView",
+    "Int8Array",
+    "Int16Array",
+    "Int32Array",
+    "Uint8Array",
+    "Uint16Array",
+    "Uint32Array",
+    "Uint8ClampedArray",
+    "Float32Array",
+    "Float64Array",
+    "ByteString",
+    "DOMString",
+    "USVString",
+    "sequence",
+    "object",
+    "RegExp",
+    "Error",
+    "DOMException",
+    "FrozenArray",
+    "any",
+    "void",
+    "attribute",
+    "callback",
+    "const",
+    "deleter",
+    "dictionary",
+    "enum",
+    "getter",
+    "implements",
+    "inherit",
+    "interface",
+    "iterable",
+    "legacycaller",
+    "maplike",
+    "partial",
+    "required",
+    "serializer",
+    "setlike",
+    "setter",
+    "static",
+    "stringifier",
+    "typedef",
+    "optional",
+    "readonly",
+    "or",
+    "true",
+    "false",
+    "Infinity",
+    "NaN",
+    "null"
+  ],
+  "commentTokens": null,
+  "indentOnInput": null,
+  "tokens": [
+    [[0,5,"keyword"],[5,6,null],[6,12,"type"],[12,13,null],[13,14,"variable"],[14,15,null],[15,16,"operator"],[16,17,null],[17,18,"number"],[18,20,"number"],[20,21,null],[21,22,"number"],[22,24,"variable"],[24,25,null],[25,31,"number"],[31,32,null],[32,36,"number"],[36,37,null],[37,42,"number"],[42,43,null],[43,46,"number"],[46,47,"number"],[47,48,null],[48,49,"number"],[49,50,"variable"],[50,51,null],[51,53,"number"],[53,54,null],[54,55,null],[55,57,"variable"],[57,58,null],[58,62,"number"],[62,63,"variable"],[63,64,null],[64,65,null],[65,66,"number"],[66,67,null]],
+    [[68,76,"atom"],[76,77,null],[77,80,"atom"],[80,81,null],[81,85,"atom"],[85,86,null],[86,91,"atom"],[91,92,null],[92,96,"variable"],[96,97,null],[97,104,"builtin"],[104,105,null],[105,109,"variable"],[109,110,null],[110,118,"variable"],[118,119,null],[119,122,"type"],[122,123,null],[123,127,"variable"],[127,128,null],[128,134,"variable"],[134,135,null],[135,140,"type"],[140,141,null],[141,145,"variable"]],
+    [[146,148,null],[148,153,"type"],[153,154,null],[154,158,null],[158,163,"type"],[163,164,null],[164,172,"variable"],[172,173,null],[173,174,null],[174,177,"variable"]],
+    [[178,186,"string"],[186,187,null],[187,194,"string"],[194,195,null],[195,199,"variable"],[199,202,"string"],[202,214,"variable"]],
+    [[215,222,"comment"],[222,225,null],[225,241,"comment"]],
+    [[242,246,null],[246,272,"comment"],[272,273,null],[273,282,"keyword"],[282,283,null],[283,287,"type"],[287,288,null],[288,297,"variable"],[297,298,null]],
+    [[299,314,"comment"],[314,315,null],[315,319,"comment"],[319,320,null],[320,337,"comment"]]
+  ]
+},
+{
+  "module": "xquery",
+  "export": "xQuery",
+  "name": "xquery",
+  "label": "language and qualified names",
+  "source": "xquery version \"3.1\";\ndeclare namespace ex = \"urn:examples\";\ndeclare function ex:render($title as xs:string, $v as xs:anyURI) {\n  for $t in (1, 8.5E-3, 10., 3E+, 2e5) return fn:concat($t, $title)\n};\nlet $n:=child::book return descendant-or-self::node()/following-sibling::title\nelement return {attribute if {\"value\"}, text {ex:other ()}}\n\"http://e.example\":fn(1) $\"http://e.example\":v 'urn:a':fn()\nalpha(1) alpha\tex:beta\t(2) ex:beta (3) a::b :: : d + - mod div ? path[-2]",
+  "unit": 2,
+  "tab": 4,
+  "mergeTokens": true,
+  "indents": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "autocomplete": null,
+  "commentTokens": {
+    "block": {
+      "open": "(:",
+      "close": ":)"
+    }
+  },
+  "indentOnInput": null,
+  "tokens": [
+    [[0,6,"keyword"],[6,7,null],[7,14,"keyword"],[14,15,null],[15,20,"string"],[20,21,"variable"]],
+    [[22,29,"keyword"],[29,30,null],[30,39,"keyword"],[39,40,null],[40,42,"variable"],[42,43,null],[43,44,"keyword"],[44,45,null],[45,59,"string"],[59,60,"variable"]],
+    [[61,68,"keyword"],[68,69,null],[69,77,"keyword"],[77,78,null],[78,87,"def"],[87,88,null],[88,94,"variable"],[94,95,null],[95,97,"keyword"],[97,98,null],[98,107,"atom"],[107,108,null],[108,109,null],[109,111,"variable"],[111,112,null],[112,114,"keyword"],[114,115,null],[115,124,"atom"],[124,125,null],[125,126,null],[126,127,null]],
+    [[128,130,null],[130,133,"keyword"],[133,134,null],[134,136,"variable"],[136,137,null],[137,139,"keyword"],[139,140,null],[140,141,null],[141,142,"atom"],[142,143,null],[143,144,null],[144,150,"atom"],[150,151,null],[151,152,null],[152,155,"atom"],[155,156,null],[156,157,null],[157,158,"atom"],[158,159,"variable"],[159,160,"keyword"],[160,161,null],[161,162,null],[162,163,"atom"],[163,165,"variable"],[165,166,null],[166,167,null],[167,173,"keyword"],[173,174,null],[174,183,"def"],[183,184,null],[184,186,"variable"],[186,187,null],[187,188,null],[188,194,"variable"],[194,195,null]],
+    [[196,197,null],[197,198,"variable"]],
+    [[199,202,"keyword"],[202,203,null],[203,205,"variable"],[205,207,"keyword"],[207,214,"qualifier"],[214,218,"variable"],[218,219,null],[219,225,"keyword"],[225,226,null],[226,246,"qualifier"],[246,250,"variable"],[250,251,null],[251,252,null],[252,253,"keyword"],[253,272,"qualifier"],[272,277,"variable"]],
+    [[278,285,"keyword"],[285,286,null],[286,292,"variable"],[292,293,null],[293,294,null],[294,303,"keyword"],[303,304,null],[304,306,"variable"],[306,307,null],[307,308,null],[308,315,"string"],[315,316,null],[316,317,null],[317,318,null],[318,322,"keyword"],[322,323,null],[323,324,null],[324,332,"def"],[332,333,null],[333,334,null],[334,335,null],[335,336,null],[336,337,null]],
+    [[338,359,"def"],[359,360,null],[360,361,"atom"],[361,362,null],[362,363,null],[363,384,"variable"],[384,385,null],[385,395,"def"],[395,396,null],[396,397,null]],
+    [[398,403,"def"],[403,404,null],[404,405,"atom"],[405,406,null],[406,407,null],[407,412,"variable"],[412,413,null],[413,420,"def"],[420,421,null],[421,422,null],[422,423,"atom"],[423,424,null],[424,425,null],[425,432,"variable"],[432,434,null],[434,435,null],[435,436,"atom"],[436,437,null],[437,438,null],[438,441,"variable"],[441,442,"variable"],[442,443,null],[443,445,"variable"],[445,446,null],[446,447,"variable"],[447,448,null],[448,449,"variable"],[449,450,null],[450,451,"keyword"],[451,452,null],[452,453,"keyword"],[453,454,null],[454,457,"keyword"],[457,458,null],[458,461,"keyword"],[461,462,null],[462,463,"keyword"],[463,464,null],[464,468,"variable"],[468,469,null],[469,470,"keyword"],[470,471,"atom"],[471,472,null]]
+  ]
+},
+{
+  "module": "xquery",
+  "export": "xQuery",
+  "name": "xquery",
+  "label": "XML and tokenizer restoration",
+  "source": "<catalog id=\"x\" data='{not code} 1' bare><item>{fn:count($it)}</item>\n  <entry active/> <entry a=\"b\" /> <solo/> text &amp; 😀\n  <!-- inline --> <!-- across\n      lines -->  <?scope one\n       two?>  <![CDATA[block\n      text]]>  </catalog>\n<?outside?> <![CDATA[outside]]> <broken = > attr?/>\n<x name=\"first line\n  second line\" y='done'>text</x>\n( <simple>one </different> ) $after",
+  "unit": 2,
+  "tab": 4,
+  "mergeTokens": true,
+  "indents": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "autocomplete": null,
+  "commentTokens": {
+    "block": {
+      "open": "(:",
+      "close": ":)"
+    }
+  },
+  "indentOnInput": null,
+  "tokens": [
+    [[0,9,"tag"],[9,11,"attribute"],[11,12,null],[12,15,"string"],[15,16,null],[16,20,"attribute"],[20,21,null],[21,35,"string"],[35,36,null],[36,40,"attribute"],[40,41,"tag"],[41,47,"tag"],[47,48,null],[48,56,"def"],[56,57,null],[57,60,"variable"],[60,61,null],[61,62,null],[62,69,"tag"]],
+    [[70,72,null],[72,79,"tag"],[79,85,"attribute"],[85,87,"tag"],[87,88,null],[88,95,"tag"],[95,96,"attribute"],[96,97,null],[97,100,"string"],[100,101,null],[101,103,"tag"],[103,104,null],[104,111,"tag"],[111,112,null],[112,113,"variable"],[113,114,"variable"],[114,115,"variable"],[115,116,"variable"],[116,117,null],[117,118,"variable"],[118,119,"variable"],[119,120,"variable"],[120,121,"variable"],[121,122,"variable"],[122,123,null],[123,127,"variable"]],
+    [[128,130,null],[130,145,"comment"],[145,146,null],[146,157,null]],
+    [[158,164,null],[164,173,"comment"],[173,175,null],[175,186,null]],
+    [[187,194,null],[194,199,"processingInstruction"],[199,201,null],[201,202,"tag"],[202,215,null]],
+    [[216,222,null],[222,228,"comment"],[228,229,"tag"],[229,231,null],[231,241,"tag"]],
+    [[242,253,"processingInstruction"],[253,254,null],[254,255,"tag"],[255,272,"comment"],[272,273,"keyword"],[273,274,null],[274,282,"tag"],[282,283,null],[283,284,null],[284,285,"tag"],[285,286,null],[286,290,"attribute"],[290,291,"attribute"],[291,293,"tag"]],
+    [[294,297,"tag"],[297,301,"attribute"],[301,302,null],[302,313,"string"]],
+    [[314,316,null],[316,328,"string"],[328,329,null],[329,330,"attribute"],[330,331,null],[331,337,"string"],[337,338,"tag"],[338,339,"variable"],[339,340,"variable"],[340,341,"variable"],[341,342,"variable"],[342,346,"tag"]],
+    [[347,348,null],[348,349,null],[349,357,"tag"],[357,358,"variable"],[358,359,"variable"],[359,360,"variable"],[360,361,null],[361,373,"tag"],[373,374,null],[374,375,null],[375,376,null],[376,382,"variable"]]
+  ]
+},
+{
+  "module": "xquery",
+  "export": "xQuery",
+  "name": "xquery",
+  "label": "nested comments and malformed scopes",
+  "source": "(: nested (: inner :) tail :) let $foo := \"yes\"\n(: outer (: inner\n  continuation :) return \"now base\" :)\nlet $v := \"first line\n\t second line\" return $v\n( child:: ( if else ) attribute [ name ] element <x/> ) ] }\n(: continuation *\n\n:) after",
+  "unit": 2,
+  "tab": 4,
+  "mergeTokens": true,
+  "indents": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "autocomplete": null,
+  "commentTokens": {
+    "block": {
+      "open": "(:",
+      "close": ":)"
+    }
+  },
+  "indentOnInput": null,
+  "tokens": [
+    [[0,29,"comment"],[29,30,null],[30,33,"keyword"],[33,34,null],[34,38,"variable"],[38,39,null],[39,41,"keyword"],[41,42,null],[42,47,"string"]],
+    [[48,65,"comment"]],
+    [[66,68,null],[68,83,"comment"],[83,84,null],[84,90,"keyword"],[90,91,null],[91,101,"string"],[101,102,null],[102,103,"variable"],[103,104,null]],
+    [[105,108,"keyword"],[108,109,null],[109,111,"variable"],[111,112,null],[112,114,"keyword"],[114,115,null],[115,126,"string"]],
+    [[127,129,null],[129,141,"string"],[141,142,null],[142,148,"keyword"],[148,149,null],[149,151,"variable"]],
+    [[152,153,null],[153,154,null],[154,161,"qualifier"],[161,162,null],[162,163,null],[163,164,null],[164,166,"keyword"],[166,167,null],[167,171,"keyword"],[171,172,null],[172,173,null],[173,174,null],[174,183,"variable"],[183,184,null],[184,185,null],[185,186,null],[186,190,"variable"],[190,191,null],[191,192,null],[192,193,null],[193,200,"keyword"],[200,201,null],[201,205,"tag"],[205,206,null],[206,207,null],[207,208,null],[208,209,null],[209,210,null],[210,211,null]],
+    [[212,229,"comment"]],
+    [],
+    [[231,233,"comment"],[233,234,null],[234,239,"keyword"]]
+  ]
+}
+]

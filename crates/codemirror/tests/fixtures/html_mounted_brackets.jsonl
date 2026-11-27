@@ -1,0 +1,8 @@
+{"name":"script and host boundaries","source":"<script>log(\")\")</script>","checks":[[8,[[7,8],[0,1],true]],[12,[[11,12],[15,16],true]],[13,[[13,14],null,false]],[15,[[15,16],[11,12],true]],[16,[[15,16],[11,12],true]]]}
+{"name":"comments and Unicode","source":"<script>// 甲 😀 ]\r\nlog(/* ) */ 1);\r\n</script>","checks":[[27,[[26,27],[36,37],true]],[36,[[36,37],[26,27],true]]]}
+{"name":"independent scripts","source":"<script>f(</script>\r\n<script>)</script>","checks":[[10,[[9,10],null,false]],[29,[[28,29],[21,22],true]]]}
+{"name":"TypeScript script","source":"<script type=\"text/typescript\">let x: number = a[0]; log(\")\");</script>","checks":[[49,[[48,49],[50,51],true]],[57,[[56,57],[60,61],true]],[58,[[58,59],null,false]]]}
+{"name":"event expression","source":"<p onclick='log(\")\")' title='(not code)'>字</p>","checks":[[16,[[15,16],[19,20],true]],[17,[[17,18],null,false]],[20,[[19,20],[15,16],true]]]}
+{"name":"JSON script expression","source":"<script type=\"application/json\">{\"a\": \"}\", \"b\": [1]}</script>","checks":[[33,[[32,33],[51,52],true]],[39,[[39,40],null,false]],[49,[[48,49],[50,51],true]]]}
+{"name":"style and host boundaries","source":"<style>a { --v: f(\")\"); }</style>","checks":[[7,[[6,7],[0,1],true]],[18,[[17,18],[21,22],true]],[19,[[19,20],null,false]],[21,[[21,22],[17,18],true]]]}
+{"name":"inline style","source":"<p style='--v: f(\")\");' title='(untouched)'>字</p>","checks":[[17,[[16,17],[20,21],true]],[18,[[18,19],null,false]],[21,[[20,21],[16,17],true]]]}

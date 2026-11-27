@@ -1,0 +1,20 @@
+{"name":"stock app","value":[[1,21],[]]}
+{"name":"stock comment","value":[[25,36],[]]}
+{"name":"configured app","value":[[2,20],[[0,0]]]}
+{"name":"disabled comment","value":[null,[]]}
+{"name":"disabled comment with ancestor","value":[[2,23],[[0,0]]]}
+{"name":"inner then outer","value":[[2,17],[[8,0],[0,0]]]}
+{"name":"inner only","value":[[10,16],[[8,0]]]}
+{"name":"fold starts before line","value":[null,[[8,0],[0,0]]]}
+{"name":"node starts at line end","value":[[2,17],[[8,0],[0,0]]]}
+{"name":"node ends at line end","value":[null,[[0,0]]]}
+{"name":"callback skips inner","value":[[2,17],[[8,0],[0,0]]]}
+{"name":"range starts at line end and crosses node end","value":[[13,19],[]]}
+{"name":"same tree, new state","value":[[3,17],[[8,1],[0,1]]]}
+{"name":"same configuration after edit","value":[[3,18],[[8,1],[0,1]]]}
+{"name":"reconfigured","value":[[1,18],[]]}
+{"name":"retained state","value":[[3,17],[[8,1],[0,1]]]}
+{"name":"service wins","value":[[4,16],[]]}
+{"name":"upstream accepts past EOF","value":[[2,100],[]]}
+{"name":"upstream accepts split surrogate","value":[[10,16],[]]}
+{"name":"upstream queries reversed bounds","value":[null,[[8,0],[0,0]]]}

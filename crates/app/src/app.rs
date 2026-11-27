@@ -52,6 +52,7 @@ pub fn run() {
     let hotkeys = Hotkeys::load(state_file::path("hotkeys.json"));
     let app = Application::new().with_assets(editor::ToolbarAssets);
     app.run(move |cx| {
+        editor::announcements::install_native_delivery(cx);
         editor::bind_keys(cx);
         hotkeys.bindings.bind(cx);
         let window = cx.open_window(
@@ -128,6 +129,8 @@ fn set_menus(cx: &App) {
                 MenuItem::os_action("Copy", editor::Copy, OsAction::Copy),
                 MenuItem::os_action("Paste", editor::Paste, OsAction::Paste),
                 MenuItem::os_action("Select All", editor::SelectAll, OsAction::SelectAll),
+                MenuItem::separator(),
+                MenuItem::action("Find in Document…", editor::OpenFind),
             ],
         },
         Menu {
@@ -393,10 +396,10 @@ impl Shell {
     fn is_composing(&self, cx: &App) -> bool {
         self.palette_is_composing(cx)
             || self.sidebar.search.is_composing(cx)
-            || self
-                .tabs
-                .iter()
-                .any(|tab| tab.editor.read(cx).is_composing())
+            || self.tabs.iter().any(|tab| {
+                let editor = tab.editor.read(cx);
+                editor.is_composing() || editor.find_is_composing(cx)
+            })
     }
 
     fn allow_document_action(&mut self, window_close: bool, cx: &mut Context<Self>) -> bool {

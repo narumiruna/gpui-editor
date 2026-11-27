@@ -1,0 +1,17 @@
+{"name":"JSON","doc":"{\"😀\":{\"user\":[{\"name\":\"Ada\"}]}}","from":25,"to":25,"results":[[23,28,true],[16,28,true],[15,29,true],[14,30,true],[7,30,true],[6,31,true],[1,31,true],[0,32,true]]}
+{"name":"JavaScript","doc":"const x = call(value + 1);","from":17,"to":17,"results":[[15,20,true],[15,24,true],[14,25,true],[10,25,true],[0,26,true]]}
+{"name":"JavaScript","doc":"const x = call(value + 1);","from":15,"to":20,"results":[[15,24,true],[14,25,true],[10,25,true],[0,26,true]]}
+{"name":"JavaScript","doc":"const x = call(value);","from":14,"to":14,"results":[[14,15,true],[14,21,true],[10,21,true],[0,22,true]]}
+{"name":"Python","doc":"def pair(x):\n    return (x, 2)\n","from":26,"to":26,"results":[[26,27,true],[24,30,true],[17,30,true],[11,31,true],[0,31,true]]}
+{"name":"HTML","doc":"<article><script>const x = call(item);</script><p>hi</p></article>","from":34,"to":34,"results":[[32,36,true],[31,37,true],[27,37,true],[17,38,true],[9,47,true],[0,66,true]]}
+{"name":"HTML","doc":"<div style=\"color: red;\">hi</div>","from":20,"to":20,"results":[[19,22,true],[12,22,true],[12,23,true],[11,24,true],[5,24,true],[0,25,true],[0,33,true]]}
+{"name":"HTML","doc":"<div onclick=\"run(event)\"></div>","from":20,"to":20,"results":[[18,23,true],[17,24,true],[14,24,true],[13,25,true],[5,25,true],[0,26,true],[0,32,true]]}
+{"name":"Jinja","doc":"<div>{% if visible %}<strong class=\"active\">Yes</strong>{% endif %}</div>","from":31,"to":31,"results":[[29,34,true],[29,43,true],[21,44,true],[21,56,true],[5,67,true],[0,73,true]]}
+{"name":"Liquid","doc":"<p>{{ product.title | upcase }}</p>","from":16,"to":16,"results":[[14,19,true],[6,19,true],[3,31,true],[0,35,true]]}
+{"name":"Vue","doc":"<p>{{ display(item) }}</p>","from":16,"to":16,"results":[[14,18,true],[13,19,true],[6,19,true],[5,20,true],[3,22,true],[0,26,true]]}
+{"name":"Angular Template","doc":"<b (click)=\"select(value)\"></b>","from":21,"to":21,"results":[[19,24,true],[18,25,true],[12,25,true],[11,26,true],[3,26,true],[0,27,true],[0,31,true]]}
+{"name":"PHP","doc":"<?php echo strlen(\"abc\"); ?><p>fine</p>","from":14,"to":14,"results":[[11,17,true],[11,24,true],[6,25,true]]}
+{"name":"Markdown","doc":"- [Some text](https://example.org)\n","from":9,"to":9,"results":[[2,34,true],[0,34,true]]}
+{"name":"YAML","doc":"object:\n  key: true\n","from":17,"to":17,"results":[[15,19,true],[10,19,true],[7,19,true],[0,19,true]]}
+{"name":"Shell","doc":"echo \"hello\"","from":10,"to":10,"results":[[5,12,true]]}
+{"name":"SQL","doc":"SELECT app.items FROM app.items;","from":13,"to":13,"results":[[11,16,true],[7,16,true],[0,32,true]]}

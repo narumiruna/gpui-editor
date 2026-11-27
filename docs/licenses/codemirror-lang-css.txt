@@ -1,0 +1,72 @@
+@codemirror/lang-css 6.3.1
+Commit: 253b0baa868d87d0a57fd9e1ac5415b20881ccaf
+Tarball: https://registry.npmjs.org/@codemirror/lang-css/-/lang-css-6.3.1.tgz
+Integrity: sha512-kr5fwBGiGtmz6l0LSJIbno9QrifNMUusivHbnA1H6Dmqy4HZFte3UAICix1VuKo0lMPKQr2rqB+0BkKi/S3Ejg==
+
+MIT License
+
+Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+@lezer/css 1.3.9 (selected resolution of @codemirror/lang-css dependency ^1.1.7)
+Commit: 78087d942b033f4e5979ca12dfbea76ea2b881a5
+Tarball: https://registry.npmjs.org/@lezer/css/-/css-1.3.9.tgz
+Integrity: sha512-ZmzgvTOBdJWGIsY/ItAfN7UW8DV802oZG+jeG6E508SwEzz5YhuAajptpWPICvIyqYAD2+VjMdOS40GgGkyEOQ==
+
+MIT License
+
+Copyright (C) 2018 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+Port and oracle
+
+The Rust parser uses the published v14 tables, specialization tables, scanner
+hooks, and style tags from @lezer/css. A CSS scanner reads the local comment
+token group. The shared Rust LR runtime does not split stacks or rank GLR
+branches. The CSS fallback finds rule and declaration boundaries, uses the
+published tables for separate headers and value suffixes, and recovers
+incomplete syntax with a local parser. It does not reproduce every Lezer
+error node or provide CodeMirror CSS completion.
+
+The oracle generator uses the package versions and SRI values listed above
+and these existing pins in docs/codemirror-upstream.json:
+  @codemirror/autocomplete 6.20.4
+  @codemirror/language 6.13.1
+  @codemirror/state 6.7.6
+  @lezer/common 1.5.7
+  @lezer/highlight 1.2.5
+  @lezer/lr 1.4.13

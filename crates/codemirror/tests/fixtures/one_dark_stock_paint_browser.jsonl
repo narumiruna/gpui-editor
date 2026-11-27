@@ -1,0 +1,7 @@
+{"name":"selection-focused","focused":true,"selection":"3e4451ff"}
+{"name":"selection-blurred","focused":false,"selection":"3e4451ff"}
+{"name":"ordinary-caret","color":"528bffff","selection":"3e4451ff"}
+{"name":"fold-and-gutter","fold":{"color":"ddddddff","background":"00000000","borderWidth":0},"gutter":{"color":"7d8799ff","background":"282c34ff","borderWidth":0}}
+{"name":"view-only","tokens":{"Heading":{"color":"abb2bfff","weight":400,"italic":false,"underline":false},"Bold":{"color":"abb2bfff","weight":400,"italic":false,"underline":false},"Italic":{"color":"abb2bfff","weight":400,"italic":false,"underline":false},"Link":{"color":"abb2bfff","weight":400,"italic":false,"underline":false}}}
+{"name":"highlight-only","tokens":{"Heading":{"color":"e06c75ff","weight":700,"italic":false,"underline":false},"Bold":{"color":"000000ff","weight":700,"italic":false,"underline":false},"Italic":{"color":"000000ff","weight":400,"italic":true,"underline":false},"Link":{"color":"7d8799ff","weight":400,"italic":false,"underline":true}}}
+{"name":"combined","tokens":{"Heading":{"color":"e06c75ff","weight":700,"italic":false,"underline":false},"Bold":{"color":"abb2bfff","weight":700,"italic":false,"underline":false},"Italic":{"color":"abb2bfff","weight":400,"italic":true,"underline":false},"Link":{"color":"7d8799ff","weight":400,"italic":false,"underline":true}}}

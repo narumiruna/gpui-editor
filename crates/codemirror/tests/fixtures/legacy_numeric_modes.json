@@ -1,0 +1,573 @@
+{
+  "afterInputs": [
+    "",
+    "x",
+    "end",
+    "  end C;",
+    "algorithm",
+    "initial algorithm",
+    "initial equation",
+    "weekend",
+    "algorithm equation end",
+    ")",
+    "}",
+    "]"
+  ],
+  "modes": {
+    "mathematica": {
+      "name": "mathematica",
+      "mergeTokens": true,
+      "data": {
+        "commentTokens": {
+          "block": {
+            "open": "(*",
+            "close": "*)"
+          }
+        }
+      },
+      "cases": [
+        {
+          "label": "expressions",
+          "source": "f[In[23], Out[], Out[x], #, ##9, #12, #name, $x, \\[Gamma]]\n2^^.b0 16^^a.F`10*^-3 16^^ff``2 1. .2 2` 3`` 4``.3*^+7 9*^+ x^^f\nctx`y::usage ctx`9::bad: x::9notmessage System`x` `Global`f` ctx``x `\nblank_ blank__Integer b34_Integer32 ___Float _ _0 _9a #$a #_ ##z\nx:=3; ++ < > @@ /; . a1__ _Integer] @% &| ^! ?; } 🙂 α\nx :> y\nx :[_Integer] y\nname: _Integer -> True\npattern\u0000:{_Integer}\npattern﻿:{_Integer} before after",
+          "indents": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "lastIndents": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]],
+          "tokens": [
+            [[0,1,"keyword"],[1,2,"bracket"],[2,8,"atom"],[8,9,"operator"],[9,10,null],[10,15,"atom"],[15,16,"operator"],[16,17,null],[17,20,"keyword"],[20,21,"bracket"],[21,22,"keyword"],[22,23,"bracket"],[23,24,"operator"],[24,25,null],[25,26,"variableName.constant"],[26,27,"operator"],[27,28,null],[28,31,"variableName.constant"],[31,32,"operator"],[32,33,null],[33,35,"variableName.constant"],[35,36,"number"],[36,37,"operator"],[37,38,null],[38,43,"variableName.constant"],[43,44,"operator"],[44,45,null],[45,47,"keyword"],[47,48,"operator"],[48,49,null],[49,57,"character"],[57,58,"bracket"]],
+            [[59,65,"number"],[65,66,null],[66,80,"number"],[80,81,null],[81,90,"number"],[90,91,null],[91,93,"number"],[93,94,null],[94,96,"number"],[96,97,null],[97,99,"number"],[99,100,null],[100,102,"number"],[102,103,"operator"],[103,104,null],[104,113,"number"],[113,114,null],[114,115,"number"],[115,116,"operator"],[116,117,"operator"],[117,118,"operator"],[118,119,null],[119,120,"keyword"],[120,121,"operator"],[121,122,"operator"],[122,123,"keyword"]],
+            [[124,136,"meta"],[136,137,null],[137,148,"string.special"],[148,149,null],[149,150,"keyword"],[150,151,"operator"],[151,152,"operator"],[152,153,"number"],[153,163,"keyword"],[163,164,null],[164,173,"keyword"],[173,174,null],[174,184,"keyword"],[184,185,null],[185,189,"keyword"],[189,191,"keyword"],[191,192,null],[192,193,"operator"]],
+            [[194,200,"variableName.special"],[200,201,null],[201,215,"variableName.special"],[215,216,null],[216,229,"variableName.special"],[229,230,null],[230,238,"variableName.special"],[238,239,null],[239,240,"operator"],[240,241,null],[241,242,"operator"],[242,243,"number"],[243,244,null],[244,245,"operator"],[245,246,"number"],[246,247,"keyword"],[247,248,null],[248,251,"variableName.constant"],[251,252,null],[252,253,"variableName.constant"],[253,254,"operator"],[254,255,null],[255,257,"variableName.constant"],[257,258,"keyword"]],
+            [[259,260,"keyword"],[260,261,"operator"],[261,262,"operator"],[262,263,"number"],[263,264,"operator"],[264,265,null],[265,266,"operator"],[266,267,"operator"],[267,268,null],[268,269,"operator"],[269,270,null],[270,271,"operator"],[271,272,null],[272,273,"operator"],[273,274,"operator"],[274,275,null],[275,276,"operator"],[276,277,"operator"],[277,278,null],[278,279,"operator"],[279,280,null],[280,284,"variableName.special"],[284,285,null],[285,293,"variableName.special"],[293,294,"bracket"],[294,295,null],[295,296,"operator"],[296,297,"operator"],[297,298,null],[298,299,"operator"],[299,300,"operator"],[300,301,null],[301,302,"operator"],[302,303,"operator"],[303,304,null],[304,305,"operator"],[305,306,"operator"],[306,307,null],[307,308,"bracket"],[308,309,null],[309,313,"error"],[313,314,null],[314,316,"error"]],
+            [[317,318,"keyword"],[318,319,null],[319,320,"operator"],[320,321,"operator"],[321,322,null],[322,323,"keyword"]],
+            [[324,325,"keyword"],[325,326,null],[326,327,"operator"],[327,328,"bracket"],[328,336,"variableName.special"],[336,337,"bracket"],[337,338,null],[338,339,"keyword"]],
+            [[340,362,"variableName.special"]],
+            [[363,370,"keyword"],[370,371,"error"],[371,372,"operator"],[372,373,"bracket"],[373,381,"variableName.special"],[381,382,"bracket"]],
+            [[383,411,"variableName.special"],[411,414,null],[414,419,"keyword"]]
+          ]
+        },
+        {
+          "label": "continuations",
+          "source": "a (* outer (* inner\n\n  \"still comment\"\n   comment *) before (* again\n x *\n) continue *) *) z\n  \"first \\\" escaped \\\n   🪐 more\" after \"two\\\\\" x\n\"open\n  \n\" end",
+          "indents": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "lastIndents": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]],
+          "tokens": [
+            [[0,1,"keyword"],[1,2,null],[2,19,"comment"]],
+            [],
+            [[21,23,null],[23,38,"comment"]],
+            [[39,42,null],[42,68,"comment"]],
+            [[69,70,null],[70,73,"comment"]],
+            [[74,90,"comment"],[90,91,null],[91,92,"keyword"]],
+            [[93,95,null],[95,114,"string"]],
+            [[115,118,null],[118,128,"string"],[128,129,null],[129,134,"keyword"],[134,135,null],[135,142,"string"],[142,143,null],[143,144,"keyword"]],
+            [[145,150,"string"]],
+            [[151,153,null]],
+            [[154,155,"string"],[155,156,null],[156,159,"keyword"]]
+          ]
+        }
+      ]
+    },
+    "octave": {
+      "name": "octave",
+      "mergeTokens": true,
+      "data": {
+        "commentTokens": {
+          "line": "%"
+        }
+      },
+      "cases": [
+        {
+          "label": "expressions",
+          "source": "function z = f(x)﻿global persistent pkg return endfunction vec z\nx' (x)' [2]' [2,3] 'str' 2.5' Inf' inf nan NaN NAN nanValue\n0xAfj -0xFAi +.3Di 2e-9j -3D+1i 4d+ 5E+8 12. 012 0Xf 1D9foo\n== <= >= << >> != += -= *= /= &= |= ^= >>= <<= .+ .- .* ./ .^ .\\ ._ => @\nifé sinλ é_x 🪐abc a b __x var1 e0 sum log10 loga whilex\na {1} {x, y}; [x:y] : ! # comment\nsin plot error input grid fliplr size return < > function break do",
+          "indents": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "lastIndents": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]],
+          "tokens": [
+            [[0,8,"builtin"],[8,9,null],[9,10,"variable"],[10,11,null],[11,12,null],[12,13,null],[13,14,"variable"],[14,15,null],[15,16,"variable"],[16,17,null],[17,20,null],[20,26,"keyword"],[26,27,null],[27,37,"keyword"],[37,38,null],[38,41,"keyword"],[41,42,null],[42,48,"keyword"],[48,49,null],[49,60,"keyword"],[60,61,null],[61,64,"variable"],[64,65,null],[65,66,"variable"]],
+            [[67,68,"variable"],[68,69,"operator"],[69,70,null],[70,71,null],[71,72,"variable"],[72,73,null],[73,74,"operator"],[74,75,null],[75,76,null],[76,77,"number"],[77,78,null],[78,79,"operator"],[79,80,null],[80,81,null],[81,82,"number"],[82,83,null],[83,84,"number"],[84,85,null],[85,86,null],[86,91,"string"],[91,92,null],[92,95,"number"],[95,96,"operator"],[96,97,null],[97,100,"number"],[100,101,"operator"],[101,102,null],[102,105,"number"],[105,106,null],[106,109,"number"],[109,110,null],[110,113,"number"],[113,114,null],[114,117,"variable"],[117,118,null],[118,126,"variable"]],
+            [[127,132,"number"],[132,133,null],[133,139,"number"],[139,140,null],[140,143,"number"],[143,145,"variable"],[145,146,null],[146,151,"number"],[151,152,null],[152,158,"number"],[158,159,null],[159,160,"number"],[160,161,"variable"],[161,162,"operator"],[162,163,null],[163,167,"number"],[167,168,null],[168,170,"number"],[170,171,null],[171,172,null],[172,175,"number"],[175,176,null],[176,177,"number"],[177,179,"variable"],[179,180,null],[180,183,"number"],[183,186,"variable"]],
+            [[187,189,"operator"],[189,190,null],[190,191,"operator"],[191,192,null],[192,193,null],[193,194,"operator"],[194,195,null],[195,196,null],[196,197,"operator"],[197,198,"operator"],[198,199,null],[199,200,"operator"],[200,201,"operator"],[201,202,null],[202,203,"operator"],[203,204,null],[204,205,null],[205,206,"operator"],[206,207,null],[207,208,null],[208,209,"operator"],[209,210,null],[210,211,null],[211,212,"operator"],[212,213,null],[213,214,null],[214,215,"operator"],[215,216,null],[216,217,null],[217,218,"operator"],[218,219,null],[219,220,null],[220,221,"operator"],[221,222,null],[222,223,null],[223,224,"operator"],[224,225,null],[225,226,null],[226,227,"operator"],[227,228,"operator"],[228,229,null],[229,230,null],[230,231,"operator"],[231,232,"operator"],[232,233,null],[233,234,null],[234,236,"operator"],[236,237,null],[237,239,"operator"],[239,240,null],[240,242,"operator"],[242,243,null],[243,245,"operator"],[245,246,null],[246,248,"operator"],[248,249,null],[249,251,"operator"],[251,252,null],[252,253,null],[253,254,"variable"],[254,255,null],[255,256,null],[256,257,"operator"],[257,258,null],[258,259,"operator"]],
+            [[260,262,"keyword"],[262,264,"variable"],[264,265,null],[265,268,"builtin"],[268,270,"variable"],[270,271,null],[271,275,"variable"],[275,276,null],[276,283,"variable"],[283,284,null],[284,285,"variable"],[285,287,null],[287,288,"variable"],[288,289,null],[289,292,"variable"],[292,293,null],[293,297,"variable"],[297,298,null],[298,300,"variable"],[300,301,null],[301,304,"builtin"],[304,305,null],[305,310,"builtin"],[310,311,null],[311,315,"variable"],[315,316,null],[316,322,"variable"]],
+            [[323,324,"variable"],[324,325,null],[325,326,null],[326,327,"number"],[327,328,null],[328,329,null],[329,330,null],[330,331,"variable"],[331,332,null],[332,333,null],[333,334,"variable"],[334,335,null],[335,336,null],[336,337,null],[337,338,null],[338,339,"variable"],[339,340,null],[340,341,"variable"],[341,342,null],[342,343,null],[343,344,null],[344,345,null],[345,346,"operator"],[346,347,null],[347,356,"comment"]],
+            [[357,360,"builtin"],[360,361,null],[361,365,"builtin"],[365,366,null],[366,371,"builtin"],[371,372,null],[372,377,"builtin"],[377,378,null],[378,382,"builtin"],[382,383,null],[383,389,"builtin"],[389,390,null],[390,394,"builtin"],[394,395,null],[395,401,"keyword"],[401,402,null],[402,403,"operator"],[403,404,null],[404,405,"operator"],[405,406,null],[406,414,"builtin"],[414,415,null],[415,420,"builtin"],[420,421,null],[421,423,"keyword"]]
+          ]
+        },
+        {
+          "label": "continuations",
+          "source": "x = \"double \"\" quote\"; y = 'single '' quote'; z = \"unterminated\ntrailing'\n'\n'abc''\n'abc'''rest\n%{ opener with ignored %}\n  more %} middle %} tail\n  %{ opens\n\n \tcontinues\nbefore %} not closed\nbefore %} done\nx\n'str'\n)'",
+          "indents": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "lastIndents": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]],
+          "tokens": [
+            [[0,1,"variable"],[1,2,null],[2,3,null],[3,4,null],[4,21,"string"],[21,22,null],[22,23,null],[23,24,"variable"],[24,25,null],[25,26,null],[26,27,null],[27,44,"string"],[44,45,null],[45,46,null],[46,47,"variable"],[47,48,null],[48,49,null],[49,50,null],[50,63,"error"]],
+            [[64,72,"variable"],[72,73,"operator"]],
+            [[74,75,"error"]],
+            [[76,82,"error"]],
+            [[83,90,"string"],[90,94,"variable"]],
+            [[95,120,"comment"]],
+            [[121,140,"comment"],[140,141,null],[141,145,"variable"]],
+            [[146,148,null],[148,156,"comment"]],
+            [],
+            [[158,169,"comment"]],
+            [[170,192,"comment"]],
+            [[193,202,"comment"],[202,203,null],[203,207,"variable"]],
+            [[208,209,"variable"]],
+            [[210,215,"string"]],
+            [[216,217,null],[217,218,"operator"]]
+          ]
+        }
+      ]
+    },
+    "sas": {
+      "name": "sas",
+      "mergeTokens": true,
+      "data": {
+        "commentTokens": {
+          "block": {
+            "open": "/*",
+            "close": "*/"
+          }
+        }
+      },
+      "cases": [
+        {
+          "label": "expressions",
+          "source": "options nosource2 pageno; title1 footnote2 title; footnote 3;\ndata work.out; set sashelp.class; input age; weight=2.0; if age eq 10 then put &last.; run;\nDATA a.b; LIBNAME x; x=stay.next; format var. var! var; label x; run; proc means data=work.out;\nclass age; var class; noobs nodupkey abs; QUIT; libname put\neq lt le gt ge in ne or and not ee eq\tge EQ GE equal next order inner le;\n0 0123 00123 0xFa 0X9 0.25 .5e2 6.0e+3 0e+2 05E+3 1. 9e . _ALL_ & &a x&sysuserid\n/ ! != <= >= <> >< - + * . , ; : ( ) [ ] { } = ^ bad 🪐\nproc matching; option most; run; %macro fn(arg=1); %if arg %then %do;\n%let a=&sysdate9; text; %end; %mend; %mend\n%global a; %put z; %eval(3+4);",
+          "indents": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "lastIndents": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]],
+          "tokens": [
+            [[0,7,"builtin"],[7,8,null],[8,17,"def"],[17,18,null],[18,25,null],[25,26,null],[26,32,null],[32,33,null],[33,42,null],[42,43,null],[43,49,null],[49,50,null],[50,58,"def"],[58,59,null],[59,60,"number"],[60,61,null]],
+            [[62,66,"builtin"],[66,67,null],[67,76,"variableName.special"],[76,77,null],[77,80,"def"],[80,81,null],[81,89,"variableName.special"],[89,96,null],[96,102,null],[102,107,null],[107,113,"def"],[113,114,"operator"],[114,117,"number"],[117,119,null],[119,121,"def"],[121,122,null],[122,126,null],[126,128,"operator"],[128,129,null],[129,131,"number"],[131,132,null],[132,136,"def"],[136,137,null],[137,140,"def"],[140,141,null],[141,146,"variable"],[146,147,"number"],[147,149,null],[149,153,"builtin"]],
+            [[154,158,"builtin"],[158,159,null],[159,163,"variableName.special"],[163,164,null],[164,171,"def"],[171,172,null],[172,175,null],[175,177,null],[177,182,"variableName.special"],[182,188,null],[188,194,"def"],[194,195,null],[195,199,"variable"],[199,200,null],[200,203,"def"],[203,205,null],[205,210,null],[210,215,"def"],[215,216,null],[216,219,null],[219,223,"builtin"],[223,224,null],[224,228,"builtin"],[228,229,null],[229,234,"variableName.special"],[234,235,null],[235,239,"def"],[239,240,"operator"],[240,244,"def"],[244,245,"number"],[245,249,null]],
+            [[250,255,"def"],[255,256,null],[256,260,null],[260,261,null],[261,264,"def"],[264,265,null],[265,271,null],[271,272,null],[272,277,"def"],[277,278,null],[278,286,"def"],[286,287,null],[287,291,null],[291,292,null],[292,297,"builtin"],[297,298,null],[298,305,"def"],[305,306,null],[306,309,null]],
+            [[310,312,"operator"],[312,313,null],[313,315,"operator"],[315,316,null],[316,318,"operator"],[318,319,null],[319,321,"operator"],[321,322,null],[322,324,"operator"],[324,325,null],[325,327,"operator"],[327,328,null],[328,330,"operator"],[330,331,null],[331,333,"operator"],[333,334,null],[334,337,null],[337,338,null],[338,341,null],[341,342,null],[342,344,null],[344,345,null],[345,347,null],[347,348,null],[348,350,"operator"],[350,351,null],[351,353,null],[353,354,null],[354,356,null],[356,357,null],[357,362,null],[362,363,null],[363,367,null],[367,368,null],[368,373,null],[373,374,null],[374,379,null],[379,380,null],[380,383,null]],
+            [[384,385,"number"],[385,386,null],[386,387,"number"],[387,390,"number"],[390,391,null],[391,396,"number"],[396,397,null],[397,401,"number"],[401,402,null],[402,405,"number"],[405,406,null],[406,407,"number"],[407,410,"number"],[410,411,null],[411,415,"number"],[415,416,null],[416,422,"number"],[422,423,null],[423,424,"number"],[424,425,null],[425,426,"operator"],[426,427,"number"],[427,428,null],[428,429,"number"],[429,433,"number"],[433,434,null],[434,436,"number"],[436,437,null],[437,438,"number"],[438,439,null],[439,440,null],[440,441,"number"],[441,442,null],[442,447,null],[447,448,null],[448,449,null],[449,450,null],[450,452,"variable"],[452,453,null],[453,464,"variable"]],
+            [[465,466,"operator"],[466,467,null],[467,468,null],[468,469,null],[469,471,"operator"],[471,472,null],[472,474,"operator"],[474,475,null],[475,477,"operator"],[477,478,null],[478,480,"operator"],[480,481,null],[481,482,"operator"],[482,483,"operator"],[483,484,null],[484,485,"operator"],[485,486,null],[486,487,"operator"],[487,488,null],[488,489,"operator"],[489,490,null],[490,491,"number"],[491,492,null],[492,493,"operator"],[493,494,null],[494,495,null],[495,496,null],[496,497,"operator"],[497,498,null],[498,499,"operator"],[499,500,null],[500,501,"operator"],[501,502,null],[502,503,"operator"],[503,504,null],[504,505,"operator"],[505,506,null],[506,507,"operator"],[507,508,null],[508,509,"operator"],[509,510,null],[510,511,"operator"],[511,512,null],[512,513,"operator"],[513,514,null],[514,517,null],[517,518,null],[518,522,null]],
+            [[523,527,"builtin"],[527,528,null],[528,537,"variableName.special"],[537,538,null],[538,544,"builtin"],[544,545,null],[545,550,null],[550,551,null],[551,555,"builtin"],[555,556,null],[556,562,"builtin"],[562,563,null],[563,565,"variableName.special"],[565,566,"operator"],[566,569,"atom"],[569,570,"operator"],[570,571,"number"],[571,572,"operator"],[572,573,"atom"],[573,574,null],[574,577,"def"],[577,578,null],[578,581,"atom"],[581,582,null],[582,587,"def"],[587,588,null],[588,592,"def"]],
+            [[593,597,"def"],[597,598,null],[598,599,"atom"],[599,600,"operator"],[600,610,"variable"],[610,611,null],[611,616,"atom"],[616,617,null],[617,622,"def"],[622,623,null],[623,629,"atom"],[629,630,null],[630,635,"builtin"]],
+            [[636,643,"def"],[643,644,null],[644,646,null],[646,647,null],[647,651,"def"],[651,652,null],[652,654,null],[654,655,null],[655,660,"def"],[660,661,"operator"],[661,662,"number"],[662,663,"operator"],[663,664,"number"],[664,665,"operator"],[665,666,null]]
+          ]
+        },
+        {
+          "label": "continuations",
+          "source": "  * first comment; remaining\ndata sample\n  foo. bar.\u0000 baz. next no! ;\n  /* body * no closer **/ then /* continuation\n       \n  * another * word *\n*/ value run;\ntitle \"outer\n  internal /* comment wins\nhere */ tail\" more\nx = 'one''two' y = \"quote\\\" closes\ndata = a\nproc\nx.y\nrun;",
+          "indents": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "lastIndents": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]],
+          "tokens": [
+            [[0,2,null],[2,28,"comment"]],
+            [[29,33,"builtin"],[33,34,null],[34,40,"variableName.special"]],
+            [[41,43,null],[43,47,"variable"],[47,48,null],[48,52,"variable"],[52,54,null],[54,58,"variable"],[58,59,null],[59,64,null],[64,66,"def"],[66,68,null],[68,69,null]],
+            [[70,72,null],[72,74,"comment"],[74,75,null],[75,81,"comment"],[81,82,null],[82,93,"comment"],[93,95,"comment"],[95,96,null],[96,100,"def"],[100,101,null],[101,103,"comment"],[103,104,null],[104,116,"comment"]],
+            [[117,124,null]],
+            [[125,127,null],[127,138,"comment"],[138,139,null],[139,145,"comment"]],
+            [[146,148,"comment"],[148,149,null],[149,154,"def"],[154,155,null],[155,159,"builtin"]],
+            [[160,165,"def"],[165,166,null],[166,167,"string"],[167,172,"string"]],
+            [[173,175,null],[175,199,"string"]],
+            [[200,213,"string"],[213,214,null],[214,218,null]],
+            [[219,220,null],[220,221,null],[221,222,"operator"],[222,223,null],[223,224,"string"],[224,228,"string"],[228,229,"string"],[229,233,"string"],[233,234,null],[234,235,null],[235,236,null],[236,237,"operator"],[237,238,null],[238,239,"string"],[239,246,"string"],[246,247,null],[247,253,null]],
+            [[254,258,"builtin"],[258,259,null],[259,260,"operator"],[260,261,null],[261,262,"variableName.special"]],
+            [[263,267,"builtin"]],
+            [[268,270,"variableName.special"],[270,271,null]],
+            [[272,276,"builtin"]]
+          ]
+        }
+      ]
+    },
+    "q": {
+      "name": "q",
+      "mergeTokens": true,
+      "data": {
+        "commentTokens": {
+          "line": "/"
+        }
+      },
+      "cases": [
+        {
+          "label": "expressions",
+          "source": "q)([ x:`p:/tmp/data.csv; y:count x ]) [] {}\nabs aj0 view while select setenv xrank z .z.p _foo . 0N 0w 0W 0n 0x 0xdef 101b 102b 1ch 9n\n2012.06m 2012.06.30 2012.06.30D 2012.06.30T12:34:56.123456789 42D05:56 3D 3D1 12:34 56:78:09.000 9p 0t 3u 60v\n.4 -.3 +2 3e-4 3e+ 3e 4f 1E+3 2012.1 2012.06.30D2 2012.06.30D20:00:00.1234567890 3.4.5\n321abc 0xg 9n_ 9n? 1.🪐 3 3﻿x\nx  / comment\nx/y \\op\n\\ q builtin rest is comment\n\\l a.q\n  \t  x",
+          "indents": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "lastIndents": [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]],
+          "tokens": [
+            [[0,1,"variable"],[1,2,null],[2,3,null],[3,4,null],[4,5,"null"],[5,6,"variable"],[6,7,null],[7,23,"macroName"],[23,24,null],[24,25,"null"],[25,26,"variable"],[26,27,null],[27,32,"keyword"],[32,33,"null"],[33,34,"variable"],[34,35,"null"],[35,36,null],[36,37,null],[37,38,"null"],[38,39,null],[39,40,null],[40,41,"null"],[41,42,null],[42,43,null]],
+            [[44,47,"keyword"],[47,48,"null"],[48,51,"keyword"],[51,52,"null"],[52,56,"keyword"],[56,57,"null"],[57,62,"keyword"],[62,63,"null"],[63,69,"keyword"],[69,70,"null"],[70,76,"keyword"],[76,77,"null"],[77,82,"keyword"],[82,83,"null"],[83,84,"variable"],[84,85,"null"],[85,89,"variable"],[89,90,"null"],[90,91,null],[91,94,"variable"],[94,95,"null"],[95,96,"variable"],[96,97,"null"],[97,99,"number"],[99,100,"null"],[100,102,"number"],[102,103,"null"],[103,105,"number"],[105,106,"null"],[106,108,"number"],[108,109,"null"],[109,111,"number"],[111,112,"null"],[112,117,"number"],[117,118,"null"],[118,122,"number"],[122,123,"null"],[123,127,"error"],[127,128,"null"],[128,131,"error"],[131,132,"null"],[132,134,"number"]],
+            [[135,143,"temporal"],[143,144,"null"],[144,154,"temporal"],[154,155,"null"],[155,166,"temporal"],[166,167,"null"],[167,196,"temporal"],[196,197,"null"],[197,205,"temporal"],[205,206,"null"],[206,208,"error"],[208,209,"null"],[209,211,"error"],[211,212,"number"],[212,213,"null"],[213,218,"temporal"],[218,219,"null"],[219,231,"temporal"],[231,232,"null"],[232,234,"temporal"],[234,235,"null"],[235,237,"temporal"],[237,238,"null"],[238,240,"temporal"],[240,241,"null"],[241,244,"temporal"]],
+            [[245,247,"number"],[247,248,"null"],[248,249,null],[249,251,"number"],[251,252,"null"],[252,253,null],[253,254,"number"],[254,255,"null"],[255,259,"number"],[259,260,"null"],[260,262,"number"],[262,263,null],[263,264,"null"],[264,266,"number"],[266,267,"null"],[267,269,"number"],[269,270,"null"],[270,272,"error"],[272,273,null],[273,274,"number"],[274,275,"null"],[275,281,"number"],[281,282,"null"],[282,294,"error"],[294,295,"null"],[295,325,"error"],[325,326,"null"],[326,330,"error"],[330,331,"number"]],
+            [[332,336,"error"],[336,338,"variable"],[338,339,"null"],[339,342,"error"],[342,343,"null"],[343,345,"number"],[345,346,null],[346,347,"null"],[347,349,"number"],[349,350,null],[350,351,"null"],[351,357,"error"],[357,358,"null"],[358,361,"error"],[361,362,"null"],[362,363,"number"],[363,366,"null"],[366,367,"variable"]],
+            [[368,369,"variable"],[369,370,"null"],[370,380,"comment"]],
+            [[381,382,"variable"],[382,383,null],[383,384,"variable"],[384,385,"null"],[385,386,null],[386,388,"variable"]],
+            [[389,416,"comment"]],
+            [[417,418,"builtin"],[418,419,"variable"],[419,420,"null"],[420,423,"variable"]],
+            [[424,425,"null"],[425,426,"null"],[426,427,"null"],[427,429,"null"],[429,432,"null"],[432,433,"variable"]]
+          ]
+        },
+        {
+          "label": "block_and_strings",
+          "source": "/ line comment\n/  \t\nblock\n  \\\n\\ not end\n\n\\ \t\nx \"hello \\\"world\n   continued\" \\l x\n\"next\\\\\" x",
+          "indents": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "lastIndents": [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]],
+          "tokens": [
+            [[0,14,"comment"]],
+            [[15,19,"comment"]],
+            [[20,25,"comment"]],
+            [[26,29,"comment"]],
+            [[30,39,"comment"]],
+            [],
+            [[41,44,"comment"]],
+            [[45,46,"variable"],[46,47,"null"],[47,61,"string"]],
+            [[62,75,"string"],[75,76,"null"],[76,77,null],[77,78,"variable"],[78,79,"null"],[79,80,"variable"]],
+            [[81,89,"string"],[89,90,"null"],[90,91,"variable"]]
+          ]
+        },
+        {
+          "label": "comment_to_end",
+          "source": "x \"two\n\\\" one\"\n\\ \nx /*\n\n\\\nshow 42",
+          "indents": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "lastIndents": [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]],
+          "tokens": [
+            [[0,1,"variable"],[1,2,"null"],[2,6,"string"]],
+            [[7,14,"string"]],
+            [[15,17,"comment"]],
+            [[18,22,"comment"]],
+            [],
+            [[24,25,"comment"]],
+            [[26,33,"comment"]]
+          ]
+        }
+      ]
+    },
+    "modelica": {
+      "name": "modelica",
+      "mergeTokens": true,
+      "data": {
+        "commentTokens": {
+          "line": "//",
+          "block": {
+            "open": "/*",
+            "close": "*/"
+          }
+        },
+        "autocomplete": [
+          "algorithm",
+          "and",
+          "annotation",
+          "assert",
+          "block",
+          "break",
+          "class",
+          "connect",
+          "connector",
+          "constant",
+          "constrainedby",
+          "der",
+          "discrete",
+          "each",
+          "else",
+          "elseif",
+          "elsewhen",
+          "encapsulated",
+          "end",
+          "enumeration",
+          "equation",
+          "expandable",
+          "extends",
+          "external",
+          "false",
+          "final",
+          "flow",
+          "for",
+          "function",
+          "if",
+          "import",
+          "impure",
+          "in",
+          "initial",
+          "inner",
+          "input",
+          "loop",
+          "model",
+          "not",
+          "operator",
+          "or",
+          "outer",
+          "output",
+          "package",
+          "parameter",
+          "partial",
+          "protected",
+          "public",
+          "pure",
+          "record",
+          "redeclare",
+          "replaceable",
+          "return",
+          "stream",
+          "then",
+          "true",
+          "type",
+          "when",
+          "while",
+          "within",
+          "abs",
+          "acos",
+          "actualStream",
+          "asin",
+          "atan",
+          "atan2",
+          "cardinality",
+          "ceil",
+          "cos",
+          "cosh",
+          "delay",
+          "div",
+          "edge",
+          "exp",
+          "floor",
+          "getInstanceName",
+          "homotopy",
+          "inStream",
+          "integer",
+          "log",
+          "log10",
+          "mod",
+          "pre",
+          "reinit",
+          "rem",
+          "semiLinear",
+          "sign",
+          "sin",
+          "sinh",
+          "spatialDistribution",
+          "sqrt",
+          "tan",
+          "tanh",
+          "Real",
+          "Boolean",
+          "Integer",
+          "String"
+        ]
+      },
+      "cases": [
+        {
+          "label": "nesting",
+          "source": "within Foo;\npackage Test\n  model M\n\tconnector C\n   when x then\n    initial algorithm\n    initial equation\n    algorithmic endAndequation\n    algorithm\n    equation\n      Real x = abs(2.3E-);\n   end when;\n  end C;\n  end M;\nend Test;\nend Overflow;",
+          "indents": [
+            0,
+            0,
+            2,
+            4,
+            6,
+            4,
+            4,
+            2,
+            6,
+            6,
+            8,
+            6,
+            4,
+            2,
+            0,
+            0
+          ],
+          "lastIndents": [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]],
+          "tokens": [
+            [[0,6,"keyword"],[6,7,null],[7,10,"variable"],[10,11,"operator"]],
+            [[12,19,"keyword"],[19,20,null],[20,24,"variable"]],
+            [[25,27,null],[27,32,"keyword"],[32,33,null],[33,34,"variable"]],
+            [[35,36,null],[36,45,"keyword"],[45,46,null],[46,47,"variable"]],
+            [[48,51,null],[51,55,"keyword"],[55,56,null],[56,57,"variable"],[57,58,null],[58,62,"keyword"]],
+            [[63,67,null],[67,74,"keyword"],[74,75,null],[75,84,"keyword"]],
+            [[85,89,null],[89,96,"keyword"],[96,97,null],[97,105,"keyword"]],
+            [[106,110,null],[110,121,"variable"],[121,122,null],[122,136,"variable"]],
+            [[137,141,null],[141,150,"keyword"]],
+            [[151,155,null],[155,163,"keyword"]],
+            [[164,170,null],[170,174,"atom"],[174,175,null],[175,176,"variable"],[176,177,null],[177,178,"operator"],[178,179,null],[179,182,"builtin"],[182,183,"operator"],[183,188,"number"],[188,189,"operator"],[189,190,"operator"]],
+            [[191,194,null],[194,197,"keyword"],[197,198,null],[198,202,"keyword"],[202,203,"operator"]],
+            [[204,206,null],[206,209,"keyword"],[209,210,null],[210,211,"variable"],[211,212,"operator"]],
+            [[213,215,null],[215,218,"keyword"],[218,219,null],[219,220,"variable"],[220,221,"operator"]],
+            [[222,225,"keyword"],[225,226,null],[226,230,"variable"],[230,231,"operator"]],
+            [[232,235,"keyword"],[235,236,null],[236,244,"variable"],[244,245,"operator"]]
+          ]
+        },
+        {
+          "label": "expressions",
+          "source": "parameter Real r=3e+5; String s; Boolean b=true; Integer i=2.;\nx:=x .+ -3; .2 .- .^ ./ .* <= >= == <> = < > (){}[] % : !\na_b_23 12xyz truevalue pre atan2 cosh semiLinear actualStream getInstanceName Abort 🪐\n'quoted id' '👋\\x' '' 'end\n'\n3e 3E- 4e+ _z 123E+Ea\n /* ignore */ model WithComment\n + model WithOperator\n  1 model AfterNumber",
+          "indents": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            2,
+            4
+          ],
+          "lastIndents": [[4,6],[4,6],[2,3],[2,3],[2,3],[0,0],[0,0],[2,3],[0,0],[4,6],[4,6],[4,6]],
+          "tokens": [
+            [[0,9,"keyword"],[9,10,null],[10,14,"atom"],[14,15,null],[15,16,"variable"],[16,17,"operator"],[17,21,"number"],[21,22,"operator"],[22,23,null],[23,29,"atom"],[29,30,null],[30,31,"variable"],[31,32,"operator"],[32,33,null],[33,40,"atom"],[40,41,null],[41,42,"variable"],[42,43,"operator"],[43,47,"keyword"],[47,48,"operator"],[48,49,null],[49,56,"atom"],[56,57,null],[57,58,"variable"],[58,59,"operator"],[59,61,"number"],[61,62,"operator"]],
+            [[63,64,"variable"],[64,66,"operator"],[66,67,"variable"],[67,68,null],[68,70,"operator"],[70,71,null],[71,72,"operator"],[72,73,"number"],[73,74,"operator"],[74,75,null],[75,76,"operator"],[76,77,"number"],[77,78,null],[78,80,"operator"],[80,81,null],[81,83,"operator"],[83,84,null],[84,86,"operator"],[86,87,null],[87,89,"operator"],[89,90,null],[90,92,"operator"],[92,93,null],[93,95,"operator"],[95,96,null],[96,98,"operator"],[98,99,null],[99,101,"operator"],[101,102,null],[102,103,"operator"],[103,104,null],[104,105,"operator"],[105,106,null],[106,107,"operator"],[107,108,null],[108,109,"operator"],[109,110,"operator"],[110,111,"operator"],[111,112,"operator"],[112,113,"operator"],[113,114,"operator"],[114,115,null],[115,116,"error"],[116,117,null],[117,118,"operator"],[118,119,null],[119,120,"error"]],
+            [[121,127,"variable"],[127,128,null],[128,130,"number"],[130,133,"variable"],[133,134,null],[134,143,"variable"],[143,144,null],[144,147,"builtin"],[147,148,null],[148,153,"builtin"],[153,154,null],[154,158,"builtin"],[158,159,null],[159,169,"builtin"],[169,170,null],[170,182,"builtin"],[182,183,null],[183,198,"builtin"],[198,199,null],[199,204,"variable"],[204,205,null],[205,209,"error"]],
+            [[210,221,"variable"],[221,222,null],[222,230,"variable"],[230,231,null],[231,232,"error"],[232,235,"variable"],[235,238,"keyword"]],
+            [[239,240,"error"]],
+            [[241,243,"number"],[243,244,null],[244,247,"number"],[247,248,null],[248,251,"number"],[251,252,null],[252,254,"variable"],[254,255,null],[255,260,"number"],[260,262,"variable"]],
+            [[263,264,null],[264,276,"comment"],[276,277,null],[277,282,"keyword"],[282,283,null],[283,294,"variable"]],
+            [[295,296,null],[296,297,"operator"],[297,298,null],[298,303,"keyword"],[303,304,null],[304,316,"variable"]],
+            [[317,319,null],[319,320,"number"],[320,321,null],[321,326,"keyword"],[326,327,null],[327,338,"variable"]]
+          ]
+        },
+        {
+          "label": "continuations",
+          "source": "model M\n  \"first \\\" still \\\n\n  continuation\" end\n  String q=\"done\"; // comment\n  /* block\n    body\n*/ connector Name\n  model N // opens\n  /* block\n*/ model StillFirst\npackage P /* other\ncontinued\n  end P;",
+          "indents": [
+            0,
+            2,
+            null,
+            null,
+            2,
+            2,
+            null,
+            null,
+            4,
+            6,
+            null,
+            8,
+            null,
+            null
+          ],
+          "lastIndents": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]],
+          "tokens": [
+            [[0,5,"keyword"],[5,6,null],[6,7,"variable"]],
+            [[8,10,null],[10,27,"string"]],
+            [],
+            [[29,44,"string"],[44,45,null],[45,48,"keyword"]],
+            [[49,51,null],[51,57,"atom"],[57,58,null],[58,59,"variable"],[59,60,"operator"],[60,66,"string"],[66,67,"operator"],[67,68,null],[68,78,"comment"]],
+            [[79,81,null],[81,89,"comment"]],
+            [[90,98,"comment"]],
+            [[99,101,"comment"],[101,102,null],[102,111,"keyword"],[111,112,null],[112,116,"variable"]],
+            [[117,119,null],[119,124,"keyword"],[124,125,null],[125,126,"variable"],[126,127,null],[127,135,"comment"]],
+            [[136,138,null],[138,146,"comment"]],
+            [[147,149,"comment"],[149,150,null],[150,155,"keyword"],[155,156,null],[156,166,"variable"]],
+            [[167,174,"keyword"],[174,175,null],[175,176,"variable"],[176,177,null],[177,185,"comment"]],
+            [[186,195,"comment"]],
+            [[196,204,"comment"]]
+          ]
+        },
+        {
+          "label": "open_string",
+          "source": "model M\n  String q = \"abc\nmore",
+          "indents": [
+            0,
+            2,
+            null
+          ],
+          "lastIndents": [[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]],
+          "tokens": [
+            [[0,5,"keyword"],[5,6,null],[6,7,"variable"]],
+            [[8,10,null],[10,16,"atom"],[16,17,null],[17,18,"variable"],[18,19,null],[19,20,"operator"],[20,21,null],[21,25,"string"]],
+            [[26,30,"string"]]
+          ]
+        }
+      ]
+    }
+  }
+}

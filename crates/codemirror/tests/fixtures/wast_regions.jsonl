@@ -1,0 +1,12 @@
+{"name":"root includes an empty document","mode":"root","source":"","regions":[{"range":[0,0],"raw":""}]}
+{"name":"root includes all text","mode":"root","source":";; 😀\r\n(module\r  (func)\n)","regions":[{"range":[0,27],"raw":";; 😀\r\n(module\r  (func)\n)"}]}
+{"name":"file catalog loads WAT","mode":"catalog","source":"(module)","filename":"draft.wat","regions":[{"range":[0,8],"raw":"(module)"}]}
+{"name":"file catalog loads WAST","mode":"catalog","source":"(module)","filename":"draft.wast","regions":[{"range":[0,8],"raw":"(module)"}]}
+{"name":"side-by-side namespaces","mode":"controlled","source":"```wast\r(module)\r```\r\r```json\r{}\r```","regions":[{"range":[8,16],"raw":"(module)"}]}
+{"name":"quoted overlay segments","mode":"controlled","source":"前 😀\r\n\r\n> ```wat extra\r> (module\r\n>   (func))\n> ```","regions":[{"range":[29,38],"raw":"(module\r\n"},{"range":[40,49],"raw":"  (func))"}]}
+{"name":"root regions exclude surrounding prose","mode":"controlled","source":"Before\n\n```wast\n(module)\n```\n\nAfter","regions":[{"range":[16,24],"raw":"(module)"}]}
+{"name":"unclosed fence includes the last line","mode":"controlled","source":"```wat\r\n(module\r  (func))","regions":[{"range":[8,25],"raw":"(module\r  (func))"}]}
+{"name":"unlabelled default and indented block","mode":"fallback","source":"```\r\n(module)\r\n```\r\n\r\n    (func)\r\n","regions":[{"range":[5,13],"raw":"(module)"},{"range":[26,32],"raw":"(func)"}]}
+{"name":"stock has no code resolver","mode":"stock","source":"```wat\r(module)\r```","regions":[]}
+{"name":"unknown or empty fence","mode":"controlled","source":"```unknown\n(module)\n```\n\n```wat\n```","regions":[]}
+{"name":"body consisting of a line break","mode":"controlled","source":"```wast\r\n\r\n```","regions":[{"range":[9,11],"raw":"\r\n"}]}

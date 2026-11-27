@@ -1,0 +1,4 @@
+{"name":"fold","source":"Outside 🧭\r\n\r\n```wat\r\n(module\r  (func $a)\r\n)\r\n```\r\nTail.","body":"(module\r  (func $a)\r\n)","line":[24,31],"selection":24,"calls":[[24,46,24]],"range":[26,45]}
+{"name":"disabled fold","source":"Outside 🧭\r\n\r\n```wat\r\n(module\r  (func $a)\r\n)\r\n```\r\nTail.","body":"(module\r  (func $a)\r\n)","line":[24,31],"selection":24,"calls":[],"range":null}
+{"name":"comment override","source":"Outside 🧭\r\n\r\n```wat\r\n(module\r  (func $a)\r\n)\r\n```\r\nTail.","body":"(module\r  (func $a)\r\n)","selection":34,"text":"Outside 🧭\r\n\r\n```wat\r\n(module\r  ;; host (func $a)\r\n)\r\n```\r\nTail."}
+{"name":"disabled comment","source":"Outside 🧭\r\n\r\n```wat\r\n(module\r  (func $a)\r\n)\r\n```\r\nTail.","body":"(module\r  (func $a)\r\n)","selection":34,"text":null}

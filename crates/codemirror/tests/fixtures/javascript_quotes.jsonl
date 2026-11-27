@@ -1,0 +1,36 @@
+{"mode":"js","name":"inside a quoted literal","source":"const x = \"😀  \";","head":16,"key":"\"","after":"const x = \"😀 \" \";","position":17,"handled":false}
+{"mode":"js","name":"after a quote escape","source":"const x = \"\\\" \";","head":13,"key":"\"","after":"const x = \"\\\"\" \";","position":14,"handled":false}
+{"mode":"js","name":"a different quote inside a literal","source":"const x = \"字  \";","head":15,"key":"'","after":"const x = \"字 '' \";","position":16,"handled":true}
+{"mode":"js","name":"before the parsed opening quote","source":"const x = \"字\";","head":10,"key":"\"","after":"const x = \"\"\"字\";","position":11,"handled":true}
+{"mode":"js","name":"before an untracked closing quote","source":"const x = \"字\";","head":14,"key":"\"","after":"const x = \"字\"\";","position":15,"handled":false}
+{"mode":"js","name":"immediately after the string","source":"const x = \"x\";","head":13,"key":"\"","after":"const x = \"x\"\";","position":14,"handled":false}
+{"mode":"js","name":"after a space outside the string","source":"const x = \"x\" ;","head":14,"key":"\"","after":"const x = \"x\" \"\";","position":15,"handled":true}
+{"mode":"js","name":"inside a template","source":"const x = `字  `;","head":15,"key":"`","after":"const x = `字 ` `;","position":16,"handled":false}
+{"mode":"js","name":"before the template opener","source":"const x = `字`;","head":10,"key":"`","after":"const x = ```字`;","position":11,"handled":true}
+{"mode":"js","name":"inside a template substitution","source":"const x = `中 ${  }`;","head":18,"key":"`","after":"const x = `中 ${ `` }`;","position":19,"handled":true}
+{"mode":"js","name":"inside a nested string","source":"const x = `x ${call('字  ')}`;","head":25,"key":"'","after":"const x = `x ${call('字 ' ')}`;","position":26,"handled":false}
+{"mode":"js","name":"inside a tagged multiline template","source":"tag`字\r\n😀 `;","head":13,"key":"`","after":"tag`字\r\n😀` `;","position":14,"handled":false}
+{"mode":"js","name":"after an escaped line break","source":"const x = \"\\\r\n字  \";","head":18,"key":"\"","after":"const x = \"\\\r\n字 \" \";","position":19,"handled":false}
+{"mode":"js","name":"after a quote in a comment","source":"// \" \r\nlet x;","head":5,"key":"\"","after":"// \" \"\"\r\nlet x;","position":6,"handled":true}
+{"mode":"js","name":"after slash in a regular expression","source":"const x = /\"  /;","head":13,"key":"\"","after":"const x = /\" \"\" /;","position":14,"handled":true}
+{"mode":"js","name":"unfinished quote","source":"const x = \"字 ;","head":15,"key":"\"","after":"const x = \"字 \";","position":16,"handled":false}
+{"mode":"ts","name":"type literal content","source":"type A = \"字  \";","head":14,"key":"\"","after":"type A = \"字 \" \";","position":15,"handled":false}
+{"mode":"ts","name":"first quote after the type","source":"type A = \"字\" ;","head":15,"key":"\"","after":"type A = \"字\" \"\";","position":16,"handled":true}
+{"mode":"ts","name":"template literal type","source":"type A = `get${Capitalize<\"字  \">}`;","head":31,"key":"\"","after":"type A = `get${Capitalize<\"字 \" \">}`;","position":32,"handled":false}
+{"mode":"jsx","name":"attribute quote content","source":"const el = <p title=\"字  \"/>;","head":25,"key":"\"","after":"const el = <p title=\"字 \" \"/>;","position":26,"handled":false}
+{"mode":"jsx","name":"before the attribute opener","source":"const el = <p title=\"字\"/>;","head":20,"key":"\"","after":"const el = <p title=\"\"\"字\"/>;","position":21,"handled":true}
+{"mode":"jsx","name":"after an untracked attribute closer","source":"const el = <p title=\"字\" />;","head":25,"key":"\"","after":"const el = <p title=\"字\"\" />;","position":26,"handled":false}
+{"mode":"jsx","name":"quote inside JSX text","source":"const el = <p>甲  乙</p>;","head":18,"key":"\"","after":"const el = <p>甲 \"\" 乙</p>;","position":19,"handled":true}
+{"mode":"jsx","name":"literal inside an attribute expression","source":"const el = <p title={\"甲  乙\"}/>;","head":26,"key":"\"","after":"const el = <p title={\"甲 \" 乙\"}/>;","position":27,"handled":false}
+{"mode":"tsx","name":"typed arrow function return literal","source":"const f = <T,>(x: T) => <p>{`字  `}</p>;","head":33,"key":"`","after":"const f = <T,>(x: T) => <p>{`字 ` `}</p>;","position":34,"handled":false}
+{"mode":"tsx","name":"before a nested attribute opener","source":"const x: JSX.Element = <p title=\"字\">😀</p>;","head":32,"key":"\"","after":"const x: JSX.Element = <p title=\"\"\"字\">😀</p>;","position":33,"handled":true}
+{"mode":"html","name":"script string interior","source":"<script>const x = \"😀  \";</script>","head":24,"key":"\"","after":"<script>const x = \"😀 \" \";</script>","position":25,"handled":false}
+{"mode":"html","name":"script string opener","source":"<script>const x = \"字\";</script>","head":18,"key":"\"","after":"<script>const x = \"\"\"字\";</script>","position":19,"handled":true}
+{"mode":"html","name":"script template with CRLF","source":"<script>const x = `字\r\n😀 `;</script>","head":28,"key":"`","after":"<script>const x = `字\r\n😀` `;</script>","position":29,"handled":false}
+{"mode":"html","name":"only selected script receives input","source":"<script>call(\"abc \");</script><script>call(\"中  \");</script>","head":48,"key":"\"","after":"<script>call(\"abc \");</script><script>call(\"中 \" \");</script>","position":49,"handled":false}
+{"mode":"html","name":"event attribute string interior","source":"<button onclick=\"call('😀  ')\">OK</button>","head":28,"key":"'","after":"<button onclick=\"call('😀 ' ')\">OK</button>","position":29,"handled":false}
+{"mode":"html","name":"event attribute string opener","source":"<button onclick=\"call('字')\">OK</button>","head":22,"key":"'","after":"<button onclick=\"call('''字')\">OK</button>","position":23,"handled":true}
+{"mode":"html","name":"ordinary attribute before string opener","source":"<p title=\"字\">ok</p>","head":9,"key":"\"","after":"<p title=\"\"\"字\">ok</p>","position":10,"handled":true}
+{"mode":"html","name":"ordinary attribute string interior","source":"<p title=\"😀  \">ok</p>","head":15,"key":"\"","after":"<p title=\"😀 \" \">ok</p>","position":16,"handled":false}
+{"mode":"html","name":"ordinary attribute untracked closer","source":"<p title=\"😀 \">ok</p>","head":15,"key":"\"","after":"<p title=\"😀 \"\">ok</p>","position":16,"handled":false}
+{"mode":"html","name":"ordinary attribute after a closed value","source":"<p title=\"字\"  >ok</p>","head":15,"key":"\"","after":"<p title=\"字\" \"\" >ok</p>","position":16,"handled":true}

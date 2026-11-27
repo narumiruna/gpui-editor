@@ -1,0 +1,1357 @@
+{
+  "metadata": {
+    "go": {
+      "exports": [
+        "go"
+      ],
+      "name": "go",
+      "mergeTokens": true,
+      "commentTokens": {
+        "line": "//",
+        "block": {
+          "open": "/*",
+          "close": "*/"
+        }
+      },
+      "indentOnInput": [
+        [
+          "",
+          false
+        ],
+        [
+          "}",
+          false
+        ],
+        [
+          " }",
+          true
+        ],
+        [
+          "\t{",
+          true
+        ],
+        [
+          "  }",
+          false
+        ],
+        [
+          "﻿}",
+          true
+        ],
+        [
+          "}",
+          false
+        ],
+        [
+          " }\n",
+          false
+        ],
+        [
+          " { ",
+          false
+        ],
+        [
+          " case ",
+          true
+        ],
+        [
+          "  case ",
+          false
+        ],
+        [
+          "default:",
+          false
+        ],
+        [
+          " default:",
+          true
+        ],
+        [
+          " default \t:",
+          true
+        ],
+        [
+          " default : ",
+          false
+        ]
+      ],
+      "dataName": null,
+      "dontIndentStates": null
+    },
+    "rust": {
+      "exports": [
+        "rust"
+      ],
+      "name": "rust",
+      "mergeTokens": true,
+      "commentTokens": {
+        "line": "//",
+        "block": {
+          "open": "/*",
+          "close": "*/"
+        }
+      },
+      "indentOnInput": [
+        [
+          "",
+          false
+        ],
+        [
+          "}",
+          true
+        ],
+        [
+          " }",
+          true
+        ],
+        [
+          "\t{",
+          false
+        ],
+        [
+          "  }",
+          true
+        ],
+        [
+          "﻿}",
+          true
+        ],
+        [
+          "}",
+          false
+        ],
+        [
+          " }\n",
+          false
+        ],
+        [
+          " { ",
+          false
+        ],
+        [
+          " case ",
+          false
+        ],
+        [
+          "  case ",
+          false
+        ],
+        [
+          "default:",
+          false
+        ],
+        [
+          " default:",
+          false
+        ],
+        [
+          " default \t:",
+          false
+        ],
+        [
+          " default : ",
+          false
+        ]
+      ],
+      "dataName": "rust",
+      "dontIndentStates": [
+        "comment"
+      ]
+    },
+    "jinja2": {
+      "exports": [
+        "jinja2"
+      ],
+      "name": "jinja2",
+      "mergeTokens": true,
+      "commentTokens": {
+        "block": {
+          "open": "{#",
+          "close": "#}",
+          "line": "##"
+        }
+      },
+      "indentOnInput": null,
+      "dataName": null,
+      "dontIndentStates": null
+    }
+  },
+  "cases": [
+    {
+      "mode": "go",
+      "title": "types, builtins, punctuation, and number prefixes",
+      "unit": 3,
+      "tabSize": 8,
+      "source": "package main\r\nfunc café(v any, w comparable) error {\r\n\tvar $x rune = 'é'; y := .2e+3 + 1. + 2.e-7 + 0Xdead + 007 + 077 + 0.5\r\n\tcopy(make([]byte, 1), append(nil, byte(0))) // builtin tokens\r\n\treturn x.y / 3_2 &^= len(x) % 2; @hello\r\n}",
+      "indents": [
+        0,
+        0,
+        3,
+        3,
+        3,
+        0
+      ],
+      "tokens": [
+        [
+          [0, 7, "keyword"],
+          [7, 8, null],
+          [8, 12, "variable"]
+        ],
+        [
+          [14, 18, "keyword"],
+          [18, 19, null],
+          [19, 24, "variable"],
+          [24, 25, null],
+          [25, 26, "variable"],
+          [26, 27, null],
+          [27, 30, "keyword"],
+          [30, 31, null],
+          [31, 32, null],
+          [32, 33, "variable"],
+          [33, 34, null],
+          [34, 44, "keyword"],
+          [44, 45, null],
+          [45, 46, null],
+          [46, 51, "keyword"],
+          [51, 52, null],
+          [52, 53, null]
+        ],
+        [
+          [55, 56, null],
+          [56, 59, "keyword"],
+          [59, 60, null],
+          [60, 62, "variable"],
+          [62, 63, null],
+          [63, 67, "keyword"],
+          [67, 68, null],
+          [68, 69, "operator"],
+          [69, 70, null],
+          [70, 74, "string"],
+          [74, 75, null],
+          [75, 76, null],
+          [76, 77, "variable"],
+          [77, 78, null],
+          [78, 79, null],
+          [79, 80, "operator"],
+          [80, 81, null],
+          [81, 86, "number"],
+          [86, 87, null],
+          [87, 88, "operator"],
+          [88, 89, null],
+          [89, 91, "number"],
+          [91, 92, null],
+          [92, 93, "operator"],
+          [93, 94, null],
+          [94, 99, "number"],
+          [99, 100, null],
+          [100, 101, "operator"],
+          [101, 102, null],
+          [102, 108, "number"],
+          [108, 109, null],
+          [109, 110, "operator"],
+          [110, 111, null],
+          [111, 114, "number"],
+          [114, 115, null],
+          [115, 116, "operator"],
+          [116, 117, null],
+          [117, 118, "number"],
+          [118, 120, "number"],
+          [120, 121, null],
+          [121, 122, "operator"],
+          [122, 123, null],
+          [123, 124, "number"],
+          [124, 126, "number"]
+        ],
+        [
+          [128, 129, null],
+          [129, 133, "atom"],
+          [133, 134, null],
+          [134, 138, "atom"],
+          [138, 139, null],
+          [139, 140, null],
+          [140, 141, null],
+          [141, 145, "keyword"],
+          [145, 146, null],
+          [146, 147, null],
+          [147, 148, "number"],
+          [148, 149, null],
+          [149, 150, null],
+          [150, 151, null],
+          [151, 157, "atom"],
+          [157, 158, null],
+          [158, 161, "atom"],
+          [161, 162, null],
+          [162, 163, null],
+          [163, 167, "keyword"],
+          [167, 168, null],
+          [168, 169, "number"],
+          [169, 170, null],
+          [170, 171, null],
+          [171, 172, null],
+          [172, 173, null],
+          [173, 190, "comment"]
+        ],
+        [
+          [192, 193, null],
+          [193, 199, "keyword"],
+          [199, 200, null],
+          [200, 201, "variable"],
+          [201, 202, "number"],
+          [202, 203, "variable"],
+          [203, 204, null],
+          [204, 205, "operator"],
+          [205, 206, null],
+          [206, 207, "number"],
+          [207, 209, "variable"],
+          [209, 210, null],
+          [210, 213, "operator"],
+          [213, 214, null],
+          [214, 217, "atom"],
+          [217, 218, null],
+          [218, 219, "variable"],
+          [219, 220, null],
+          [220, 221, null],
+          [221, 222, "operator"],
+          [222, 223, null],
+          [223, 224, "number"],
+          [224, 225, null],
+          [225, 226, null],
+          [226, 232, "variable"]
+        ],
+        [
+          [234, 235, null]
+        ]
+      ]
+    },
+    {
+      "mode": "go",
+      "title": "aligned delimiters and case transitions",
+      "unit": 2,
+      "tabSize": 4,
+      "source": "switch f(x,\ny) {\n\tcase x:\n\t\tf(7,\n        8)\n\tdefault : /* note\n  still comment */\n\t{ x\n        y\n     }\n}\nswitch x { // comment does not align\ncase a: case b:\ndefault:\n}\nf(case\ndefault_name\n}\ncase\n}",
+      "indents": [
+        0,
+        9,
+        2,
+        2,
+        10,
+        2,
+        null,
+        2,
+        5,
+        4,
+        0,
+        0,
+        2,
+        0,
+        2,
+        0,
+        2,
+        1,
+        0,
+        0
+      ],
+      "tokens": [
+        [
+          [0, 6, "keyword"],
+          [6, 7, null],
+          [7, 8, "variable"],
+          [8, 9, null],
+          [9, 10, "variable"],
+          [10, 11, null]
+        ],
+        [
+          [12, 13, "variable"],
+          [13, 14, null],
+          [14, 15, null],
+          [15, 16, null]
+        ],
+        [
+          [17, 18, null],
+          [18, 22, "keyword"],
+          [22, 23, null],
+          [23, 24, "variable"],
+          [24, 25, null]
+        ],
+        [
+          [26, 28, null],
+          [28, 29, "variable"],
+          [29, 30, null],
+          [30, 31, "number"],
+          [31, 32, null]
+        ],
+        [
+          [33, 41, null],
+          [41, 42, "number"],
+          [42, 43, null]
+        ],
+        [
+          [44, 45, null],
+          [45, 52, "keyword"],
+          [52, 53, null],
+          [53, 54, null],
+          [54, 55, null],
+          [55, 62, "comment"]
+        ],
+        [
+          [63, 65, null],
+          [65, 81, "comment"]
+        ],
+        [
+          [82, 83, null],
+          [83, 84, null],
+          [84, 85, null],
+          [85, 86, "variable"]
+        ],
+        [
+          [87, 95, null],
+          [95, 96, "variable"]
+        ],
+        [
+          [97, 102, null],
+          [102, 103, null]
+        ],
+        [
+          [104, 105, null]
+        ],
+        [
+          [106, 112, "keyword"],
+          [112, 113, null],
+          [113, 114, "variable"],
+          [114, 115, null],
+          [115, 116, null],
+          [116, 117, null],
+          [117, 142, "comment"]
+        ],
+        [
+          [143, 147, "keyword"],
+          [147, 148, null],
+          [148, 149, "variable"],
+          [149, 150, null],
+          [150, 151, null],
+          [151, 155, "keyword"],
+          [155, 156, null],
+          [156, 157, "variable"],
+          [157, 158, null]
+        ],
+        [
+          [159, 166, "keyword"],
+          [166, 167, null]
+        ],
+        [
+          [168, 169, null]
+        ],
+        [
+          [170, 171, "variable"],
+          [171, 172, null],
+          [172, 176, "keyword"]
+        ],
+        [
+          [177, 189, "variable"]
+        ],
+        [
+          [190, 191, null]
+        ],
+        [
+          [192, 196, "keyword"]
+        ],
+        [
+          [197, 198, null]
+        ]
+      ]
+    },
+    {
+      "mode": "go",
+      "title": "multiline strings and comments",
+      "unit": 2,
+      "tabSize": 4,
+      "source": "var x = `raw\\` + `open 😺\n\n   raw text` + \"escaped \\\n  continued \\\"quote\"\n\"unterminated\nbuiltin := false\nvar y = 'x\\''/* comment\n\n   still *\n/ comment */ nil\n/* */true\n",
+      "indents": [
+        0,
+        null,
+        null,
+        null,
+        0,
+        0,
+        0,
+        null,
+        null,
+        null,
+        0,
+        0
+      ],
+      "tokens": [
+        [
+          [0, 3, "keyword"],
+          [3, 4, null],
+          [4, 5, "variable"],
+          [5, 6, null],
+          [6, 7, "operator"],
+          [7, 8, null],
+          [8, 14, "string"],
+          [14, 15, null],
+          [15, 16, "operator"],
+          [16, 17, null],
+          [17, 27, "string"]
+        ],
+        [],
+        [
+          [29, 32, null],
+          [32, 41, "string"],
+          [41, 42, null],
+          [42, 43, "operator"],
+          [43, 44, null],
+          [44, 54, "string"]
+        ],
+        [
+          [55, 57, null],
+          [57, 75, "string"]
+        ],
+        [
+          [76, 89, "string"]
+        ],
+        [
+          [90, 97, "variable"],
+          [97, 98, null],
+          [98, 99, null],
+          [99, 100, "operator"],
+          [100, 101, null],
+          [101, 106, "atom"]
+        ],
+        [
+          [107, 110, "keyword"],
+          [110, 111, null],
+          [111, 112, "variable"],
+          [112, 113, null],
+          [113, 114, "operator"],
+          [114, 115, null],
+          [115, 120, "string"],
+          [120, 130, "comment"]
+        ],
+        [],
+        [
+          [132, 135, null],
+          [135, 142, "comment"]
+        ],
+        [
+          [143, 155, "comment"],
+          [155, 156, null],
+          [156, 159, "atom"]
+        ],
+        [
+          [160, 165, "comment"],
+          [165, 169, "atom"]
+        ],
+        []
+      ]
+    },
+    {
+      "mode": "rust",
+      "title": "definitions, legacy words, macros, attributes and numbers",
+      "unit": 3,
+      "tabSize": 8,
+      "source": "#![derive(Debug)] #[meta] // greedy attribute\npub fn pick(x: Option<u8>) -> Self {\n\tlet\tmut answer = Some(0b10_1u8); let mutx = 4.2e-3f32;\n\tlet mut = 1_234usize; let abc = 0o_7i64 + 0xA_f + 2E+_1 + 1..3 + 2f64;\n\tprintln!(\"ok\"); async!() pure!(); false!(), Other!();\n\tstruct café; union U; type T; mod m; enum E; let x_1 = Err;\n} // done",
+      "indents": [
+        0,
+        0,
+        3,
+        3,
+        3,
+        3,
+        0
+      ],
+      "tokens": [
+        [
+          [0, 25, "meta"],
+          [25, 26, null],
+          [26, 45, "comment"]
+        ],
+        [
+          [46, 49, "keyword"],
+          [49, 50, null],
+          [50, 52, "keyword"],
+          [52, 53, null],
+          [53, 57, "def"],
+          [57, 58, null],
+          [58, 59, "variable"],
+          [59, 60, null],
+          [60, 61, null],
+          [61, 67, "atom"],
+          [67, 68, "operator"],
+          [68, 70, "atom"],
+          [70, 71, "operator"],
+          [71, 72, null],
+          [72, 73, null],
+          [73, 75, "operator"],
+          [75, 76, null],
+          [76, 80, "atom"],
+          [80, 81, null],
+          [81, 82, null]
+        ],
+        [
+          [83, 84, null],
+          [84, 91, "keyword"],
+          [91, 93, null],
+          [93, 99, "def"],
+          [99, 100, null],
+          [100, 101, "operator"],
+          [101, 102, null],
+          [102, 106, "builtin"],
+          [106, 107, null],
+          [107, 115, "number"],
+          [115, 116, null],
+          [116, 117, null],
+          [117, 118, null],
+          [118, 121, "keyword"],
+          [121, 122, null],
+          [122, 126, "def"],
+          [126, 127, null],
+          [127, 128, "operator"],
+          [128, 129, null],
+          [129, 138, "number"],
+          [138, 139, null]
+        ],
+        [
+          [140, 141, null],
+          [141, 144, "keyword"],
+          [144, 145, null],
+          [145, 148, "def"],
+          [148, 149, null],
+          [149, 150, "operator"],
+          [150, 151, null],
+          [151, 161, "number"],
+          [161, 162, null],
+          [162, 163, null],
+          [163, 166, "keyword"],
+          [166, 167, null],
+          [167, 170, "def"],
+          [170, 171, null],
+          [171, 172, "operator"],
+          [172, 173, null],
+          [173, 180, "number"],
+          [180, 181, null],
+          [181, 182, "operator"],
+          [182, 183, null],
+          [183, 188, "number"],
+          [188, 189, null],
+          [189, 190, "operator"],
+          [190, 191, null],
+          [191, 196, "number"],
+          [196, 197, null],
+          [197, 198, "operator"],
+          [198, 199, null],
+          [199, 200, "number"],
+          [200, 201, null],
+          [201, 202, null],
+          [202, 203, "number"],
+          [203, 204, null],
+          [204, 205, "operator"],
+          [205, 206, null],
+          [206, 207, "number"],
+          [207, 210, "atom"],
+          [210, 211, null]
+        ],
+        [
+          [212, 213, null],
+          [213, 221, "macroName"],
+          [221, 222, null],
+          [222, 223, "string"],
+          [223, 225, "string"],
+          [225, 226, "string"],
+          [226, 227, null],
+          [227, 228, null],
+          [228, 229, null],
+          [229, 234, "keyword"],
+          [234, 235, "operator"],
+          [235, 236, null],
+          [236, 237, null],
+          [237, 238, null],
+          [238, 242, "keyword"],
+          [242, 243, "operator"],
+          [243, 244, null],
+          [244, 245, null],
+          [245, 246, null],
+          [246, 247, null],
+          [247, 252, "builtin"],
+          [252, 253, "operator"],
+          [253, 254, null],
+          [254, 255, null],
+          [255, 256, null],
+          [256, 257, null],
+          [257, 263, "macroName"],
+          [263, 264, null],
+          [264, 265, null],
+          [265, 266, null]
+        ],
+        [
+          [267, 268, null],
+          [268, 274, "keyword"],
+          [274, 275, null],
+          [275, 278, "def"],
+          [278, 280, null],
+          [280, 281, null],
+          [281, 282, null],
+          [282, 287, "keyword"],
+          [287, 288, null],
+          [288, 289, "def"],
+          [289, 290, null],
+          [290, 291, null],
+          [291, 295, "keyword"],
+          [295, 296, null],
+          [296, 297, "def"],
+          [297, 298, null],
+          [298, 299, null],
+          [299, 302, "keyword"],
+          [302, 303, null],
+          [303, 304, "def"],
+          [304, 305, null],
+          [305, 306, null],
+          [306, 310, "keyword"],
+          [310, 311, null],
+          [311, 312, "def"],
+          [312, 313, null],
+          [313, 314, null],
+          [314, 317, "keyword"],
+          [317, 318, null],
+          [318, 321, "def"],
+          [321, 322, null],
+          [322, 323, "operator"],
+          [323, 324, null],
+          [324, 327, "builtin"],
+          [327, 328, null]
+        ],
+        [
+          [329, 330, null],
+          [330, 331, null],
+          [331, 338, "comment"]
+        ]
+      ]
+    },
+    {
+      "mode": "rust",
+      "title": "ordinary, raw, and byte literals",
+      "unit": 2,
+      "tabSize": 4,
+      "source": "let c = '\\n' '\\x41' '\\u{000041}' '\\u{41}' '\\\\' '\\\"' 'é' 'a;\r\nlet b = b'\\n' b'\\x41' b'\\' b'\\\\' b'\\u{000041}';\r\nlet s = b\"a\\\"b\\\\c\" \"split\r\nescaped\\\r\n    until close\" r\"raw 😺 \\\" br\"\"\r\nr###\"has \"quote and\r\nline \"#  br#\"closed too many\"####\r\n\"\" // empty",
+      "indents": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "tokens": [
+        [
+          [0, 3, "keyword"],
+          [3, 4, null],
+          [4, 5, "def"],
+          [5, 6, null],
+          [6, 7, "operator"],
+          [7, 8, null],
+          [8, 12, "string special"],
+          [12, 13, null],
+          [13, 19, "string special"],
+          [19, 20, null],
+          [20, 32, "string special"],
+          [32, 33, null],
+          [33, 34, null],
+          [34, 35, null],
+          [35, 36, "variable"],
+          [36, 37, null],
+          [37, 39, "number"],
+          [39, 40, null],
+          [40, 43, "string special"],
+          [43, 44, null],
+          [44, 45, null],
+          [45, 48, "string special"],
+          [48, 49, null],
+          [49, 50, "string"],
+          [50, 60, "string"]
+        ],
+        [
+          [62, 109, "string"]
+        ],
+        [
+          [111, 120, "string"],
+          [120, 121, "string"],
+          [121, 122, "variable"],
+          [122, 123, null],
+          [123, 124, "string"],
+          [124, 128, "string"],
+          [128, 129, "string"],
+          [129, 130, null],
+          [130, 131, "string"],
+          [131, 136, "string"]
+        ],
+        [
+          [138, 146, "string"]
+        ],
+        [
+          [148, 163, "string"],
+          [163, 164, "string"],
+          [164, 165, null],
+          [165, 167, "string"],
+          [167, 177, "string"],
+          [177, 178, "string"],
+          [178, 179, null],
+          [179, 182, "string"],
+          [182, 183, "string"]
+        ],
+        [
+          [185, 190, "string"],
+          [190, 204, "string"]
+        ],
+        [
+          [206, 211, "string"],
+          [211, 213, "string"],
+          [213, 214, null],
+          [214, 215, null],
+          [215, 219, "string"],
+          [219, 234, "string"],
+          [234, 239, "string"]
+        ],
+        [
+          [241, 242, "string"],
+          [242, 243, "string"],
+          [243, 244, null],
+          [244, 252, "comment"]
+        ]
+      ]
+    },
+    {
+      "mode": "rust",
+      "title": "indent stack and non-nesting block comments",
+      "unit": 2,
+      "tabSize": 4,
+      "source": "fn first() {\n  call([\n    /* block\n\n    /* nested-looking */ 7,\n  ])\n}\n/*/ still comment\n*/ ([ \n  }) extra\n)",
+      "indents": [
+        0,
+        2,
+        4,
+        null,
+        null,
+        2,
+        0,
+        0,
+        null,
+        0,
+        0
+      ],
+      "tokens": [
+        [
+          [0, 2, "keyword"],
+          [2, 3, null],
+          [3, 8, "def"],
+          [8, 9, null],
+          [9, 10, null],
+          [10, 11, null],
+          [11, 12, null]
+        ],
+        [
+          [13, 14, null],
+          [14, 15, null],
+          [15, 19, "variable"],
+          [19, 20, null],
+          [20, 21, null]
+        ],
+        [
+          [22, 23, null],
+          [23, 24, null],
+          [24, 25, null],
+          [25, 26, null],
+          [26, 28, "comment"],
+          [28, 34, "comment"]
+        ],
+        [],
+        [
+          [36, 60, "comment"],
+          [60, 61, null],
+          [61, 62, "number"],
+          [62, 63, null]
+        ],
+        [
+          [64, 65, null],
+          [65, 66, null],
+          [66, 67, null],
+          [67, 68, null]
+        ],
+        [
+          [69, 70, null]
+        ],
+        [
+          [71, 73, "comment"],
+          [73, 88, "comment"]
+        ],
+        [
+          [89, 91, "comment"],
+          [91, 92, null],
+          [92, 93, null],
+          [93, 94, null],
+          [94, 95, null]
+        ],
+        [
+          [96, 97, null],
+          [97, 98, null],
+          [98, 99, null],
+          [99, 100, null],
+          [100, 101, null],
+          [101, 106, "variable"]
+        ],
+        [
+          [107, 108, null]
+        ]
+      ]
+    },
+    {
+      "mode": "jinja2",
+      "title": "comments and tag boundaries in plain text",
+      "unit": 2,
+      "tabSize": 4,
+      "source": "<p>café {x #} {# first\n  second #}##}} tail ## line comment\n{%- if true -%}<em>{{- value|safe -}}</em>{% endif %}\n{%raw%}{{x}}{%endraw%}\nsingle #\n{# #}{{\"q\"}}",
+      "indents": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "tokens": [
+        [
+          [0, 1, null],
+          [1, 2, null],
+          [2, 3, null],
+          [3, 4, null],
+          [4, 5, null],
+          [5, 6, null],
+          [6, 8, null],
+          [8, 9, null],
+          [9, 11, null],
+          [11, 12, null],
+          [12, 13, "tag"],
+          [13, 14, "variable"],
+          [14, 15, "variable"],
+          [15, 16, "variable"],
+          [16, 17, "variable"],
+          [17, 18, "variable"],
+          [18, 19, "variable"],
+          [19, 20, "variable"],
+          [20, 21, "variable"],
+          [21, 22, "variable"],
+          [22, 23, "variable"]
+        ],
+        [
+          [24, 25, null],
+          [25, 26, null],
+          [26, 27, null],
+          [27, 28, null],
+          [28, 29, null],
+          [29, 30, null],
+          [30, 31, null],
+          [31, 32, null],
+          [32, 33, null],
+          [33, 34, "tag"],
+          [34, 35, "variable"],
+          [35, 36, "variable"],
+          [36, 37, "variable"],
+          [37, 38, "variable"],
+          [38, 39, "variable"],
+          [39, 40, "variable"],
+          [40, 41, "variable"],
+          [41, 42, "variable"],
+          [42, 43, "variable"],
+          [43, 44, "variable"],
+          [44, 45, "variable"],
+          [45, 46, "variable"],
+          [46, 47, "variable"],
+          [47, 48, "variable"],
+          [48, 49, "variable"],
+          [49, 50, "variable"],
+          [50, 51, "variable"],
+          [51, 52, "variable"],
+          [52, 53, "variable"],
+          [53, 54, "variable"],
+          [54, 55, "variable"],
+          [55, 56, "variable"],
+          [56, 57, "variable"],
+          [57, 58, "variable"],
+          [58, 59, "variable"],
+          [59, 60, "variable"]
+        ],
+        [
+          [61, 64, "tag"],
+          [64, 67, "keyword"],
+          [67, 72, "atom"],
+          [72, 73, "variable"],
+          [73, 76, "tag"],
+          [76, 77, null],
+          [77, 78, null],
+          [78, 79, null],
+          [79, 80, null],
+          [80, 83, "tag"],
+          [83, 84, "variable"],
+          [84, 85, "variable"],
+          [85, 86, "variable"],
+          [86, 87, "variable"],
+          [87, 88, "variable"],
+          [88, 89, "variable"],
+          [89, 90, "operator"],
+          [90, 91, "variable"],
+          [91, 92, "variable"],
+          [92, 93, "variable"],
+          [93, 94, "variable"],
+          [94, 95, "variable"],
+          [95, 98, "tag"],
+          [98, 99, null],
+          [99, 100, null],
+          [100, 101, null],
+          [101, 102, null],
+          [102, 103, null],
+          [103, 105, "tag"],
+          [105, 111, "keyword"],
+          [111, 112, "variable"],
+          [112, 114, "tag"]
+        ],
+        [
+          [115, 117, "tag"],
+          [117, 118, "variable"],
+          [118, 119, "variable"],
+          [119, 120, "variable"],
+          [120, 122, "tag"],
+          [122, 124, "tag"],
+          [124, 125, "variable"],
+          [125, 127, "tag"],
+          [127, 129, "tag"],
+          [129, 130, "variable"],
+          [130, 131, "variable"],
+          [131, 132, "variable"],
+          [132, 133, "variable"],
+          [133, 134, "variable"],
+          [134, 135, "variable"],
+          [135, 137, "tag"]
+        ],
+        [
+          [138, 139, null],
+          [139, 140, null],
+          [140, 141, null],
+          [141, 142, null],
+          [142, 143, null],
+          [143, 144, null],
+          [144, 145, null],
+          [145, 146, null]
+        ],
+        [
+          [147, 152, "comment"],
+          [152, 154, "tag"],
+          [154, 155, "string"],
+          [155, 156, "string"],
+          [156, 157, "string"],
+          [157, 159, "tag"]
+        ]
+      ]
+    },
+    {
+      "mode": "jinja2",
+      "title": "word boundaries, operators, literal positions, and strings",
+      "unit": 2,
+      "tabSize": 4,
+      "source": "{{ false true_ falseé 2/34.5 1. 42e1 }}\r\n{{x+true==-42+a:2?false+1_2+[false]({true})}}\r\n{{--3 --?x -true -:-2 - }}\r\n{% set item = \"a'b\" %}{{ 'a\"b' }}\r\n{{ \"no\\\"escape\"\r\nstill string\" }}",
+      "indents": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "tokens": [
+        [
+          [0, 2, "tag"],
+          [2, 8, "atom"],
+          [8, 9, "variable"],
+          [9, 10, "variable"],
+          [10, 11, "variable"],
+          [11, 12, "variable"],
+          [12, 13, "variable"],
+          [13, 14, "variable"],
+          [14, 20, "atom"],
+          [20, 22, "variable"],
+          [22, 29, "number"],
+          [29, 31, "number"],
+          [31, 32, "variable"],
+          [32, 35, "number"],
+          [35, 36, "variable"],
+          [36, 37, "variable"],
+          [37, 38, "variable"],
+          [38, 40, "tag"]
+        ],
+        [
+          [42, 44, "tag"],
+          [44, 45, "variable"],
+          [45, 46, "operator"],
+          [46, 50, "atom"],
+          [50, 51, "operator"],
+          [51, 52, "operator"],
+          [52, 54, "variable"],
+          [54, 55, "variable"],
+          [55, 56, "operator"],
+          [56, 57, "variable"],
+          [57, 58, "variable"],
+          [58, 59, "number"],
+          [59, 60, "operator"],
+          [60, 65, "atom"],
+          [65, 66, "operator"],
+          [66, 67, "number"],
+          [67, 68, "variable"],
+          [68, 69, "variable"],
+          [69, 70, "operator"],
+          [70, 71, "variable"],
+          [71, 72, "variable"],
+          [72, 73, "variable"],
+          [73, 74, "variable"],
+          [74, 75, "variable"],
+          [75, 76, "variable"],
+          [76, 77, "variable"],
+          [77, 78, "variable"],
+          [78, 79, "variable"],
+          [79, 83, "atom"],
+          [83, 84, "variable"],
+          [84, 85, "variable"],
+          [85, 87, "tag"]
+        ],
+        [
+          [89, 92, "tag"],
+          [92, 94, "variable"],
+          [94, 95, "variable"],
+          [95, 97, "operator"],
+          [97, 98, "operator"],
+          [98, 99, "variable"],
+          [99, 100, "variable"],
+          [100, 102, "variable"],
+          [102, 103, "variable"],
+          [103, 104, "variable"],
+          [104, 105, "variable"],
+          [105, 106, "variable"],
+          [106, 108, "variable"],
+          [108, 110, "variable"],
+          [110, 111, "variable"],
+          [111, 113, "variable"],
+          [113, 115, "tag"]
+        ],
+        [
+          [117, 119, "tag"],
+          [119, 123, "keyword"],
+          [123, 124, "variable"],
+          [124, 125, "variable"],
+          [125, 126, "variable"],
+          [126, 127, "variable"],
+          [127, 128, "variable"],
+          [128, 129, "variable"],
+          [129, 130, "operator"],
+          [130, 131, "variable"],
+          [131, 132, "string"],
+          [132, 133, "string"],
+          [133, 134, "string"],
+          [134, 135, "string"],
+          [135, 136, "string"],
+          [136, 137, "variable"],
+          [137, 139, "tag"],
+          [139, 141, "tag"],
+          [141, 142, "variable"],
+          [142, 143, "string"],
+          [143, 144, "string"],
+          [144, 145, "string"],
+          [145, 146, "string"],
+          [146, 147, "string"],
+          [147, 148, "variable"],
+          [148, 150, "tag"]
+        ],
+        [
+          [152, 154, "tag"],
+          [154, 155, "variable"],
+          [155, 156, "string"],
+          [156, 157, "string"],
+          [157, 158, "string"],
+          [158, 159, "string"],
+          [159, 160, "string"],
+          [160, 161, "variable"],
+          [161, 162, "variable"],
+          [162, 163, "variable"],
+          [163, 164, "variable"],
+          [164, 165, "variable"],
+          [165, 166, "variable"],
+          [166, 167, "string"]
+        ],
+        [
+          [169, 170, "string"],
+          [170, 171, "string"],
+          [171, 172, "string"],
+          [172, 173, "string"],
+          [173, 174, "string"],
+          [174, 175, "string"],
+          [175, 176, "string"],
+          [176, 177, "string"],
+          [177, 178, "string"],
+          [178, 179, "string"],
+          [179, 180, "string"],
+          [180, 181, "string"],
+          [181, 182, "string"],
+          [182, 183, "variable"],
+          [183, 185, "tag"]
+        ]
+      ]
+    },
+    {
+      "mode": "jinja2",
+      "title": "line tags, continuation delimiters, and flags across lines",
+      "unit": 2,
+      "tabSize": 4,
+      "source": "#for value in call(\n\ntrue,\n  [false, \"quoted\ntext\", true])\n<li>{{ value }}</li>\n# endfor\n#if x+\n{{true+false}}\ntext #set a = [\n  1, 2,\n] soup\n#\n## after",
+      "indents": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "tokens": [
+        [
+          [0, 1, "tag"],
+          [1, 4, "keyword"],
+          [4, 5, "variable"],
+          [5, 6, "variable"],
+          [6, 7, "variable"],
+          [7, 8, "variable"],
+          [8, 9, "variable"],
+          [9, 10, "variable"],
+          [10, 13, "keyword"],
+          [13, 18, "keyword"],
+          [18, 19, "variable"]
+        ],
+        [],
+        [
+          [21, 25, "atom"],
+          [25, 26, "variable"]
+        ],
+        [
+          [27, 28, "variable"],
+          [28, 29, "variable"],
+          [29, 30, "variable"],
+          [30, 31, "variable"],
+          [31, 32, "variable"],
+          [32, 33, "variable"],
+          [33, 34, "variable"],
+          [34, 35, "variable"],
+          [35, 36, "variable"],
+          [36, 37, "variable"],
+          [37, 38, "string"],
+          [38, 39, "string"],
+          [39, 40, "string"],
+          [40, 41, "string"],
+          [41, 42, "string"],
+          [42, 43, "string"],
+          [43, 44, "string"]
+        ],
+        [
+          [45, 46, "string"],
+          [46, 47, "string"],
+          [47, 48, "string"],
+          [48, 49, "string"],
+          [49, 50, "string"],
+          [50, 51, "variable"],
+          [51, 56, "atom"],
+          [56, 57, "variable"],
+          [57, 58, "variable"]
+        ],
+        [
+          [59, 60, null],
+          [60, 61, null],
+          [61, 62, null],
+          [62, 63, null],
+          [63, 65, "tag"],
+          [65, 66, "variable"],
+          [66, 67, "variable"],
+          [67, 68, "variable"],
+          [68, 69, "variable"],
+          [69, 70, "variable"],
+          [70, 71, "variable"],
+          [71, 72, "variable"],
+          [72, 74, "tag"],
+          [74, 75, null],
+          [75, 76, null],
+          [76, 77, null],
+          [77, 78, null],
+          [78, 79, null]
+        ],
+        [
+          [80, 81, "tag"],
+          [81, 88, "keyword"]
+        ],
+        [
+          [89, 90, "tag"],
+          [90, 92, "keyword"],
+          [92, 93, "variable"],
+          [93, 94, "variable"],
+          [94, 95, "operator"]
+        ],
+        [
+          [96, 98, "tag"],
+          [98, 102, "atom"],
+          [102, 103, "operator"],
+          [103, 108, "atom"],
+          [108, 110, "tag"]
+        ],
+        [
+          [111, 112, null],
+          [112, 113, null],
+          [113, 114, null],
+          [114, 115, null],
+          [115, 116, null],
+          [116, 117, "tag"],
+          [117, 118, "variable"],
+          [118, 119, "variable"],
+          [119, 120, "variable"],
+          [120, 121, "variable"],
+          [121, 122, "variable"],
+          [122, 123, "variable"],
+          [123, 124, "operator"],
+          [124, 125, "variable"],
+          [125, 126, "variable"]
+        ],
+        [
+          [127, 128, "variable"],
+          [128, 130, "number"],
+          [130, 131, "variable"],
+          [131, 133, "number"],
+          [133, 134, "variable"]
+        ],
+        [
+          [135, 136, "variable"],
+          [136, 137, "variable"],
+          [137, 138, "variable"],
+          [138, 139, "variable"],
+          [139, 140, "variable"],
+          [140, 141, "variable"]
+        ],
+        [
+          [142, 143, null]
+        ],
+        [
+          [144, 152, "comment"]
+        ]
+      ]
+    }
+  ]
+}

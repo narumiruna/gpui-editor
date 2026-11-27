@@ -1,0 +1,17 @@
+{"name":"new double quote pair and tracked skip","before":{"body":"Root { }","selection":[7,7],"hit":[[7,8],[5,6],true]},"after":[["\"",{"body":"Root { \"\"}","selection":[8,8],"hit":null}],["\"",{"body":"Root { \"\"}","selection":[9,9],"hit":[[9,10],[5,6],true]}]]}
+{"name":"new single quote pair and tracked skip","before":{"body":"Root {  }","selection":[7,7],"hit":null},"after":[["'",{"body":"Root { '' }","selection":[8,8],"hit":null}],["'",{"body":"Root { '' }","selection":[9,9],"hit":null}]]}
+{"name":"before existing double literal opener","before":{"body":"Root { \"😀)\" }","selection":[7,7],"hit":null},"after":[["\"",{"body":"Root { \"\"\"😀)\" }","selection":[8,8],"hit":null}]]}
+{"name":"before existing single literal opener","before":{"body":"Root { '字]' }","selection":[7,7],"hit":null},"after":[["'",{"body":"Root { '''字]' }","selection":[8,8],"hit":null}]]}
+{"name":"inside double literal","before":{"body":"Root { \"😀   }\" }","selection":[14,14],"hit":null},"after":[["\"",{"body":"Root { \"😀  \" }\" }","selection":[15,15],"hit":null}]]}
+{"name":"inside single literal","before":{"body":"Root { '😀   )' }","selection":[14,14],"hit":null},"after":[["'",{"body":"Root { '😀  ' )' }","selection":[15,15],"hit":null}]]}
+{"name":"different quote inside a literal","before":{"body":"Root { \"😀   }\" }","selection":[14,14],"hit":null},"after":[["'",{"body":"Root { \"😀  '' }\" }","selection":[15,15],"hit":null}]]}
+{"name":"untracked literal closer","before":{"body":"Root { \"😀\" }","selection":[12,12],"hit":null},"after":[["\"",{"body":"Root { \"😀\"\" }","selection":[13,13],"hit":null}]]}
+{"name":"after complete literal","before":{"body":"Root { \"字\" }","selection":[12,12],"hit":null},"after":[["\"",{"body":"Root { \"字\"\" }","selection":[13,13],"hit":null}]]}
+{"name":"at end of unterminated literal","before":{"body":"Root { \"abc ","selection":[12,12],"hit":null},"after":[["\"",{"body":"Root { \"abc \"","selection":[13,13],"hit":null}]]}
+{"name":"escaped delimiter in literal","before":{"body":"Root { \"abc \\\"  }\" }","selection":[15,15],"hit":null},"after":[["\"",{"body":"Root { \"abc \\\" \" }\" }","selection":[16,16],"hit":null}]]}
+{"name":"line comment has no string context","before":{"body":"Root { // \n }","selection":[10,10],"hit":null},"after":[["\"",{"body":"Root { // \"\"\n }","selection":[11,11],"hit":null}]]}
+{"name":"block comment has no string context","before":{"body":"Root { /*  */ }","selection":[10,10],"hit":null},"after":[["'",{"body":"Root { /* '' */ }","selection":[11,11],"hit":null}]]}
+{"name":"charset has no string context","before":{"body":"Root { $[  ] }","selection":[10,10],"hit":null},"after":[["\"",{"body":"Root { $[ \"\" ] }","selection":[11,11],"hit":null}]]}
+{"name":"word next to quote uses ordinary insertion","before":{"body":"Root { name }","selection":[7,7],"hit":null},"after":[["\"",{"body":"Root { \"name }","selection":[8,8],"hit":null}]]}
+{"name":"reverse selection stays selected with UTF-8 offsets","before":{"body":"Root { \"字😀\" }","selection":[15,8],"hit":null},"after":[["'",{"body":"Root { \"'字😀'\" }","selection":[16,9],"hit":null}]]}
+{"name":"fence body end","before":{"body":"Root { } ","selection":[9,9],"hit":null},"after":[["\"",{"body":"Root { } \"\"","selection":[10,10],"hit":null}]]}

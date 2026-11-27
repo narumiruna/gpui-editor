@@ -1,0 +1,18 @@
+{"kind":"input","name":"configured before allows a comma","source":",","heads":[0],"main":0,"input":"(","before":",","words":[],"result":"(),","selection":[1]}
+{"kind":"input","name":"configured before replaces defaults","source":"]","heads":[0],"main":0,"input":"(","before":",","words":[],"result":null,"selection":null}
+{"kind":"input","name":"an empty before uses the default","source":"]","heads":[0],"main":0,"input":"(","before":"","words":[],"result":"()]","selection":[1]}
+{"kind":"input","name":"whitespace does not need to be listed","source":"﻿","heads":[0],"main":0,"input":"(","before":",","words":[],"result":"()﻿","selection":[1]}
+{"kind":"input","name":"word at the previous unit","source":"$ ","heads":[1],"main":0,"input":"\"","words":[[1,"$"]],"result":null,"selection":null}
+{"kind":"input","name":"word at the next character","source":" $","heads":[1],"main":0,"input":"\"","words":[[1,"$"]],"result":null,"selection":null}
+{"kind":"input","name":"prefix uses the caret word rule","source":"$r ","heads":[2],"main":0,"input":"\"","prefixes":["r"],"words":[[2,"$"]],"result":null,"selection":null}
+{"kind":"input","name":"a word rule at the prefix start is not used","source":"$r ","heads":[2],"main":0,"input":"\"","prefixes":["r"],"words":[[1,"$"]],"result":"$r\"\" ","selection":[3]}
+{"kind":"input","name":"space is not a word","source":"  ","heads":[1],"main":0,"input":"\"","words":[[1," "]],"result":" \"\" ","selection":[2]}
+{"kind":"input","name":"second caret can veto an automatic pair","source":"\r\n$ ","heads":[0,3],"main":0,"input":"\"","words":[[3,"$"]],"result":null,"selection":null}
+{"kind":"input","name":"word rule does not follow the main caret","source":"\r\n$ ","heads":[0,3],"main":1,"input":"\"","words":[[0,"$"]],"result":"\"\"\r\n$\"\" ","selection":[1,6]}
+{"kind":"input","name":"low surrogate identifies the previous unit","source":"😀 ","heads":[4],"main":0,"input":"\"","words":[[4,"🨀"]],"result":null,"selection":null}
+{"kind":"input","name":"a distinct low surrogate does not block","source":"😀 ","heads":[4],"main":0,"input":"\"","words":[[4,"😁"]],"result":"😀\"\" ","selection":[5]}
+{"kind":"input","name":"high surrogate can match part of the next character","source":" 😀","heads":[1],"main":0,"input":"\"","words":[[1,"😁"]],"result":null,"selection":null}
+{"kind":"track","name":"lone CR separates logical lines","source":" 😀\rj","keep":false}
+{"kind":"track","name":"CRLF separates logical lines","source":" 😀\r\nj","keep":false}
+{"kind":"track","name":"explicit LF keeps a lone CR within one line","source":" 😀\rj","separator":"\n","keep":true}
+{"kind":"track","name":"no separator between the carets","source":" 😀 j","keep":true}

@@ -1,0 +1,11 @@
+{"name":"before space in a pair","source":"( )","head":1,"after":"(\r\n  \r\n)","position":5}
+{"name":"after space in a pair","source":"( )","head":2,"after":"(\r\n  \r\n)","position":5}
+{"name":"empty pair","source":"()","head":1,"after":"(\r\n  \r\n)","position":5}
+{"name":"spaces and a tab","source":"( \t  )","head":3,"after":"(\r\n  \r\n)","position":5}
+{"name":"nested pair","source":"(func ( ))","head":7,"after":"(func (\r\n  \r\n))","position":11}
+{"name":"nested pair with a CRLF prefix","source":"(module\r\n  (func (  )))","head":18,"after":"(module\r\n  (func (\r\n    \r\n  )))","position":24}
+{"name":"token to the right","source":"(local i32)","head":7,"after":"(local \r\n  i32)","position":11}
+{"name":"token to the left","source":"(local i32 )","head":10,"after":"(local i32\r\n)","position":12}
+{"name":"block comment delimiters","source":"(; note  ;)","head":8,"after":"(; note \r\n;)","position":10}
+{"name":"delimiters on separate lines","source":"(\r\n)","head":1,"after":"(\r\n  \r\n)","position":5}
+{"name":"comment between the delimiters","source":"( (; comment ;) )","head":2,"after":"( \r\n  (; comment ;) )","position":6}

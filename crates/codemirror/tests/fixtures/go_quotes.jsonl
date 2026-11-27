@@ -1,0 +1,16 @@
+{"name":"inside interpreted string","source":"package p\nvar s = \"😀 \"","head":23,"key":"\"","after":"package p\nvar s = \"😀\" \"","position":24,"handled":false}
+{"name":"inside raw string","source":"package p\nvar s = `x  `","head":21,"key":"`","after":"package p\nvar s = `x ` `","position":22,"handled":false}
+{"name":"other quote inside raw string","source":"package p\nvar s = `x  `","head":21,"key":"\"","after":"package p\nvar s = `x \"\" `","position":22,"handled":true}
+{"name":"other quote inside interpreted string","source":"package p\nvar s = \"x  \"","head":21,"key":"`","after":"package p\nvar s = \"x `` \"","position":22,"handled":true}
+{"name":"inside rune","source":"package p\nvar c = ' '","head":19,"key":"'","after":"package p\nvar c = '' '","position":20,"handled":false}
+{"name":"after escape","source":"package p\nvar s = \"\\\" \"","head":21,"key":"\"","after":"package p\nvar s = \"\\\"\" \"","position":22,"handled":false}
+{"name":"multiline raw string and CRLF","source":"package p\r\nvar s = `甲\r\n😀 `","head":29,"key":"`","after":"package p\r\nvar s = `甲\r\n😀` `","position":30,"handled":false}
+{"name":"before parsed string opener","source":"package p\nvar s = \"字\"","head":18,"key":"\"","after":"package p\nvar s = \"\"\"字\"","position":19,"handled":true}
+{"name":"before parsed raw opener","source":"package p\nvar s = `字`","head":18,"key":"`","after":"package p\nvar s = ```字`","position":19,"handled":true}
+{"name":"before untracked closer","source":"package p\nvar s = \"x\"","head":20,"key":"\"","after":"package p\nvar s = \"x\"\"","position":21,"handled":false}
+{"name":"before untracked raw closer","source":"package p\nvar s = `x`","head":20,"key":"`","after":"package p\nvar s = `x``","position":21,"handled":false}
+{"name":"after a complete literal","source":"package p\nvar s = \"x\";","head":21,"key":"\"","after":"package p\nvar s = \"x\"\";","position":22,"handled":false}
+{"name":"after space outside literal","source":"package p\nvar s = \"x\" ;","head":22,"key":"\"","after":"package p\nvar s = \"x\" \"\";","position":23,"handled":true}
+{"name":"comment with a quote","source":"package p\r\n// \" ","head":16,"key":"\"","after":"package p\r\n// \" \"\"","position":17,"handled":true}
+{"name":"unfinished string","source":"package p\nvar s = \"abc ;","head":23,"key":"\"","after":"package p\nvar s = \"abc \";","position":24,"handled":false}
+{"name":"unfinished raw string","source":"package p\nvar s = `abc ;","head":23,"key":"`","after":"package p\nvar s = `abc ``;","position":24,"handled":true}

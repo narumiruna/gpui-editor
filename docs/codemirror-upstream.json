@@ -1,0 +1,586 @@
+{
+  "inventory": "https://code.haverbeke.berlin/codemirror/dev/src/commit/fcab058c5b4713a6d3965278589d8ec9960bca70/bin/packages.js",
+  "runtimeDependencies": [
+    {
+      "name": "@marijn/find-cluster-break",
+      "version": "1.0.4",
+      "tarball": "https://registry.npmjs.org/@marijn/find-cluster-break/-/find-cluster-break-1.0.4.tgz",
+      "integrity": "sha512-Wy0V7+SGUjnF9/TkiM1hKVDPj7jKXduPNboMVtHTA8dySMURWqfg/JZ9E2Sq8JgSJmkl7k7Qe9FLeMSrSraWmQ==",
+      "license": "MIT"
+    },
+    {
+      "name": "crelt",
+      "version": "1.0.7",
+      "tarball": "https://registry.npmjs.org/crelt/-/crelt-1.0.7.tgz",
+      "integrity": "sha512-aK6BbWfhf4U/wCcLHKPJl/xa6VkVstRaPywWtMKGwuOLc/wZTyQYuoxgvZnNsBvv7Kg3YTBQYYBCggcviQczuA==",
+      "license": "MIT"
+    },
+    {
+      "name": "marked",
+      "version": "15.0.12",
+      "tarball": "https://registry.npmjs.org/marked/-/marked-15.0.12.tgz",
+      "integrity": "sha512-8dD6FusOQSrpv9Z1rdNMdlSgQOIP880DHqnohobOmYLElGEqAL/JvxvuxZO16r4HtjTlfPRDC1hbvxC9dPN2nA==",
+      "license": "MIT"
+    },
+    {
+      "name": "style-mod",
+      "version": "4.1.5",
+      "tarball": "https://registry.npmjs.org/style-mod/-/style-mod-4.1.5.tgz",
+      "integrity": "sha512-WQ2llCZa9sZSkJA+aOwpg5DkfbAXFKGh//t3MRTBeruFiSBC+GXUmbBzrw3bXyboCWAbtCW9InDfBsXrRD/rAg==",
+      "license": "MIT"
+    },
+    {
+      "name": "vscode-jsonrpc",
+      "version": "10.0.1",
+      "tarball": "https://registry.npmjs.org/vscode-jsonrpc/-/vscode-jsonrpc-10.0.1.tgz",
+      "integrity": "sha512-fGdu32Sp4GeSQ2twML46WPMB6cFfIJ4Vdx1K5s/WPzUYdShVPCGKscYltn5hiNz748xKNJdBHgocAvuN48tLGw==",
+      "license": "MIT"
+    },
+    {
+      "name": "vscode-languageserver-protocol",
+      "version": "3.18.6",
+      "tarball": "https://registry.npmjs.org/vscode-languageserver-protocol/-/vscode-languageserver-protocol-3.18.6.tgz",
+      "integrity": "sha512-Ocoa4g/vyB66ZFkIKApV8/FTjQ+EYeOVDkq/nzw9SmfX+L6Ikl5KtL5AjmSAQ7nhqfud1ojiVuy+drHdvAlgUg==",
+      "license": "MIT"
+    },
+    {
+      "name": "vscode-languageserver-types",
+      "version": "3.18.6",
+      "tarball": "https://registry.npmjs.org/vscode-languageserver-types/-/vscode-languageserver-types-3.18.6.tgz",
+      "integrity": "sha512-DEDtik4YupS+nOg4JxqJ2H5ec/m4tTD9a5mGcBVGYkQKZQo1AIF3ZToiP8+A0kUzyhyqX5dMnPDEnhtmzts7GA==",
+      "license": "MIT"
+    },
+    {
+      "name": "w3c-keyname",
+      "version": "2.2.8",
+      "tarball": "https://registry.npmjs.org/w3c-keyname/-/w3c-keyname-2.2.8.tgz",
+      "integrity": "sha512-dpojBhNsCNN7T82Tm7k26A6G9ML3NkhDsnw9n/eoxSRlVBB4CEtIQ/KTCLI2Fwf3ataSXRhYFkQi3SlnFwPvPQ==",
+      "license": "MIT"
+    }
+  ],
+  "referenceDependencies": [
+    {
+      "name": "@lezer/json",
+      "version": "1.0.3",
+      "tarball": "https://registry.npmjs.org/@lezer/json/-/json-1.0.3.tgz",
+      "integrity": "sha512-BP9KzdF9Y35PDpv04r0VeSTKDeox5vVr3efE7eBbx3r4s3oNLfunchejZhjArmeieBH+nVOpgIiBJpEAv8ilqQ==",
+      "license": "MIT",
+      "commit": "a48f95d0d403b8b13f14d466216bf017dacd7a34"
+    },
+    {
+      "name": "@lezer/xml",
+      "version": "1.0.6",
+      "tarball": "https://registry.npmjs.org/@lezer/xml/-/xml-1.0.6.tgz",
+      "integrity": "sha512-CdDwirL0OEaStFue/66ZmFSeppuL6Dwjlk8qk153mSQwiSH/Dlri4GNymrNWnUmPl2Um7QfV1FO9KFUyX3Twww==",
+      "license": "MIT",
+      "commit": "99f043a01c6a034573cafd47f9cf3338744fea5e"
+    },
+    {
+      "name": "@lezer/yaml",
+      "version": "1.0.4",
+      "tarball": "https://registry.npmjs.org/@lezer/yaml/-/yaml-1.0.4.tgz",
+      "integrity": "sha512-2lrrHqxalACEbxIbsjhqGpSW8kWpUKuY6RHgnSAFZa6qK62wvnPxA8hGOwOoDbwHcOFs5M4o27mjGu+P7TvBmw==",
+      "license": "MIT",
+      "commit": "07f32307efb7d4968b9e560d32bb110a1c7fccfd"
+    },
+    {
+      "name": "@lezer/lr",
+      "version": "1.4.13",
+      "tarball": "https://registry.npmjs.org/@lezer/lr/-/lr-1.4.13.tgz",
+      "integrity": "sha512-Ez6qF9rXdnR/7hTcA6kHq1uTcPV+17hyUFjiHBVYNi0a81TgbkC0SwiNvxcuUMkvX7phuhTHo+QAXh9L2kjGdg==",
+      "license": "MIT",
+      "commit": "df257eb65972a2eefef4c938108c6a0a5363eef5"
+    },
+    {
+      "name": "@lezer/common",
+      "version": "1.5.7",
+      "tarball": "https://registry.npmjs.org/@lezer/common/-/common-1.5.7.tgz",
+      "integrity": "sha512-3+3PN+M/3xSjrlQz8/wBPOl+JYGJ+G37ZszHfnhphFwj41qPUPxsz4WEic3ZyVpL23rX1qefaGqz0lA7jGUqwg==",
+      "license": "MIT",
+      "commit": "885cff0d1b1623eb4c684ae2dda0e14624cb4543"
+    },
+    {
+      "name": "@lezer/generator",
+      "version": "1.8.1",
+      "tarball": "https://registry.npmjs.org/@lezer/generator/-/generator-1.8.1.tgz",
+      "integrity": "sha512-7q7szXqT7EPTs6SODBl58Qoz/4OrhNvm5pW4lbu1ZDnG5e0nn7drLzeN9Nxkm8j/1iMs5QZ9j3i4SV+W4Z6SQA==",
+      "license": "MIT",
+      "commit": "fb36fac862d045f012c45b0162c8cd826e5529c0"
+    },
+    {
+      "name": "@lezer/highlight",
+      "version": "1.2.5",
+      "tarball": "https://registry.npmjs.org/@lezer/highlight/-/highlight-1.2.5.tgz",
+      "integrity": "sha512-O1GMVKgtf5YspFaRzpmqkVgMtIk2HG9uMAbH6wdAIdNh3TVzCsch/+cRi+6l2//UGDKe6NB9BW3cvuR5ezMQ0w==",
+      "license": "MIT",
+      "commit": "411321ba47cffc8845e79e1a3c773e0bcaf8b5b5"
+    },
+    {
+      "name": "@lezer/lezer",
+      "version": "1.1.3",
+      "tarball": "https://registry.npmjs.org/@lezer/lezer/-/lezer-1.1.3.tgz",
+      "integrity": "sha512-S3zy0KjFMU42c7StIfIH6ROWAMYNMf83ifX1hMcrXXSZvWcRdyBWTLUPFvN5afcz/CJzQJbdLNwbqMBMxyUYyg==",
+      "license": "MIT",
+      "commit": "bd0f0b1b20eaebb680119865400a4b7f5c56602e"
+    },
+    {
+      "name": "@lezer/css",
+      "version": "1.3.9",
+      "tarball": "https://registry.npmjs.org/@lezer/css/-/css-1.3.9.tgz",
+      "integrity": "sha512-ZmzgvTOBdJWGIsY/ItAfN7UW8DV802oZG+jeG6E508SwEzz5YhuAajptpWPICvIyqYAD2+VjMdOS40GgGkyEOQ==",
+      "license": "MIT",
+      "commit": "78087d942b033f4e5979ca12dfbea76ea2b881a5"
+    },
+    {
+      "name": "@lezer/rust",
+      "version": "1.0.3",
+      "tarball": "https://registry.npmjs.org/@lezer/rust/-/rust-1.0.3.tgz",
+      "integrity": "sha512-XxErOjZzQ7yJt1agUT4fu9qQvESZ3acgoxpPaPTPOiUx+duCjaVAtZGFIgphkHxlN05djdVAIOy/wItShMEjqQ==",
+      "license": "MIT",
+      "commit": "7ed8aa59756e9e4e159988830bac03878a77dca9"
+    },
+    {
+      "name": "@lezer/go",
+      "version": "1.0.1",
+      "tarball": "https://registry.npmjs.org/@lezer/go/-/go-1.0.1.tgz",
+      "integrity": "sha512-xToRsYxwsgJNHTgNdStpcvmbVuKxTapV0dM0wey1geMMRc9aggoVyKgzYp41D2/vVOx+Ii4hmE206kvxIXBVXQ==",
+      "license": "MIT",
+      "commit": "a419e05c2a992ffbb53411904ee02dde3e728b37"
+    },
+    {
+      "name": "@lezer/html",
+      "version": "1.3.13",
+      "tarball": "https://registry.npmjs.org/@lezer/html/-/html-1.3.13.tgz",
+      "integrity": "sha512-oI7n6NJml729m7pjm9lvLvmXbdoMoi2f+1pwSDJkl9d68zGr7a9Btz8NdHTGQZtW2DA25ybeuv/SyDb9D5tseg==",
+      "license": "MIT",
+      "commit": "36d7e20ef97982ed97e27ab63151326b8ed2ba53"
+    },
+    {
+      "name": "@lezer/markdown",
+      "version": "1.8.2",
+      "tarball": "https://registry.npmjs.org/@lezer/markdown/-/markdown-1.8.2.tgz",
+      "integrity": "sha512-q0kGuKOFrKEMi8d3ExryIOAT5XwjW86x1JO5scQB7gcXr8LobgXP3l6Gq6ArpXUQLeDju9cwRHF2Axjk6VMhLQ==",
+      "license": "MIT",
+      "commit": "8d0600bd5aaf3b16c54399c0c19aa833079a9534"
+    },
+    {
+      "name": "@lezer/javascript",
+      "version": "1.5.7",
+      "tarball": "https://registry.npmjs.org/@lezer/javascript/-/javascript-1.5.7.tgz",
+      "integrity": "sha512-o3Rn+TzKuN25sdILOZFXi8hz4K/ed4OK0I+QrAi7Zzn3tXRBZmfsQrZpLX47ZYK/rZU8Vu4jLkz4SOSYRzBfjw==",
+      "license": "MIT",
+      "commit": "779f6a9fbb302df49457a0e8c58bc7ff14b7ee14"
+    },
+    {
+      "name": "@lezer/python",
+      "version": "1.1.20",
+      "tarball": "https://registry.npmjs.org/@lezer/python/-/python-1.1.20.tgz",
+      "integrity": "sha512-pHg8ViehmXZJZnqztg/Qo/4NaSF5/a9IW2tWJctbZYD/CPGK06TNP3iRyyxDGA+qpAeIS9Mc1Zqk4PIBjWrSug==",
+      "license": "MIT",
+      "commit": "411ed29248c897877cec6f81e262057ff869db1d"
+    },
+    {
+      "name": "@lezer/java",
+      "version": "1.2.1",
+      "tarball": "https://registry.npmjs.org/@lezer/java/-/java-1.2.1.tgz",
+      "integrity": "sha512-1ZswxJHE5h47FDpbcT1e0kfg87oDuYghTBICompiZXlFXjP95KhZ8WrMwdJZhpgGhKWM4oFwnxUgFysaC0mBag==",
+      "license": "MIT",
+      "commit": "76c6ff8ca0a565be9fbe813b07ea1407d3f4c1f0"
+    },
+    {
+      "name": "@lezer/cpp",
+      "version": "1.1.6",
+      "tarball": "https://registry.npmjs.org/@lezer/cpp/-/cpp-1.1.6.tgz",
+      "integrity": "sha512-vh9gWWJOXFVY8HBHK3Twzq8MgwG2iN4GSyzBP9sCGTe37P15x2R14VaBQk0VA0ezTRN1KHYBBsHhvpGZ2Xy/pA==",
+      "license": "MIT",
+      "commit": "c6585ded0c374a238e5deb822df848ee145548f6"
+    },
+    {
+      "name": "@lezer/php",
+      "version": "1.0.6",
+      "tarball": "https://registry.npmjs.org/@lezer/php/-/php-1.0.6.tgz",
+      "integrity": "sha512-QJ2xNXPmsm/Z3IpThq8fnJrEIVpxhsIoj6GZBW0JYEd/l9zxpJZW216X4fzqQY4vgpdGIumypvI4uQjd4tnYtw==",
+      "license": "MIT",
+      "commit": "5222344cf05e15c86d5bd480e2d523e611a30be5"
+    },
+    {
+      "name": "@lezer/sass",
+      "version": "1.1.0",
+      "tarball": "https://registry.npmjs.org/@lezer/sass/-/sass-1.1.0.tgz",
+      "integrity": "sha512-3mMGdCTUZ/84ArHOuXWQr37pnf7f+Nw9ycPUeKX+wu19b7pSMcZGLbaXwvD2APMBDOGxPmpK/O6S1v1EvLoqgQ==",
+      "license": "MIT",
+      "commit": "40ea285acf39d2db4b29c0ddff9f0e7bdeceb471"
+    }
+  ],
+  "packages": [
+    {
+      "name": "@codemirror/state",
+      "group": "core",
+      "version": "6.7.6",
+      "tarball": "https://registry.npmjs.org/@codemirror/state/-/state-6.7.6.tgz",
+      "integrity": "sha512-kAz+AncRtKuIknedxT1bq4XwXv4UowhbkHU1myPrtVb/jZtImWuV5BXzv5vK6i3kYACsdiZiQKFQQ5Mq7elW8w==",
+      "license": "MIT",
+      "repository": "git+https://code.haverbeke.berlin/codemirror/state.git",
+      "commit": "651084c8a322b3a19b2bb3e00eee7d4a61d641af"
+    },
+    {
+      "name": "@codemirror/view",
+      "group": "core",
+      "version": "6.44.0",
+      "tarball": "https://registry.npmjs.org/@codemirror/view/-/view-6.44.0.tgz",
+      "integrity": "sha512-kAUekx35l9u64jW/NzdO054l80lz+ri+Z5ZFS+dMpMrCbG5pFiTz58twWcWghzBEInWno0SPaURNSCnHHvipnQ==",
+      "license": "MIT",
+      "repository": "git+https://code.haverbeke.berlin/codemirror/view.git",
+      "commit": "83a9e9e8ad2827fde3f12b4fb2ccec6630404742"
+    },
+    {
+      "name": "@codemirror/language",
+      "group": "core",
+      "version": "6.13.1",
+      "tarball": "https://registry.npmjs.org/@codemirror/language/-/language-6.13.1.tgz",
+      "integrity": "sha512-zfvU2r3TyylQLMj/te+5CnQ0rSqZi8B1oTCBbQkagcLW4Xc6imab6qN+pEJhsuNOLaJqiRyBXp9UhWA1DhVvDw==",
+      "license": "MIT",
+      "repository": "git+https://code.haverbeke.berlin/codemirror/language.git",
+      "commit": "21a38068286652eceb17d8e02da88cbed52f8263"
+    },
+    {
+      "name": "@codemirror/streamparser",
+      "group": "core",
+      "version": "6.0.0",
+      "tarball": "https://registry.npmjs.org/@codemirror/streamparser/-/streamparser-6.0.0.tgz",
+      "integrity": "sha512-JTFPF6xrfjt0mnfGPgzcLiMwYmvIyNaoizp8BYzv8FE8KrT6GBGDZ190rtt+O7Wke3gG/MFHyiY9YGNeimof4w==",
+      "license": "MIT",
+      "repository": "git+https://code.haverbeke.berlin/codemirror/streamparser.git",
+      "commit": "e8750deb555c08c6b9cea9956daf748c23e3da92"
+    },
+    {
+      "name": "@codemirror/commands",
+      "group": "core",
+      "version": "6.11.2",
+      "tarball": "https://registry.npmjs.org/@codemirror/commands/-/commands-6.11.2.tgz",
+      "integrity": "sha512-NbH6Q9lmcXvf9s5/mMJIwL2Hjl2NEdsN/dDlezGnaFOQgNZ59dT7ndKUf21/PIjJacD/Ti2Ifi4TsBkO6WHvsg==",
+      "license": "MIT",
+      "repository": "git+https://code.haverbeke.berlin/codemirror/commands.git",
+      "commit": "2d2511920a7201ba65e3a9d86e5bd941aef8dc25"
+    },
+    {
+      "name": "@codemirror/search",
+      "group": "core",
+      "version": "6.7.3",
+      "tarball": "https://registry.npmjs.org/@codemirror/search/-/search-6.7.3.tgz",
+      "integrity": "sha512-pD3bONMUhzkg4+cTpk3mkh3UAveJbZ5fhqPlRhYsP7mgBPEGhyy+8aUvy7Nggsc8MlZMkS1SKGzC7iFGh4YkUw==",
+      "license": "MIT",
+      "repository": "git+https://code.haverbeke.berlin/codemirror/search.git",
+      "commit": "d1153bef3f36e9576108f928f0bc3251ff7ba4c9"
+    },
+    {
+      "name": "@codemirror/autocomplete",
+      "group": "core",
+      "version": "6.20.4",
+      "tarball": "https://registry.npmjs.org/@codemirror/autocomplete/-/autocomplete-6.20.4.tgz",
+      "integrity": "sha512-yF8RhOf2SXlg00+qtupzLhrglcas61boqaONiNcbPIebHCpJocpqTBA6dyrtUrQO47hqyTdeob/3XnYilT7TaQ==",
+      "license": "MIT",
+      "repository": "git+https://code.haverbeke.berlin/codemirror/autocomplete.git",
+      "commit": "5e4c57ab8d0bfd0a8428c6c129741f4a47faa8fc"
+    },
+    {
+      "name": "@codemirror/lint",
+      "group": "core",
+      "version": "6.9.8",
+      "tarball": "https://registry.npmjs.org/@codemirror/lint/-/lint-6.9.8.tgz",
+      "integrity": "sha512-qNvtcE73xUto/D1RvtgSRI4A1Hg8ekxlvtZpjHpdpisLBnhyu82EUEJMEgaxkjuQCA8vqnrylENWKOsEDCOHcw==",
+      "license": "MIT",
+      "repository": "git+https://code.haverbeke.berlin/codemirror/lint.git",
+      "commit": "f71583124fa13052d0ac1c5ead5813448a429353"
+    },
+    {
+      "name": "@codemirror/collab",
+      "group": "core",
+      "version": "6.1.1",
+      "tarball": "https://registry.npmjs.org/@codemirror/collab/-/collab-6.1.1.tgz",
+      "integrity": "sha512-tkIn9Jguh98ie12dbBuba3lE8LHUkaMrIFuCVeVGhncSczFdKmX25vC12+58+yqQW5AXi3py6jWY0W+jelyglA==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/collab.git",
+      "commit": "b793fbc1992bdcad24e7c366b12b4c1e8d245327"
+    },
+    {
+      "name": "@codemirror/language-data",
+      "group": "core",
+      "version": "6.5.2",
+      "tarball": "https://registry.npmjs.org/@codemirror/language-data/-/language-data-6.5.2.tgz",
+      "integrity": "sha512-CPkWBKrNS8stYbEU5kwBwTf3JB1kghlbh4FSAwzGW2TEscdeHHH4FGysREW86Mqnj3Qn09s0/6Ea/TutmoTobg==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/language-data.git",
+      "commit": "e0a0578fc1d1d678bec348fd409d0100a834be34"
+    },
+    {
+      "name": "@codemirror/merge",
+      "group": "core",
+      "version": "6.13.0",
+      "tarball": "https://registry.npmjs.org/@codemirror/merge/-/merge-6.13.0.tgz",
+      "integrity": "sha512-JiGYUH7C3o+dDNdc3k8Rcn3aCkczWn3RgonF7n8Psy2S5YRlPFx60NRgcCoO69SVP9lxqDiedqHWt9dNP1dUWw==",
+      "license": "MIT",
+      "repository": "git+https://code.haverbeke.berlin/codemirror/merge.git",
+      "commit": "d206cc871bf9f8bdaaa46e1030265da8bce468b5"
+    },
+    {
+      "name": "@codemirror/lsp-client",
+      "group": "core",
+      "version": "6.3.1",
+      "tarball": "https://registry.npmjs.org/@codemirror/lsp-client/-/lsp-client-6.3.1.tgz",
+      "integrity": "sha512-8uCLbozDGJKxEHKkPy3np4dNOvN1sLkRogsFkqm9QSK5nWwPktiqIeh+c9PWD1P3PUwnCgwfS1YWWNuuyts/dw==",
+      "license": "MIT",
+      "commit": "dbb03b05afd3f7f356dc88c3dc5fbfe81a9a3eed"
+    },
+    {
+      "name": "codemirror",
+      "group": "core",
+      "version": "6.0.2",
+      "tarball": "https://registry.npmjs.org/codemirror/-/codemirror-6.0.2.tgz",
+      "integrity": "sha512-VhydHotNW5w1UGK0Qj96BwSk/Zqbp9WbnyK2W/eVMv4QyF41INRGpjUhFJY7/uDNuudSc33a/PKr4iDqRduvHw==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/basic-setup.git",
+      "commit": "76462c05acb10fe77e0f04edd7fcddfeb9987abd"
+    },
+    {
+      "name": "@codemirror/lang-javascript",
+      "group": "non-core",
+      "version": "6.2.5",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-javascript/-/lang-javascript-6.2.5.tgz",
+      "integrity": "sha512-zD4e5mS+50htS7F+TYjBPsiIFGanfVqg4HyUz6WNFikgOPf2BgKlx+TQedI1w6n/IqRBVBbBWmGFdLB/7uxO4A==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-javascript.git",
+      "commit": "a202a000e8d3d107d1c340db933d9f09a828308a"
+    },
+    {
+      "name": "@codemirror/lang-java",
+      "group": "non-core",
+      "version": "6.0.2",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-java/-/lang-java-6.0.2.tgz",
+      "integrity": "sha512-m5Nt1mQ/cznJY7tMfQTJchmrjdjQ71IDs+55d1GAa8DGaB8JXWsVCkVT284C3RTASaY43YknrK2X3hPO/J3MOQ==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-java.git",
+      "commit": "a75c10204fccf9b42d1172208a5eb7799a54c11e"
+    },
+    {
+      "name": "@codemirror/lang-json",
+      "group": "non-core",
+      "version": "6.0.2",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-json/-/lang-json-6.0.2.tgz",
+      "integrity": "sha512-x2OtO+AvwEHrEwR0FyyPtfDUiloG3rnVTSZV1W8UteaLL8/MajQd8DpvUb2YVzC+/T18aSDv0H9mu+xw0EStoQ==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-json.git",
+      "commit": "ef0c630e5f3735f3c8c1c3d39ea10cde0046cc85"
+    },
+    {
+      "name": "@codemirror/lang-cpp",
+      "group": "non-core",
+      "version": "6.0.3",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-cpp/-/lang-cpp-6.0.3.tgz",
+      "integrity": "sha512-URM26M3vunFFn9/sm6rzqrBzDgfWuDixp85uTY49wKudToc2jTHUrKIGGKs+QWND+YLofNNZpxcNGRynFJfvgA==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-cpp.git",
+      "commit": "6abf50cbc667c1fcebbf37d6d70c8e159eb41090"
+    },
+    {
+      "name": "@codemirror/lang-php",
+      "group": "non-core",
+      "version": "6.0.2",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-php/-/lang-php-6.0.2.tgz",
+      "integrity": "sha512-ZKy2v1n8Fc8oEXj0Th0PUMXzQJ0AIR6TaZU+PbDHExFwdu+guzOA4jmCHS1Nz4vbFezwD7LyBdDnddSJeScMCA==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-php.git",
+      "commit": "ce25655e29f32714d3f9b7b3732084445821907d"
+    },
+    {
+      "name": "@codemirror/lang-python",
+      "group": "non-core",
+      "version": "6.2.1",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-python/-/lang-python-6.2.1.tgz",
+      "integrity": "sha512-IRjC8RUBhn9mGR9ywecNhB51yePWCGgvHfY1lWN/Mrp3cKuHr0isDKia+9HnvhiWNnMpbGhWrkhuWOc09exRyw==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-python.git",
+      "commit": "b29a2dd8f52bd1f3194d9a0d1d65631cda1c3c47"
+    },
+    {
+      "name": "@codemirror/lang-go",
+      "group": "non-core",
+      "version": "6.0.1",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-go/-/lang-go-6.0.1.tgz",
+      "integrity": "sha512-7fNvbyNylvqCphW9HD6WFnRpcDjr+KXX/FgqXy5H5ZS0eC5edDljukm/yNgYkwTsgp2busdod50AOTIy6Jikfg==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-go.git",
+      "commit": "b6aa0b765989c9bc0924def77fdef2f25be5ca70"
+    },
+    {
+      "name": "@codemirror/lang-css",
+      "group": "non-core",
+      "version": "6.3.1",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-css/-/lang-css-6.3.1.tgz",
+      "integrity": "sha512-kr5fwBGiGtmz6l0LSJIbno9QrifNMUusivHbnA1H6Dmqy4HZFte3UAICix1VuKo0lMPKQr2rqB+0BkKi/S3Ejg==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-css.git",
+      "commit": "253b0baa868d87d0a57fd9e1ac5415b20881ccaf"
+    },
+    {
+      "name": "@codemirror/lang-sass",
+      "group": "non-core",
+      "version": "6.0.2",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-sass/-/lang-sass-6.0.2.tgz",
+      "integrity": "sha512-l/bdzIABvnTo1nzdY6U+kPAC51czYQcOErfzQ9zSm9D8GmNPD0WTW8st/CJwBTPLO8jlrbyvlSEcN20dc4iL0Q==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-sass.git",
+      "commit": "ecf8367100b898a2ee8b0ba9fdeda787d0acced6"
+    },
+    {
+      "name": "@codemirror/lang-html",
+      "group": "non-core",
+      "version": "6.4.12",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-html/-/lang-html-6.4.12.tgz",
+      "integrity": "sha512-pw2ReWKUqSkbvh76RAT4NYxiogRu+PWkR2ukAwO9uOgrm8uipkzjtKKtNpyeAQwHOqxEeSvAXZ6vr3AfyB9y/w==",
+      "license": "MIT",
+      "repository": "git+https://code.haverbeke.berlin/codemirror/lang-html.git",
+      "commit": "de1fbd825c6f5b2a3d4c7a6bceba328b8e4ad036"
+    },
+    {
+      "name": "@codemirror/lang-sql",
+      "group": "non-core",
+      "version": "6.10.0",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-sql/-/lang-sql-6.10.0.tgz",
+      "integrity": "sha512-6ayPkEd/yRw0XKBx5uAiToSgGECo/GY2NoJIHXIIQh1EVwLuKoU8BP/qK0qH5NLXAbtJRLuT73hx7P9X34iO4w==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-sql.git",
+      "commit": "62abf00f18da6146b8de63f654a48b0faabd9f7a"
+    },
+    {
+      "name": "@codemirror/lang-rust",
+      "group": "non-core",
+      "version": "6.0.2",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-rust/-/lang-rust-6.0.2.tgz",
+      "integrity": "sha512-EZaGjCUegtiU7kSMvOfEZpaCReowEf3yNidYu7+vfuGTm9ow4mthAparY5hisJqOHmJowVH3Upu+eJlUji6qqA==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-rust.git",
+      "commit": "b78f62a7f3457c876f823460dc1123130a96ffa0"
+    },
+    {
+      "name": "@codemirror/lang-xml",
+      "group": "non-core",
+      "version": "6.1.0",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-xml/-/lang-xml-6.1.0.tgz",
+      "integrity": "sha512-3z0blhicHLfwi2UgkZYRPioSgVTo9PV5GP5ducFH6FaHy0IAJRg+ixj5gTR1gnT/glAIC8xv4w2VL1LoZfs+Jg==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-xml.git",
+      "commit": "6fb53b56f59167def8d13f6838113c7f09c70984"
+    },
+    {
+      "name": "@codemirror/lang-markdown",
+      "group": "non-core",
+      "version": "6.5.2",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-markdown/-/lang-markdown-6.5.2.tgz",
+      "integrity": "sha512-AwBOdkWYuA//WcM0xO5PfHPUcmz/O2i5o0Nsg1U69SII/loCJlFI1Romd9xp2HYb1kYJRGZotyqRghuHH5n8Kw==",
+      "license": "MIT",
+      "repository": "git+https://code.haverbeke.berlin/codemirror/lang-markdown.git",
+      "commit": "f90daf6e56a72f1cf8bbe10b07867f535d0ad2e4"
+    },
+    {
+      "name": "@codemirror/lang-lezer",
+      "group": "non-core",
+      "version": "6.0.2",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-lezer/-/lang-lezer-6.0.2.tgz",
+      "integrity": "sha512-mcVAf8lw+sCfSlr2ivMqV8JtNmOQjSXdA1vHKRtoW0OZsz1k6qhF+DX0K2TbWlAThqiGgRkRSZyYzIoEtKB2uQ==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-lezer.git",
+      "commit": "b963aba946a100f1210ded02f4b39bef40019c12"
+    },
+    {
+      "name": "@codemirror/lang-wast",
+      "group": "non-core",
+      "version": "6.0.2",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-wast/-/lang-wast-6.0.2.tgz",
+      "integrity": "sha512-Imi2KTpVGm7TKuUkqyJ5NRmeFWF7aMpNiwHnLQe0x9kmrxElndyH0K6H/gXtWwY6UshMRAhpENsgfpSwsgmC6Q==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-wast.git",
+      "commit": "3739cffcc59c4c0a443ef78329a2b281fe71ab7c"
+    },
+    {
+      "name": "@codemirror/lang-angular",
+      "group": "non-core",
+      "version": "0.1.4",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-angular/-/lang-angular-0.1.4.tgz",
+      "integrity": "sha512-oap+gsltb/fzdlTQWD6BFF4bSLKcDnlxDsLdePiJpCVNKWXSTAbiiQeYI3UmES+BLAdkmIC1WjyztC1pi/bX4g==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-angular.git",
+      "commit": "55bf1cdebf806484d223c694f8b84584a54d5794"
+    },
+    {
+      "name": "@codemirror/lang-vue",
+      "group": "non-core",
+      "version": "0.1.3",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-vue/-/lang-vue-0.1.3.tgz",
+      "integrity": "sha512-QSKdtYTDRhEHCfo5zOShzxCmqKJvgGrZwDQSdbvCRJ5pRLWBS7pD/8e/tH44aVQT6FKm0t6RVNoSUWHOI5vNug==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-vue.git",
+      "commit": "50efb40d5a538b9397953b4eb51d94d984ab9efa"
+    },
+    {
+      "name": "@codemirror/lang-liquid",
+      "group": "non-core",
+      "version": "6.3.4",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-liquid/-/lang-liquid-6.3.4.tgz",
+      "integrity": "sha512-oERd/wioD2l/leIvLok7FOGApEvvx4Rht4PQ80HHgwPG1A6Qv0zUJo1lvx3TeL1hG5Q0EcAIFYE2dR96EGmZkA==",
+      "license": "MIT",
+      "repository": "git+https://code.haverbeke.berlin/codemirror/lang-liquid.git",
+      "commit": "2afa0e21101505fdf5f433c14c5f757f90115179"
+    },
+    {
+      "name": "@codemirror/lang-less",
+      "group": "non-core",
+      "version": "6.0.2",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-less/-/lang-less-6.0.2.tgz",
+      "integrity": "sha512-EYdQTG22V+KUUk8Qq582g7FMnCZeEHsyuOJisHRft/mQ+ZSZ2w51NupvDUHiqtsOy7It5cHLPGfHQLpMh9bqpQ==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-less.git",
+      "commit": "a07c8335e6094ec8ebf297c37d27f1fdbfacfc9c"
+    },
+    {
+      "name": "@codemirror/lang-yaml",
+      "group": "non-core",
+      "version": "6.1.3",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-yaml/-/lang-yaml-6.1.3.tgz",
+      "integrity": "sha512-AZ8DJBuXGVHybpBQhmZtgew5//4hv3tdkXnr3vDmOUMJRuB6vn/uuwtmTOTlqEaQFg3hQSVeA90NmvIQyUV6FQ==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/lang-yaml.git",
+      "commit": "1a5b4f7d1e5692181aa55c2dbad94da07b8ed944"
+    },
+    {
+      "name": "@codemirror/lang-jinja",
+      "group": "non-core",
+      "version": "6.0.1",
+      "tarball": "https://registry.npmjs.org/@codemirror/lang-jinja/-/lang-jinja-6.0.1.tgz",
+      "integrity": "sha512-P5kyHLObzjtbGj16h+hyvZTxJhSjBEeSx4wMjbnAf3b0uwTy2+F0zGjMZL4PQOm/mh2eGZ5xUDVZXgwP783Nsw==",
+      "license": "MIT",
+      "repository": "git+https://code.haverbeke.berlin/codemirror/lang-jinja.git",
+      "commit": "e317d9b9da2ab0e04ad8f181348870ca44c18e1c"
+    },
+    {
+      "name": "@codemirror/legacy-modes",
+      "group": "non-core",
+      "version": "6.5.5",
+      "tarball": "https://registry.npmjs.org/@codemirror/legacy-modes/-/legacy-modes-6.5.5.tgz",
+      "integrity": "sha512-9ltT214oMb3Y1w5eAZMSigzrjzZnMI2Wa3Feq73rU/i4C56MkwrpfswfQYOr28C5pXr6dWwspNTMyeHXlzWMxg==",
+      "license": "MIT",
+      "repository": "git+https://code.haverbeke.berlin/codemirror/legacy-modes.git",
+      "commit": "cee55a6909d5497a48960d19ed7d53ce8e5d59a7"
+    },
+    {
+      "name": "@codemirror/theme-one-dark",
+      "group": "non-core",
+      "version": "6.1.3",
+      "tarball": "https://registry.npmjs.org/@codemirror/theme-one-dark/-/theme-one-dark-6.1.3.tgz",
+      "integrity": "sha512-NzBdIvEJmx6fjeremiGp3t/okrLPYT0d9orIc7AFun8oZcRk58aejkqhv6spnz4MLAevrKNPMQYXEWMg4s+sKA==",
+      "license": "MIT",
+      "repository": "git+https://github.com/codemirror/theme-one-dark.git",
+      "commit": "5c4c69e48964fab6b3fbb2b60501533ff69d5238"
+    }
+  ]
+}

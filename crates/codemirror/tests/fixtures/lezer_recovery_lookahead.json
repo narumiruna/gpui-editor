@@ -1,0 +1,24 @@
+{
+  "packages": {"@lezer/generator":"1.8.1","@lezer/lr":"1.4.13","@lezer/common":"1.5.7"},
+  "table": {"version":14,"states":"#lQYQROOOkQROOOpQRO'#C`OwQRO'#CdO!oQRO'#CcO!vQRO'#CeOOQP'#Co'#CoOOQP'#Cj'#CjQYQROOQOQQOOOOQP,58z,58zO!}QRO,58zOOQP,58},58}O#UQRO,58}OOQP,59P,59PO#]QRO,59POOQP-E6h-E6hOOQP1G.f1G.fOOQP1G.i1G.iOOQP1G.k1G.k","stateData":"#d~ObOSQOS~OPUOTQOZUO[UOdRO~O`XO~OUYO~PYOPWXPYXTWXTYXZWXZYX[WX[YXdWXdYXeWXeYX~Oe[O~PYOe^O~PYOUaO~PYOebO~PYOecO~PYO","goto":"!qdPPPPePPeoeyPPP!TPPPP!gaUOQSTWZ]_aSOQSTWZ]_aTOQSTWZ]_QWOQZQQ]SQ_TX`WZ]_aVOQSTWZ]_","nodeNames":"⚠ Probe Comment Main Group Open Close First FirstStart Preferred PreferredStart Word String Mark","maxTerm":21,"skippedNodes":[0,2],"repeatNodeCount":1,"tokenData":"#v~R[XYwYZwpqwrs!Vst!txy!|yz#R!}#O#W#P#Q#]#T#o#b&R&S#b;(c;(d#p~|Rb~XYwYZwpqw~!YTOr!Vrs!is;'S!V;'S;=`!n<%lO!V~!nO[~~!qP;=`<%l!V~!yPQ~#T#o!t~#ROT~~#WOU~~#]Od~~#bOe~~#gRZ~#T#o#b&R&S#b;(c;(d#p~#sP;Hf;Hg#b","tokenizers":["probe",0],"topRules":{"Main":[0,3],"Mark":[1,13]},"dynamicPrecedences":{"10":1},"tokenPrec":0},
+  "terms": {"Probe":1,"mark":16},
+  "cases": [
+    {"id":"dfa-below","source":"?\"aaaaaaaaaaaaaaaaaaaaaaaaa","nodes":[[0,"Main",0,27],[1,"⚠",0,2],[1,"Word",2,27]]},
+    {"id":"dfa-above","source":"?\"aaaaaaaaaaaaaaaaaaaaaaaaaa","nodes":[[0,"Main",0,28],[1,"⚠",0,1],[1,"⚠",1,2],[1,"Word",2,28]]},
+    {"id":"dfa-bmp","source":"?\"ééééééééééééééééééééééééé","nodes":[[0,"Main",0,52],[1,"⚠",0,2],[1,"Word",2,52]]},
+    {"id":"dfa-astral-below","source":"?\"😀😀😀😀😀😀😀😀😀😀😀😀a","nodes":[[0,"Main",0,51],[1,"⚠",0,2],[1,"Word",2,51]]},
+    {"id":"dfa-astral-above","source":"?\"😀😀😀😀😀😀😀😀😀😀😀😀😀","nodes":[[0,"Main",0,54],[1,"⚠",0,1],[1,"⚠",1,2],[1,"Word",2,54]]},
+    {"id":"end-before-eof","source":"?\"aaaaaaaaaaaaaaaaaaaaaaaaa\n","nodes":[[0,"Main",0,28],[1,"⚠",0,1],[1,"⚠",1,2],[1,"Word",2,27]]},
+    {"id":"named-deletion","source":")\"aaaaaaaaaaaaaaaaaaaaaaaaaa","nodes":[[0,"Main",0,28],[1,"⚠",0,1],[2,"Close",0,1],[1,"⚠",1,2],[1,"Word",2,28]]},
+    {"id":"group","source":"(?\"aaaaaaaaaaaaaaaaaaaaaaaaaa)","nodes":[[0,"Main",0,30],[1,"Group",0,30],[2,"Open",0,1],[2,"⚠",1,2],[2,"⚠",2,3],[2,"Word",3,29],[2,"Close",29,30]]},
+    {"id":"group-skip-eof","source":"(?\"aaaaaaaaaaaaaaaaaaaaaaaaaa #end","nodes":[[0,"Main",0,34],[1,"Group",0,34],[2,"Open",0,1],[2,"⚠",1,2],[2,"⚠",2,3],[2,"Word",3,29],[2,"Comment",30,34],[2,"⚠",34,34]]},
+    {"id":"external-below","source":"?`aaaaaaaaaaaaaaaaaaaaaaaaa","nodes":[[0,"Main",0,27],[1,"⚠",0,2],[1,"Word",2,27]]},
+    {"id":"external-above","source":"?`aaaaaaaaaaaaaaaaaaaaaaaaaa","nodes":[[0,"Main",0,28],[1,"⚠",0,1],[1,"⚠",1,2],[1,"Word",2,28]]},
+    {"id":"external-astral","source":"?`😀😀😀😀😀😀😀😀😀😀😀😀😀","nodes":[[0,"Main",0,54],[1,"⚠",0,1],[1,"⚠",1,2],[1,"Word",2,54]]},
+    {"id":"external-closed","source":"?`aaaaaaaaaaaaaaaaaaaaaaaaaa`","nodes":[[0,"Main",0,29],[1,"⚠",0,1],[1,"Probe",1,29]]},
+    {"id":"external-short-below","source":"?~aaaaaaaaaaaaaaaaaaaaaaaaa","nodes":[[0,"Main",0,27],[1,"⚠",0,2],[1,"Word",2,27]]},
+    {"id":"external-short-above","source":"?~aaaaaaaaaaaaaaaaaaaaaaaaaa","nodes":[[0,"Main",0,28],[1,"⚠",0,1],[1,"⚠",1,2],[1,"Word",2,28]]},
+    {"id":"cached-branch","source":"[a?`aaaaaaaaaaaaaaaaaaaaaaaaaa]","nodes":[[0,"Main",0,31],[1,"Preferred",0,31],[2,"PreferredStart",0,1],[2,"Word",1,2],[2,"⚠",2,3],[2,"⚠",3,4],[2,"Word",4,30]]},
+    {"id":"valid","source":"(\"aaaaaaaaaaaaaaaaaaaaaaaaaa\" `a😀` é)","nodes":[[0,"Main",0,41],[1,"Group",0,41],[2,"Open",0,1],[2,"String",1,29],[2,"Probe",30,37],[2,"Word",38,40],[2,"Close",40,41]]}
+  ]
+}

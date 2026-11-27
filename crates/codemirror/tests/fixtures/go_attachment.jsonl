@@ -1,0 +1,12 @@
+{"name":"bare","active":true,"sources":0,"sameTree":false,"root":"SourceFile"}
+{"name":"bundle","active":true,"sources":2,"sameTree":true,"root":"SourceFile"}
+{"name":"select","active":true,"sources":2,"sameTree":true,"root":"SourceFile"}
+{"name":"edit","active":true,"sources":2,"sameTree":false,"root":"SourceFile"}
+{"name":"fresh bundle","active":true,"sources":2,"sameTree":true,"root":"SourceFile"}
+{"name":"bare again","active":true,"sources":0,"sameTree":true,"root":"SourceFile"}
+{"name":"competing parser","active":false,"sources":0,"sameTree":false,"root":"JsonText"}
+{"name":"restore bundle","active":true,"sources":2,"sameTree":false,"root":"SourceFile"}
+{"name":"detach","active":false,"sources":0,"sameTree":false,"root":""}
+{"name":"empty block","text":"package p\nfunc f() {}","at":20,"after":"package p\nfunc f() {\n  \n}","head":23}
+{"name":"spaced block","text":"package p\nfunc f() {  }","at":21,"after":"package p\nfunc f() {\n  \n}","head":23}
+{"name":"inside a string","text":"package p\nvar s = \"😀{}\"","at":24,"after":"package p\nvar s = \"😀{\n  \n}\"","head":27}

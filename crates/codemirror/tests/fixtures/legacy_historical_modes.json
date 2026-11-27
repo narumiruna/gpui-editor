@@ -1,0 +1,290 @@
+{
+  "afterInputs":["","next","end","END","end_"," then again ","﻿else","[]","foo []bar","]","];","}","};",")",");"," );","); ","  ];"],
+  "triggerInputs":["normal","  then","then\n","then ","intend","end_","something else","else too","foo []bar","[","]","(",")","}","{",";","try","end","End","proof","return from","% comment"],
+  "modes":{
+    "dylan": {"name":"dylan","mergeTokens":true,"commentTokens":{"block":{"open":"/*","close":"*/"}},"triggers":{},
+      "cases":[
+        {"label":"definitions","source":"define library glyphs\n  use common-dylan;\n  export <figure>, *global*, $answer;\nend library;\ndefine method render (x :: <figure>)\n\tlet opt = size: x;\n  if (opt) signal(x); else abort(); end if;\nend method;",
+         "tokens":[
+           [[0,6,"def"],[6,7,null],[7,14,"def"],[14,15,null],[15,21,"variable"]],
+           [[22,24,null],[24,27,"variable"],[27,28,null],[28,40,"variable"],[40,41,"variableName.standard"]],
+           [[42,44,null],[44,50,"variable"],[50,51,null],[51,59,"tag"],[59,60,"punctuation"],[60,61,null],[61,69,"variableName.standard"],[69,70,"punctuation"],[70,71,null],[71,78,"variableName.constant"],[78,79,"variableName.standard"]],
+           [[80,83,"keyword"],[83,84,null],[84,91,"def"],[91,92,"variableName.standard"]],
+           [[93,99,"def"],[99,100,null],[100,106,"def"],[106,107,null],[107,113,"variable"],[113,114,null],[114,115,"bracket"],[115,116,"variable"],[116,117,null],[117,119,"punctuation"],[119,120,null],[120,128,"tag"],[128,129,"bracket"]],
+           [[130,131,null],[131,134,"keyword"],[134,135,null],[135,138,"variable"],[138,139,null],[139,140,"operator"],[140,141,null],[141,146,"atom"],[146,147,null],[147,148,"variable"],[148,149,"variableName.standard"]],
+           [[150,152,null],[152,154,"keyword"],[154,155,null],[155,156,"bracket"],[156,159,"variable"],[159,160,"bracket"],[160,161,null],[161,167,"builtin"],[167,168,"bracket"],[168,169,"variable"],[169,170,"bracket"],[170,171,"variableName.standard"],[171,172,null],[172,176,"keyword"],[176,177,null],[177,182,"builtin"],[182,183,"bracket"],[183,184,"bracket"],[184,185,"variableName.standard"],[185,186,null],[186,189,"keyword"],[189,190,null],[190,192,"keyword"],[192,193,"variableName.standard"]],
+           [[194,197,"keyword"],[197,198,null],[198,204,"def"],[204,205,"variableName.standard"]]
+         ],
+         "indents":[null,null,null,null,null,null,null,null],"endIndents":[[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]},
+        {"label":"word-precedence","source":"interface module library macro C-struct C-union C-function C-callable-wrapper class C-subtype C-mapped-subtype method function C-variable C-address constant variable generic domain C-pointer-type table\nif block begin case for select when unless until while iterate profiling dynamic-bind finally exception cleanup else elseif afterwards above below by from handler in instance let local otherwise slot subclass then to keyed-by virtual signal error cerror break check-type abort\nendless define_more IF METHOD with-test without-a? within with- with-temp: world-with -thing a9_b _? @foo",
+         "tokens":[
+           [[0,9,"def"],[9,10,null],[10,16,"def"],[16,17,null],[17,24,"def"],[24,25,null],[25,30,"def"],[30,31,null],[31,39,"def"],[39,40,null],[40,47,"def"],[47,48,null],[48,58,"def"],[58,59,null],[59,77,"def"],[77,78,null],[78,83,"def"],[83,84,null],[84,93,"def"],[93,94,null],[94,110,"def"],[110,111,null],[111,117,"def"],[117,118,null],[118,126,"def"],[126,127,null],[127,137,"def"],[137,138,null],[138,147,"def"],[147,148,null],[148,156,"def"],[156,157,null],[157,165,"def"],[165,166,null],[166,173,"def"],[173,174,null],[174,180,"def"],[180,181,null],[181,195,"def"],[195,196,null],[196,201,"def"]],
+           [[202,204,"keyword"],[204,205,null],[205,210,"keyword"],[210,211,null],[211,216,"keyword"],[216,217,null],[217,221,"keyword"],[221,222,null],[222,225,"keyword"],[225,226,null],[226,232,"keyword"],[232,233,null],[233,237,"keyword"],[237,238,null],[238,244,"keyword"],[244,245,null],[245,250,"keyword"],[250,251,null],[251,256,"keyword"],[256,257,null],[257,264,"keyword"],[264,265,null],[265,274,"keyword"],[274,275,null],[275,287,"keyword"],[287,288,null],[288,295,"keyword"],[295,296,null],[296,305,"keyword"],[305,306,null],[306,313,"keyword"],[313,314,null],[314,318,"keyword"],[318,319,null],[319,325,"keyword"],[325,326,null],[326,336,"keyword"],[336,337,null],[337,342,"keyword"],[342,343,null],[343,348,"keyword"],[348,349,null],[349,351,"keyword"],[351,352,null],[352,356,"keyword"],[356,357,null],[357,364,"keyword"],[364,365,null],[365,367,"keyword"],[367,368,null],[368,376,"keyword"],[376,377,null],[377,380,"keyword"],[380,381,null],[381,386,"keyword"],[386,387,null],[387,396,"keyword"],[396,397,null],[397,401,"keyword"],[401,402,null],[402,410,"keyword"],[410,411,null],[411,415,"keyword"],[415,416,null],[416,418,"keyword"],[418,419,null],[419,427,"keyword"],[427,428,null],[428,435,"keyword"],[435,436,null],[436,442,"builtin"],[442,443,null],[443,448,"builtin"],[448,449,null],[449,455,"builtin"],[455,456,null],[456,461,"builtin"],[461,462,null],[462,472,"builtin"],[472,473,null],[473,478,"builtin"]],
+           [[479,482,"keyword"],[482,486,"variable"],[486,487,null],[487,493,"def"],[493,498,"variable"],[498,499,null],[499,501,"variable"],[501,502,null],[502,508,"variable"],[508,509,null],[509,518,null],[518,519,null],[519,529,null],[529,530,null],[530,536,"variable"],[536,537,null],[537,542,"variable"],[542,543,null],[543,553,"atom"],[553,554,null],[554,564,"variable"],[564,565,null],[565,566,"operator"],[566,571,"variable"],[571,572,null],[572,576,"variable"],[576,577,null],[577,578,"variable"],[578,579,"variableName.standard"],[579,580,null],[580,581,"variableName.standard"],[581,584,"variable"]]
+         ],
+         "indents":[null,null,null],"endIndents":[[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]},
+        {"label":"numbers-and-symbols","source":"+.e-3 -0.s+10 . -. +3 -4 1x3 2e-2 3d+8 4s 9.e+ 1_2 #b1012 #b #xFa9Z #o78 #XFF #Tale #ALL-KEYS #include #key #next #rest #foo #unknown ## #[ #( #\n~ ~= ~== ~=== := :: :blip! :end :define :with-a :ok: :+ :*/ , { } [ ]^<&> | /",
+         "tokens":[
+           [[0,5,"number"],[5,6,null],[6,13,"number"],[13,14,null],[14,15,"number"],[15,16,null],[16,18,"number"],[18,19,null],[19,21,"number"],[21,22,null],[22,24,"number"],[24,25,null],[25,28,"number"],[28,29,null],[29,33,"number"],[33,34,null],[34,38,"number"],[38,39,null],[39,40,"number"],[40,41,"variable"],[41,42,null],[42,44,"number"],[44,45,"variable"],[45,46,"operator"],[46,47,null],[47,48,"number"],[48,50,"variable"],[50,51,null],[51,56,"number"],[56,57,"number"],[57,58,null],[58,60,"number"],[60,61,null],[61,66,"number"],[66,67,"variable"],[67,68,null],[68,71,"number"],[71,72,"number"],[72,73,null],[73,77,"error"],[77,78,null],[78,80,"atom"],[80,83,"variable"],[83,84,null],[84,93,"atom"],[93,94,null],[94,102,"atom"],[102,103,null],[103,107,"atom"],[107,108,null],[108,113,"atom"],[113,114,null],[114,119,"atom"],[119,120,null],[120,122,"atom"],[122,124,"variable"],[124,125,null],[125,133,"error"],[133,134,null],[134,136,"punctuation"],[136,137,null],[137,139,"bracket"],[139,140,null],[140,142,"bracket"],[142,143,null],[143,144,"error"]],
+           [[145,146,"operator"],[146,147,null],[147,149,"operator"],[149,150,null],[150,153,"operator"],[153,154,null],[154,157,"operator"],[157,158,"operator"],[158,159,null],[159,161,"operator"],[161,162,null],[162,164,"punctuation"],[164,165,null],[165,171,"variableName.standard"],[171,172,null],[172,177,"variableName.standard"],[177,184,"def"],[184,185,null],[185,192,null],[192,193,null],[193,197,"atom"],[197,198,null],[198,200,"operator"],[200,201,null],[201,203,"operator"],[203,204,"operator"],[204,205,null],[205,206,"punctuation"],[206,207,null],[207,208,"bracket"],[208,209,null],[209,210,"bracket"],[210,211,null],[211,212,"bracket"],[212,213,null],[213,214,"bracket"],[214,215,"operator"],[215,216,"operator"],[216,217,"operator"],[217,218,"operator"],[218,219,null],[219,220,"operator"],[220,221,null],[221,222,"operator"]]
+         ],
+         "indents":[null,null],"endIndents":[[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]},
+        {"label":"string-continuation","source":"\"ignored\\\n\t  still \\\"here\" #\"quoted\" 'end\ncode' 'x' \"unterminated\nif\n",
+         "tokens":[
+           [[0,9,"string"]],
+           [[10,13,null],[13,26,"string"],[26,27,null],[27,36,"string"],[36,37,null],[37,41,"string"]],
+           [[42,46,"variable"],[46,49,"string"],[49,50,"variable"],[50,65,"string"]],
+           [[66,68,"keyword"]],
+           []
+         ],
+         "indents":[null,null,null,null,null],"endIndents":[[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]},
+        {"label":"nested-comments","source":"/* é /* inner */ still */ x // note\r\n/* one /* nested\r\n\r\n    */ if\r\n*/ end\r\n/* */ // 🙂",
+         "tokens":[
+           [[0,26,"comment"],[26,27,null],[27,28,"variable"],[28,29,null],[29,36,"comment"]],
+           [[38,54,"comment"]],
+           [],
+           [[58,62,null],[62,64,"comment"],[64,65,null],[65,67,"keyword"]],
+           [[69,70,"operator"],[70,71,"operator"],[71,72,null],[72,75,"keyword"]],
+           [[77,82,"comment"],[82,83,null],[83,90,"comment"]]
+         ],
+         "indents":[null,null,null,null,null,null],"endIndents":[[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]},
+        {"label":"extended-characters","source":"﻿define A🙂漢字; /* 🙂 */ element-name?\n #\"clé\" next",
+         "tokens":[
+           [[0,3,null],[3,9,"def"],[9,10,null],[10,11,"variable"],[11,15,"variableName.standard"],[15,18,"variableName.standard"],[18,21,"variableName.standard"],[21,22,"variableName.standard"],[22,23,null],[23,33,"comment"],[33,34,null],[34,46,"variable"],[46,47,"variableName.standard"]],
+           [[48,50,null],[50,57,"string"],[57,60,null],[60,64,"variable"]]
+         ],
+         "indents":[null,null],"endIndents":[[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]}
+      ]
+    },
+    "eiffel": {"name":"eiffel","mergeTokens":true,"commentTokens":{"line":"--"},"triggers":{},
+      "cases":[
+        {"label":"class","source":"class APPLICATION\n    inherit PARENT\nfeature -- Entry\n    run (x: INTEGER_64): BOOLEAN\n        do\n            Result := True and then False or not Current.is_equal (Void)\n        end\nend",
+         "tokens":[
+           [[0,5,"keyword"],[5,6,null],[6,17,"tag"]],
+           [[18,22,null],[22,29,"keyword"],[29,30,null],[30,36,"tag"]],
+           [[37,44,"keyword"],[44,45,null],[45,53,"comment"]],
+           [[54,58,null],[58,61,"variable"],[61,62,null],[62,63,null],[63,64,"variable"],[64,65,null],[65,66,null],[66,76,"tag"],[76,77,null],[77,78,null],[78,79,null],[79,86,"tag"]],
+           [[87,95,null],[95,97,"keyword"]],
+           [[98,110,null],[110,116,"keyword"],[116,117,null],[117,119,"operator"],[119,120,null],[120,124,"keyword"],[124,125,null],[125,128,"keyword"],[128,129,null],[129,133,"keyword"],[133,134,null],[134,139,"keyword"],[139,140,null],[140,142,"keyword"],[142,143,null],[143,146,"keyword"],[146,147,null],[147,154,"keyword"],[154,155,null],[155,163,"variable"],[163,164,null],[164,165,null],[165,169,"keyword"],[169,170,null]],
+           [[171,179,null],[179,182,"keyword"]],
+           [[183,186,"keyword"]]
+         ],
+         "indents":[null,null,null,null,null,null,null,null],"endIndents":[[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]},
+        {"label":"keywords-and-numbers","source":"note across when variant until unique undefine then strip select retry rescue require rename reference redefine prefix once old obsolete loop local like is inspect infix include if frozen from external export ensure end elseif else do creation create check alias agent separate invariant inherit indexing feature expanded deferred class Void True Result Precursor False Current attached detachable as and implies not or\nCLASS true VOID A_B12 _AB A? Foo! else? 123! 0B01 0b12 0C77 0c78 0xbBcC9 0xAB 0xC 3. 3..x! 1x.2 .12 9B3 111e4\n<< >>= ~ /= +-* -= := : = -- comment",
+         "tokens":[
+           [[0,4,"keyword"],[4,5,null],[5,11,"keyword"],[11,12,null],[12,16,"keyword"],[16,17,null],[17,24,"keyword"],[24,25,null],[25,30,"keyword"],[30,31,null],[31,37,"keyword"],[37,38,null],[38,46,"keyword"],[46,47,null],[47,51,"keyword"],[51,52,null],[52,57,"keyword"],[57,58,null],[58,64,"keyword"],[64,65,null],[65,70,"keyword"],[70,71,null],[71,77,"keyword"],[77,78,null],[78,85,"keyword"],[85,86,null],[86,92,"keyword"],[92,93,null],[93,102,"keyword"],[102,103,null],[103,111,"keyword"],[111,112,null],[112,118,"keyword"],[118,119,null],[119,123,"keyword"],[123,124,null],[124,127,"keyword"],[127,128,null],[128,136,"keyword"],[136,137,null],[137,141,"keyword"],[141,142,null],[142,147,"keyword"],[147,148,null],[148,152,"keyword"],[152,153,null],[153,155,"keyword"],[155,156,null],[156,163,"keyword"],[163,164,null],[164,169,"keyword"],[169,170,null],[170,177,"keyword"],[177,178,null],[178,180,"keyword"],[180,181,null],[181,187,"keyword"],[187,188,null],[188,192,"keyword"],[192,193,null],[193,201,"keyword"],[201,202,null],[202,208,"keyword"],[208,209,null],[209,215,"keyword"],[215,216,null],[216,219,"keyword"],[219,220,null],[220,226,"keyword"],[226,227,null],[227,231,"keyword"],[231,232,null],[232,234,"keyword"],[234,235,null],[235,243,"keyword"],[243,244,null],[244,250,"keyword"],[250,251,null],[251,256,"keyword"],[256,257,null],[257,262,"keyword"],[262,263,null],[263,268,"keyword"],[268,269,null],[269,277,"keyword"],[277,278,null],[278,287,"keyword"],[287,288,null],[288,295,"keyword"],[295,296,null],[296,304,"keyword"],[304,305,null],[305,312,"keyword"],[312,313,null],[313,321,"keyword"],[321,322,null],[322,330,"keyword"],[330,331,null],[331,336,"keyword"],[336,337,null],[337,341,"keyword"],[341,342,null],[342,346,"keyword"],[346,347,null],[347,353,"keyword"],[353,354,null],[354,363,"keyword"],[363,364,null],[364,369,"keyword"],[369,370,null],[370,377,"keyword"],[377,378,null],[378,386,"keyword"],[386,387,null],[387,397,"keyword"],[397,398,null],[398,400,"keyword"],[400,401,null],[401,404,"keyword"],[404,405,null],[405,412,"keyword"],[412,413,null],[413,416,"keyword"],[416,417,null],[417,419,"keyword"]],
+           [[420,425,"tag"],[425,426,null],[426,430,"variable"],[430,431,null],[431,435,"tag"],[435,436,null],[436,441,"tag"],[441,442,null],[442,445,"variable"],[445,446,null],[446,448,"variable"],[448,449,null],[449,453,"variable"],[453,454,null],[454,459,"variable"],[459,460,null],[460,464,"variable"],[464,465,null],[465,469,"number"],[469,470,null],[470,474,"variable"],[474,475,null],[475,479,"number"],[479,480,null],[480,484,"variable"],[484,485,null],[485,492,"number"],[492,493,null],[493,495,"variable"],[495,497,"tag"],[497,498,null],[498,501,"number"],[501,502,null],[502,504,"number"],[504,505,null],[505,510,"number"],[510,511,null],[511,515,"number"],[515,516,null],[516,517,null],[517,519,"number"],[519,520,null],[520,523,"variable"],[523,524,null],[524,527,"number"],[527,529,"variable"]],
+           [[530,532,"operator"],[532,533,null],[533,536,"operator"],[536,537,null],[537,538,"operator"],[538,539,null],[539,541,"operator"],[541,542,null],[542,545,"operator"],[545,546,null],[546,548,"operator"],[548,549,null],[549,551,"operator"],[551,552,null],[552,553,null],[553,554,null],[554,555,"operator"],[555,556,null],[556,566,"comment"]]
+         ],
+         "indents":[null,null,null],"endIndents":[[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]},
+        {"label":"strings","source":"say (\"an escaped %\"quote\" and 'a%'b')\ntext := \"open\n\n    segment %\" no end%\n    \" gone\n'open\r\n next %%'A\r\n\t-- 日本 🙂\n﻿class é",
+         "tokens":[
+           [[0,3,"variable"],[3,4,null],[4,5,null],[5,25,"string"],[25,26,null],[26,29,"keyword"],[29,30,null],[30,36,"string"],[36,37,null]],
+           [[38,42,"variable"],[42,43,null],[43,45,"operator"],[45,46,null],[46,51,"string"]],
+           [],
+           [[53,75,"string"]],
+           [[76,81,"string"],[81,82,null],[82,86,"variable"]],
+           [[87,92,"string"]],
+           [[94,103,"string"],[103,104,"tag"]],
+           [[106,107,null],[107,121,"comment"]],
+           [[122,125,null],[125,130,"keyword"],[130,131,null],[131,133,null]]
+         ],
+         "indents":[null,null,null,null,null,null,null,null,null],"endIndents":[[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]},
+        {"label":"active-string","source":"before := \"open\n    until here",
+         "tokens":[
+           [[0,6,"variable"],[6,7,null],[7,9,"operator"],[9,10,null],[10,15,"string"]],
+           [[16,30,"string"]]
+         ],
+         "indents":[null,null],"endIndents":[[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]}
+      ]
+    },
+    "mumps": {"name":"mumps","mergeTokens":true,"commentTokens":null,"triggers":{},
+      "cases":[
+        {"label":"command-context","source":"MAIN(ARG) SET COUNT=1 WRITE $J\n set x=1  w x; comment\n  d:flag . . set foo=\"odd string\"\n\tSET:x=1 WRITE @target\n\t. . IF cond READ foo\nLABEL; leading comment or label\n; labeled comment\n;\n\n\tK  WRITE",
+         "tokens":[
+           [[0,4,"tag"],[4,5,"bracket"],[5,8,"variable"],[8,9,"bracket"],[9,10,"error"],[10,13,"controlKeyword"],[13,14,"error"],[14,19,"variable"],[19,20,"operator"],[20,21,"number"],[21,22,"error"],[22,27,"controlKeyword"],[27,28,"error"],[28,30,"builtin"]],
+           [[31,32,"error"],[32,35,"controlKeyword"],[35,36,"error"],[36,37,"variable"],[37,38,"operator"],[38,39,"number"],[39,40,"error"],[40,41,"error"],[41,42,"controlKeyword"],[42,43,"error"],[43,44,"variable"],[44,53,"comment"]],
+           [[54,55,"error"],[55,56,"error"],[56,57,"controlKeyword"],[57,58,null],[58,62,"variable"],[62,63,"error"],[63,64,null],[64,65,"error"],[65,66,null],[66,67,"error"],[67,70,"controlKeyword"],[70,71,"error"],[71,74,"variable"],[74,75,"operator"],[75,76,"string"],[76,79,"variable"],[79,80,"error"],[80,86,"variable"],[86,87,"string"]],
+           [[88,89,"error"],[89,92,"controlKeyword"],[92,93,null],[93,94,"variable"],[94,95,"operator"],[95,96,"number"],[96,97,"error"],[97,102,"variable"],[102,103,"error"],[103,104,"string.special"],[104,110,"variable"]],
+           [[111,112,"error"],[112,113,null],[113,114,"error"],[114,115,null],[115,116,"error"],[116,118,"controlKeyword"],[118,119,"error"],[119,123,"variable"],[123,124,"error"],[124,128,"controlKeyword"],[128,129,"error"],[129,132,"variable"]],
+           [[133,138,"tag"],[138,164,"tag"]],
+           [[165,182,"tag"]],
+           [[183,184,"tag"]],
+           [],
+           [[186,187,"error"],[187,188,"controlKeyword"],[188,189,"error"],[189,190,"error"],[190,195,"controlKeyword"]]
+         ],
+         "indents":[null,null,null,null,null,null,null,null,null,null],"endIndents":[[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]},
+        {"label":"literals-and-operators","source":"(TAG)  SET _V=3_+12.5e-2,-3. +.2 +3e+2 2e 4E-1e3\n [' [] (] )] |] ][ [[ ]] '= <= >= '> '< ' < > ( ) ? ! # & \\ _\n \"unterminated\n \"\"\"a\"\"b\" ^ABC @var ^$name $unknown\n\t﻿moo 🙂",
+         "tokens":[
+           [[0,1,"bracket"],[1,4,"variable"],[4,5,"bracket"],[5,6,"error"],[6,7,"error"],[7,10,"controlKeyword"],[10,11,"error"],[11,12,"operator"],[12,13,"variable"],[13,14,"operator"],[14,15,"number"],[15,16,"operator"],[16,24,"number"],[24,25,null],[25,27,"number"],[27,28,null],[28,29,"error"],[29,30,"operator"],[30,31,null],[31,32,"number"],[32,33,"error"],[33,38,"number"],[38,39,"error"],[39,40,"number"],[40,41,"controlKeyword"],[41,42,"error"],[42,46,"number"],[46,48,"variable"]],
+           [[49,50,"error"],[50,51,"operator"],[51,52,"operator"],[52,53,"error"],[53,55,"operator"],[55,56,"error"],[56,58,"operator"],[58,59,"error"],[59,61,"operator"],[61,62,"error"],[62,64,"operator"],[64,65,"error"],[65,66,"operator"],[66,67,"operator"],[67,68,"error"],[68,69,"operator"],[69,70,"operator"],[70,71,"error"],[71,72,"operator"],[72,73,"operator"],[73,74,"error"],[74,76,"operator"],[76,77,"error"],[77,79,"operator"],[79,80,"error"],[80,82,"operator"],[82,83,"error"],[83,85,"operator"],[85,86,"error"],[86,88,"operator"],[88,89,"error"],[89,90,"operator"],[90,91,"error"],[91,92,"operator"],[92,93,"error"],[93,94,"operator"],[94,95,"error"],[95,96,"bracket"],[96,97,"error"],[97,98,"bracket"],[98,99,"error"],[99,100,"operator"],[100,101,"error"],[101,102,"operator"],[102,103,"error"],[103,104,"operator"],[104,105,"error"],[105,106,"operator"],[106,107,"error"],[107,108,"operator"],[108,109,"error"],[109,110,"operator"]],
+           [[111,112,"error"],[112,113,"string"],[113,125,"variable"]],
+           [[126,127,"error"],[127,128,"string"],[128,129,"string"],[129,130,"string"],[130,131,"variable"],[131,132,"string"],[132,133,"string"],[133,134,"controlKeyword"],[134,135,"string"],[135,136,"error"],[136,137,"builtin"],[137,140,"variable"],[140,141,"error"],[141,142,"string.special"],[142,145,"variable"],[145,146,"error"],[146,147,"builtin"],[147,152,"builtin"],[152,153,"error"],[153,154,"builtin"],[154,161,"variable"]],
+           [[162,163,"error"],[163,166,"error"],[166,169,"variable"],[169,171,"error"],[171,175,"error"]]
+         ],
+         "indents":[null,null,null,null,null],"endIndents":[[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]},
+        {"label":"word-boundaries","source":" Break CLOSE DO ELSE FOR GOTO HALT HANG IF JOB KILL LOCK MERGE NEW OPEN QUIT READ SET TCOMMIT TROLLBACK TSTART USE VIEW WRITE XECUTE\n b c d e f g h i j k l m n o q r s tc tro ts u v w x\n W_ SET9 r%.1\n $ascii $char $data $ecode $estack $etrap $extract $find $fnumber $get $horolog $io $increment $job $justify $length $name $next $order $piece $qlength $qsubscript $query $quit $random $reverse $select $stack $test $text $translate $view $x $y $a $c $d $e $ec $es $et $f $fn $g $h $i $j $l $n $na $o $p $q $ql $qs $r $re $s $st $t $tr $v $z $QL_ $reX $S% %abc9",
+         "tokens":[
+           [[0,1,"error"],[1,6,"controlKeyword"],[6,7,"error"],[7,12,"variable"],[12,13,"error"],[13,15,"controlKeyword"],[15,16,"error"],[16,20,"variable"],[20,21,"error"],[21,24,"controlKeyword"],[24,25,"error"],[25,29,"variable"],[29,30,"error"],[30,34,"controlKeyword"],[34,35,"error"],[35,39,"variable"],[39,40,"error"],[40,42,"controlKeyword"],[42,43,"error"],[43,46,"variable"],[46,47,"error"],[47,51,"controlKeyword"],[51,52,"error"],[52,56,"variable"],[56,57,"error"],[57,62,"controlKeyword"],[62,63,"error"],[63,66,"variable"],[66,67,"error"],[67,71,"controlKeyword"],[71,72,"error"],[72,76,"variable"],[76,77,"error"],[77,81,"controlKeyword"],[81,82,"error"],[82,85,"variable"],[85,86,"error"],[86,93,"controlKeyword"],[93,94,"error"],[94,103,"variable"],[103,104,"error"],[104,110,"controlKeyword"],[110,111,"error"],[111,114,"variable"],[114,115,"error"],[115,119,"controlKeyword"],[119,120,"error"],[120,125,"variable"],[125,126,"error"],[126,132,"controlKeyword"]],
+           [[133,134,"error"],[134,135,"controlKeyword"],[135,136,"error"],[136,137,"variable"],[137,138,"error"],[138,139,"controlKeyword"],[139,140,"error"],[140,141,"variable"],[141,142,"error"],[142,143,"controlKeyword"],[143,144,"error"],[144,145,"variable"],[145,146,"error"],[146,147,"controlKeyword"],[147,148,"error"],[148,149,"variable"],[149,150,"error"],[150,151,"controlKeyword"],[151,152,"error"],[152,153,"variable"],[153,154,"error"],[154,155,"controlKeyword"],[155,156,"error"],[156,157,"variable"],[157,158,"error"],[158,159,"controlKeyword"],[159,160,"error"],[160,161,"variable"],[161,162,"error"],[162,163,"controlKeyword"],[163,164,"error"],[164,165,"variable"],[165,166,"error"],[166,167,"controlKeyword"],[167,168,"error"],[168,170,"variable"],[170,171,"error"],[171,174,"controlKeyword"],[174,175,"error"],[175,177,"variable"],[177,178,"error"],[178,179,"controlKeyword"],[179,180,"error"],[180,181,"variable"],[181,182,"error"],[182,183,"controlKeyword"],[183,184,"error"],[184,185,"variable"]],
+           [[186,187,"error"],[187,188,"variable"],[188,189,"operator"],[189,190,"error"],[190,194,"variable"],[194,195,"error"],[195,196,"controlKeyword"],[196,197,"variable"],[197,198,null],[198,199,"number"]],
+           [[200,201,"error"],[201,207,"builtin"],[207,208,"error"],[208,213,"builtin"],[213,214,"error"],[214,219,"builtin"],[219,220,"error"],[220,226,"builtin"],[226,227,"error"],[227,234,"builtin"],[234,235,"error"],[235,241,"builtin"],[241,242,"error"],[242,250,"builtin"],[250,251,"error"],[251,256,"builtin"],[256,257,"error"],[257,265,"builtin"],[265,266,"error"],[266,270,"builtin"],[270,271,"error"],[271,279,"builtin"],[279,280,"error"],[280,283,"builtin"],[283,284,"error"],[284,294,"builtin"],[294,295,"error"],[295,299,"builtin"],[299,300,"error"],[300,308,"builtin"],[308,309,"error"],[309,316,"builtin"],[316,317,"error"],[317,322,"builtin"],[322,323,"error"],[323,328,"builtin"],[328,329,"error"],[329,335,"builtin"],[335,336,"error"],[336,342,"builtin"],[342,343,"error"],[343,351,"builtin"],[351,352,"error"],[352,363,"builtin"],[363,364,"error"],[364,370,"builtin"],[370,371,"error"],[371,376,"builtin"],[376,377,"error"],[377,384,"builtin"],[384,385,"error"],[385,393,"builtin"],[393,394,"error"],[394,401,"builtin"],[401,402,"error"],[402,408,"builtin"],[408,409,"error"],[409,414,"builtin"],[414,415,"error"],[415,420,"builtin"],[420,421,"error"],[421,431,"builtin"],[431,432,"error"],[432,437,"builtin"],[437,438,"error"],[438,440,"builtin"],[440,441,"error"],[441,443,"builtin"],[443,444,"error"],[444,446,"builtin"],[446,447,"error"],[447,449,"builtin"],[449,450,"error"],[450,452,"builtin"],[452,453,"error"],[453,455,"builtin"],[455,456,"error"],[456,459,"builtin"],[459,460,"error"],[460,463,"builtin"],[463,464,"error"],[464,467,"builtin"],[467,468,"error"],[468,470,"builtin"],[470,471,"error"],[471,474,"builtin"],[474,475,"error"],[475,477,"builtin"],[477,478,"error"],[478,480,"builtin"],[480,481,"error"],[481,483,"builtin"],[483,484,"error"],[484,486,"builtin"],[486,487,"error"],[487,489,"builtin"],[489,490,"error"],[490,492,"builtin"],[492,493,"error"],[493,496,"builtin"],[496,497,"error"],[497,499,"builtin"],[499,500,"error"],[500,502,"builtin"],[502,503,"error"],[503,505,"builtin"],[505,506,"error"],[506,509,"builtin"],[509,510,"error"],[510,513,"builtin"],[513,514,"error"],[514,516,"builtin"],[516,517,"error"],[517,520,"builtin"],[520,521,"error"],[521,523,"builtin"],[523,524,"error"],[524,527,"builtin"],[527,528,"error"],[528,530,"builtin"],[530,531,"error"],[531,534,"builtin"],[534,535,"error"],[535,537,"builtin"],[537,538,"error"],[538,540,"builtin"],[540,541,"error"],[541,542,"builtin"],[542,544,"variable"],[544,545,"operator"],[545,546,"error"],[546,547,"builtin"],[547,550,"variable"],[550,551,"error"],[551,553,"builtin"],[553,554,"variable"],[554,555,"error"],[555,560,"variable"]]
+         ],
+         "indents":[null,null,null,null],"endIndents":[[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]}
+      ]
+    },
+    "oz": {"name":"oz","mergeTokens":true,"commentTokens":{"line":"%","block":{"open":"/*","close":"*/"}},"triggers":{"indentOnInut":[false,true,false,false,true,false,true,false,true,true,true,false,false,false,false,false,false,true,false,true,false,false]},
+      "cases":[
+        {"label":"nested-blocks","source":"functor\nimport\n  System\ndefine\n   class `A B`\n      meth run(X)\n        if X>=0 then\n          {System.show true}\n        elseif X==~3 then\n          {System.show unit}\n        else\n          []\n        end\n      end\n   end\nend\nend\nproc {Again X}\n  Foo []Bar\n  end;",
+         "tokens":[
+           [[0,7,"keyword"]],
+           [[8,14,"keyword"]],
+           [[15,17,null],[17,23,"variable"]],
+           [[24,30,"keyword"]],
+           [[31,34,null],[34,39,"keyword"],[39,40,null],[40,45,"type"]],
+           [[46,52,null],[52,56,"keyword"],[56,57,null],[57,60,"def"],[60,62,"variable"],[62,63,"variable"]],
+           [[64,72,null],[72,74,"keyword"],[74,75,null],[75,76,"variable"],[76,78,"operator"],[78,79,"number"],[79,80,null],[80,84,"keyword"]],
+           [[85,95,null],[95,96,"bracket"],[96,102,"variable"],[102,103,"operator"],[103,107,"variable"],[107,108,null],[108,112,"atom"],[112,113,"bracket"]],
+           [[114,122,null],[122,128,"keyword"],[128,129,null],[129,130,"variable"],[130,132,"operator"],[132,134,"number"],[134,135,null],[135,139,"keyword"]],
+           [[140,150,null],[150,151,"bracket"],[151,157,"variable"],[157,158,"operator"],[158,162,"variable"],[162,163,null],[163,167,"atom"],[167,168,"bracket"]],
+           [[169,177,null],[177,181,"keyword"]],
+           [[182,192,null],[192,194,"keyword"]],
+           [[195,203,null],[203,206,"keyword"]],
+           [[207,213,null],[213,216,"keyword"]],
+           [[217,220,null],[220,223,"keyword"]],
+           [[224,227,"keyword"]],
+           [[228,231,"keyword"]],
+           [[232,236,"keyword"],[236,237,null],[237,238,"bracket"],[238,243,"def"],[243,244,null],[244,245,"variable"],[245,246,"bracket"]],
+           [[247,249,null],[249,252,"variable"],[252,253,null],[253,255,"keyword"],[255,258,"variable"]],
+           [[259,261,null],[261,264,"keyword"],[264,265,"variable"]]
+         ],
+         "indents":[0,0,2,0,2,4,6,8,6,8,6,6,6,4,2,0,0,0,0,0],"endIndents":[[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]},
+        {"label":"signatures","source":"proc {Name X} {Call X} end\nfun\n\n { $ X} X end\nclass bad_name 1 meth `move here` proc missing_brace\nproc {lower 5} fun {`Special Name` Y}\nclass\n    UPPER_2 meth 1foo proc {\n  _Fallback}\n% no state changes here",
+         "tokens":[
+           [[0,4,"keyword"],[4,5,null],[5,6,"bracket"],[6,10,"def"],[10,11,null],[11,12,"variable"],[12,13,"bracket"],[13,14,null],[14,15,"bracket"],[15,19,"variable"],[19,20,null],[20,21,"variable"],[21,22,"bracket"],[22,23,null],[23,26,"keyword"]],
+           [[27,30,"keyword"]],
+           [],
+           [[32,33,null],[33,34,"bracket"],[34,35,null],[35,36,"def"],[36,37,null],[37,38,"variable"],[38,39,"bracket"],[39,40,null],[40,41,"variable"],[41,42,null],[42,45,"keyword"]],
+           [[46,51,"keyword"],[51,52,null],[52,60,"variable"],[60,61,null],[61,62,"number"],[62,63,null],[63,67,"keyword"],[67,68,null],[68,79,"def"],[79,80,null],[80,84,"keyword"],[84,85,null],[85,98,"variable"]],
+           [[99,103,"keyword"],[103,104,null],[104,105,"bracket"],[105,110,"variable"],[110,111,null],[111,112,"number"],[112,113,"bracket"],[113,114,null],[114,117,"keyword"],[117,118,null],[118,119,"bracket"],[119,133,"def"],[133,134,null],[134,135,"variable"],[135,136,"bracket"]],
+           [[137,142,"keyword"]],
+           [[143,147,null],[147,154,"type"],[154,155,null],[155,159,"keyword"],[159,160,null],[160,161,"number"],[161,164,"variable"],[164,165,null],[165,169,"keyword"],[169,170,null],[170,171,"bracket"]],
+           [[172,174,null],[174,183,"variable"],[183,184,"bracket"]],
+           [[185,208,"comment"]]
+         ],
+         "indents":[0,0,2,2,0,6,10,12,16,16],"endIndents":[[16,24],[16,24],[14,21],[16,24],[16,24],[14,21],[14,21],[14,21],[14,21],[16,24],[16,24],[16,24],[16,24],[16,24],[16,24],[16,24],[16,24],[16,24]]},
+        {"label":"words-and-literals","source":"true false nil unit true_x False andthen at attr declare feat from lex mod div mode orelse parser prod prop scanner self syn token\nlocal proc {P} fun {F} case class C if cond or dis choice not thread try raise lock for suchthat meth m functor\nin then else of elseof elsecase elseif catch finally with require prepare import export define do end\n::: ... =<: >=: <- := =< >= <= <: >: =: \\=: !! == :: -- ~ ~x ~0x10 0Xfa 0x 1.23e~9 ~2.3e+4 1. 2E-3 1e2\n@ ! # \\ ^ (name) [word] , 😄!",
+         "tokens":[
+           [[0,4,"atom"],[4,5,null],[5,10,"atom"],[10,11,null],[11,14,"atom"],[14,15,null],[15,19,"atom"],[19,20,null],[20,26,"variable"],[26,27,null],[27,32,"variable"],[32,33,null],[33,40,"keyword"],[40,41,null],[41,43,"keyword"],[43,44,null],[44,48,"keyword"],[48,49,null],[49,56,"keyword"],[56,57,null],[57,61,"keyword"],[61,62,null],[62,66,"keyword"],[66,67,null],[67,70,"keyword"],[70,71,null],[71,74,"keyword"],[74,75,null],[75,78,"keyword"],[78,79,null],[79,83,"keyword"],[83,84,null],[84,90,"keyword"],[90,91,null],[91,97,"keyword"],[97,98,null],[98,102,"keyword"],[102,103,null],[103,107,"keyword"],[107,108,null],[108,115,"keyword"],[115,116,null],[116,120,"keyword"],[120,121,null],[121,124,"keyword"],[124,125,null],[125,130,"keyword"]],
+           [[131,136,"keyword"],[136,137,null],[137,141,"keyword"],[141,142,null],[142,143,"bracket"],[143,144,"def"],[144,145,"bracket"],[145,146,null],[146,149,"keyword"],[149,150,null],[150,151,"bracket"],[151,152,"def"],[152,153,"bracket"],[153,154,null],[154,158,"keyword"],[158,159,null],[159,164,"keyword"],[164,165,null],[165,166,"type"],[166,167,null],[167,169,"keyword"],[169,170,null],[170,174,"keyword"],[174,175,null],[175,177,"keyword"],[177,178,null],[178,181,"keyword"],[181,182,null],[182,188,"keyword"],[188,189,null],[189,192,"keyword"],[192,193,null],[193,199,"keyword"],[199,200,null],[200,203,"keyword"],[203,204,null],[204,209,"keyword"],[209,210,null],[210,214,"keyword"],[214,215,null],[215,218,"keyword"],[218,219,null],[219,227,"keyword"],[227,228,null],[228,232,"keyword"],[232,233,null],[233,234,"def"],[234,235,null],[235,242,"keyword"]],
+           [[243,245,"keyword"],[245,246,null],[246,250,"keyword"],[250,251,null],[251,255,"keyword"],[255,256,null],[256,258,"keyword"],[258,259,null],[259,265,"keyword"],[265,266,null],[266,274,"keyword"],[274,275,null],[275,281,"keyword"],[281,282,null],[282,287,"keyword"],[287,288,null],[288,295,"keyword"],[295,296,null],[296,300,"keyword"],[300,301,null],[301,308,"keyword"],[308,309,null],[309,316,"keyword"],[316,317,null],[317,323,"keyword"],[323,324,null],[324,330,"keyword"],[330,331,null],[331,337,"keyword"],[337,338,null],[338,340,"keyword"],[340,341,null],[341,344,"keyword"]],
+           [[345,348,"operator"],[348,349,null],[349,352,"operator"],[352,353,null],[353,356,"operator"],[356,357,null],[357,360,"operator"],[360,361,null],[361,363,"operator"],[363,364,null],[364,366,"operator"],[366,367,null],[367,369,"operator"],[369,370,null],[370,372,"operator"],[372,373,null],[373,375,"operator"],[375,376,null],[376,378,"operator"],[378,379,null],[379,381,"operator"],[381,382,null],[382,384,"operator"],[384,385,null],[385,387,"operator"],[387,388,"variable"],[388,389,null],[389,391,"operator"],[391,392,null],[392,394,"operator"],[394,395,null],[395,397,"operator"],[397,398,null],[398,399,"operator"],[399,400,"operator"],[400,401,null],[401,402,null],[402,403,null],[403,404,null],[404,405,"variable"],[405,406,null],[406,411,"number"],[411,412,null],[412,416,"number"],[416,417,null],[417,418,"number"],[418,419,"variable"],[419,420,null],[420,427,"number"],[427,428,null],[428,435,"number"],[435,436,null],[436,437,"number"],[437,438,"operator"],[438,439,null],[439,440,"number"],[440,441,"variable"],[441,442,"operator"],[442,443,"number"],[443,444,null],[444,447,"number"]],
+           [[448,449,"operator"],[449,450,null],[450,451,"operator"],[451,452,null],[452,453,"operator"],[453,454,null],[454,455,"operator"],[455,456,null],[456,457,"operator"],[457,458,null],[458,463,"variable"],[463,464,"variable"],[464,465,null],[465,470,"variable"],[470,471,"variable"],[471,472,null],[472,473,"operator"],[473,474,null],[474,478,"variable"],[478,479,"operator"]]
+         ],
+         "indents":[0,0,36,36,36],"endIndents":[[36,54],[36,54],[34,51],[36,54],[36,54],[34,51],[34,51],[34,51],[34,51],[36,54],[36,54],[36,54],[36,54],[36,54],[36,54],[36,54],[36,54],[36,54]]},
+        {"label":"strings-and-comments","source":"if \"test\\\n    é\\\" quote\" then\n /* inner /* end */ flag\n /* across\n   \n   */  end\n'bare\nend\nend\n",
+         "tokens":[
+           [[0,2,"keyword"],[2,3,null],[3,9,"string"]],
+           [[10,25,"string"],[25,26,null],[26,30,"keyword"]],
+           [[31,32,null],[32,50,"comment"],[50,51,null],[51,55,"variable"]],
+           [[56,57,null],[57,66,"comment"]],
+           [[67,70,"comment"]],
+           [[71,76,"comment"],[76,79,null],[79,82,"keyword"]],
+           [[83,88,"string"]],
+           [[89,92,"keyword"]],
+           [[93,96,"keyword"]],
+           []
+         ],
+         "indents":[0,2,2,2,2,2,0,0,0,0],"endIndents":[[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]},
+        {"label":"active-signature","source":"local\nproc {\n",
+         "tokens":[
+           [[0,5,"keyword"]],
+           [[6,10,"keyword"],[10,11,null],[11,12,"bracket"]],
+           []
+         ],
+         "indents":[0,2,4],"endIndents":[[4,6],[4,6],[2,3],[4,6],[4,6],[2,3],[2,3],[2,3],[2,3],[4,6],[4,6],[4,6],[4,6],[4,6],[4,6],[4,6],[4,6],[4,6]]}
+      ]
+    },
+    "yacas": {"name":"yacas","mergeTokens":true,"commentTokens":{"line":"//","block":{"open":"/*","close":"*/"}},"triggers":{"electricInput":[false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,false,false,false,false,false,false]},
+      "cases":[
+        {"label":"bodied-operations","source":"Rule(1)\n  Module(\n    {a, b}\n  );\nFor (i:=1, i<8, i++)\n[\n  Write(i);\n];\nWhile(x)\n  While(y)\n    y:=y-1;\n  done;\nRule /* not a call */ (2)\nRule﻿(3)\n  body",
+         "tokens":[
+           [[0,4,"variableName.function"],[4,5,"bracket"],[5,6,"number"],[6,7,"bracket"]],
+           [[8,10,null],[10,16,"variableName.function"],[16,17,"bracket"]],
+           [[18,22,null],[22,23,"bracket"],[23,24,"variable"],[24,25,"operator"],[25,26,null],[26,27,"variable"],[27,28,"bracket"]],
+           [[29,31,null],[31,32,"bracket"],[32,33,"operator"]],
+           [[34,38,"variableName.function"],[38,39,"bracket"],[39,40,"variable"],[40,41,"operator"],[41,42,"operator"],[42,43,"number"],[43,44,"operator"],[44,45,null],[45,46,"variable"],[46,47,"operator"],[47,48,"number"],[48,49,"operator"],[49,50,null],[50,51,"variable"],[51,52,"operator"],[52,53,"operator"],[53,54,"bracket"]],
+           [[55,56,"bracket"]],
+           [[57,59,null],[59,64,"variableName.function"],[64,65,"bracket"],[65,66,"variable"],[66,67,"bracket"],[67,68,"operator"]],
+           [[69,70,"bracket"],[70,71,"operator"]],
+           [[72,77,"variableName.function"],[77,78,"bracket"],[78,79,"variable"],[79,80,"bracket"]],
+           [[81,83,null],[83,88,"variableName.function"],[88,89,"bracket"],[89,90,"variable"],[90,91,"bracket"]],
+           [[92,96,null],[96,97,"variable"],[97,98,"operator"],[98,99,"operator"],[99,100,"variable"],[100,101,"operator"],[101,102,"number"],[102,103,"operator"]],
+           [[104,106,null],[106,110,"variable"],[110,111,"operator"]],
+           [[112,116,"variable"],[116,117,null],[117,133,"comment"],[133,134,null],[134,135,"bracket"],[135,136,"number"],[136,137,"bracket"]],
+           [[138,145,"variableName.function"],[145,146,"bracket"],[146,147,"number"],[147,148,"bracket"]],
+           [[149,151,null],[151,155,"variable"]]
+         ],
+         "indents":[0,2,4,2,0,2,2,0,0,2,4,0,0,0,2],"endIndents":[[2,3],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3],[2,3],[0,0],[0,0],[0,0],[0,0],[2,3],[0,0],[2,3],[2,3],[2,3]]},
+        {"label":"rules-and-patterns","source":"42# 42  # 42\t# .5e+2 0.E-1 3e4 23e 0xFF -.9 1. 1..2\n_x var_x $x_z a'b_'c a_ _ 15_a abc_x_y\n  f \t (x) $a(b) 'Name(x) Call (y) + - * / , ; . : @ ~ = > < & | _ ` ^ ? ! % # \\",
+         "tokens":[
+           [[0,3,"qualifier"],[3,4,null],[4,9,"qualifier"],[9,10,null],[10,12,"number"],[12,13,null],[13,14,"operator"],[14,15,null],[15,20,"number"],[20,21,null],[21,26,"number"],[26,27,null],[27,30,"number"],[30,31,null],[31,33,"number"],[33,34,"variable"],[34,35,null],[35,36,"number"],[36,39,"variable"],[39,40,null],[40,41,"operator"],[41,43,"number"],[43,44,null],[44,46,"number"],[46,47,null],[47,49,"number"],[49,51,"number"]],
+           [[52,54,"variableName.special"],[54,55,null],[55,60,"variableName.special"],[60,61,null],[61,65,"variableName.special"],[65,66,null],[66,72,"variableName.special"],[72,73,null],[73,74,"variable"],[74,75,"operator"],[75,76,null],[76,77,"operator"],[77,78,null],[78,80,"number"],[80,82,"variableName.special"],[82,83,null],[83,88,"variableName.special"],[88,90,"variableName.special"]],
+           [[91,93,null],[93,97,"variableName.function"],[97,98,"bracket"],[98,99,"variable"],[99,100,"bracket"],[100,101,null],[101,103,"variableName.function"],[103,104,"bracket"],[104,105,"variable"],[105,106,"bracket"],[106,107,null],[107,112,"variableName.function"],[112,113,"bracket"],[113,114,"variable"],[114,115,"bracket"],[115,116,null],[116,123,"variableName.function"],[123,124,"bracket"],[124,125,"variable"],[125,126,"bracket"],[126,127,null],[127,128,"operator"],[128,129,null],[129,130,"operator"],[130,131,null],[131,132,"operator"],[132,133,null],[133,134,"operator"],[134,135,null],[135,136,"operator"],[136,137,null],[137,138,"operator"],[138,139,null],[139,140,"operator"],[140,141,null],[141,142,"operator"],[142,143,null],[143,144,"operator"],[144,145,null],[145,146,"operator"],[146,147,null],[147,148,"operator"],[148,149,null],[149,150,"operator"],[150,151,null],[151,152,"operator"],[152,153,null],[153,154,"operator"],[154,155,null],[155,156,"operator"],[156,157,null],[157,158,"operator"],[158,159,null],[159,160,"operator"],[160,161,null],[161,162,"operator"],[162,163,null],[163,164,"operator"],[164,165,null],[165,166,"operator"],[166,167,null],[167,168,"operator"],[168,169,null],[169,170,"operator"],[170,171,null],[171,172,"operator"]]
+         ],
+         "indents":[0,0,0],"endIndents":[[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]},
+        {"label":"scope-recovery","source":"f(\n  g(\n  );\n  )\n{\n   f([\n   };\n   ];\n   )\n};\n];\n\nx",
+         "tokens":[
+           [[0,1,"variableName.function"],[1,2,"bracket"]],
+           [[3,5,null],[5,6,"variableName.function"],[6,7,"bracket"]],
+           [[8,10,null],[10,11,"bracket"],[11,12,"operator"]],
+           [[13,15,null],[15,16,"bracket"]],
+           [[17,18,"bracket"]],
+           [[19,22,null],[22,23,"variableName.function"],[23,24,"bracket"],[24,25,"bracket"]],
+           [[26,29,null],[29,30,"bracket"],[30,31,"operator"]],
+           [[32,35,null],[35,36,"bracket"],[36,37,"operator"]],
+           [[38,41,null],[41,42,"bracket"]],
+           [[43,44,"bracket"],[44,45,"operator"]],
+           [[46,47,"bracket"],[47,48,"operator"]],
+           [],
+           [[50,51,"variable"]]
+         ],
+         "indents":[0,2,2,2,0,2,4,4,4,0,0,0,0],"endIndents":[[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]},
+        {"label":"strings-and-comments","source":"For(x) /* comment across\n\n   end */ [\n // line: \"\n   \"a \\\"quote\n    and more\";\n   \"another\n\n    tail\"\n];",
+         "tokens":[
+           [[0,3,"variableName.function"],[3,4,"bracket"],[4,5,"variable"],[5,6,"bracket"],[6,7,null],[7,24,"comment"]],
+           [],
+           [[26,29,null],[29,35,"comment"],[35,36,null],[36,37,"bracket"]],
+           [[38,39,null],[39,49,"comment"]],
+           [[50,53,null],[53,63,"string"]],
+           [[64,68,null],[68,77,"string"],[77,78,"operator"]],
+           [[79,82,null],[82,90,"string"]],
+           [],
+           [[92,96,null],[96,101,"string"]],
+           [[102,103,"bracket"],[103,104,"operator"]]
+         ],
+         "indents":[0,null,null,2,2,null,2,null,null,0],"endIndents":[[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]},
+        {"label":"active-comment","source":"Rule(x) [\n   /* start\n  body\n",
+         "tokens":[
+           [[0,4,"variableName.function"],[4,5,"bracket"],[5,6,"variable"],[6,7,"bracket"],[7,8,null],[8,9,"bracket"]],
+           [[10,13,null],[13,21,"comment"]],
+           [[22,24,null],[24,28,"comment"]],
+           []
+         ],
+         "indents":[0,2,null,null],"endIndents":[[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]},
+        {"label":"active-string","source":"f(\"not yet\n  continued",
+         "tokens":[
+           [[0,1,"variableName.function"],[1,2,"bracket"],[2,10,"string"]],
+           [[11,13,null],[13,22,"string"]]
+         ],
+         "indents":[0,null],"endIndents":[[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null],[null,null]]},
+        {"label":"unrecognized-scalars","source":"A🙂é+2\n?§\tNext(x)",
+         "tokens":[
+           [[0,1,"variable"],[1,5,"error"],[5,7,"error"],[7,8,"operator"],[8,9,"number"]],
+           [[10,11,"operator"],[11,13,"error"],[13,14,null],[14,18,"variableName.function"],[18,19,"bracket"],[19,20,"variable"],[20,21,"bracket"]]
+         ],
+         "indents":[0,0],"endIndents":[[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]}
+      ]
+    }
+  }
+}

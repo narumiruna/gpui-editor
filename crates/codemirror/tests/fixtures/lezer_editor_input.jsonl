@@ -1,0 +1,5 @@
+{"name":"top Rule closer","source":"@top Rule {\r\n  Word\r    \r\nWord { \"😀\" }","caret":24,"typed":"}","event":"input.type","result":"@top Rule {\r\n  Word\r}\r\nWord { \"😀\" }","finalCaret":21}
+{"name":"nested token closer","source":"@tokens {\r\n  Word {\r    \"😀\"\r      \r\n}\r\n","caret":37,"typed":"}","event":"input.type","result":"@tokens {\r\n  Word {\r    \"😀\"\r  }\r\n}\r\n","finalCaret":34}
+{"name":"rule closer completion","source":"Rule {\r  Word\r    ","caret":18,"typed":"}","event":"input.complete","result":"Rule {\r  Word\r}","finalCaret":15}
+{"name":"non-brace input","source":"Rule {\r  Word\r    ","caret":18,"typed":"]","event":"input.type","result":"Rule {\r  Word\r    ]","finalCaret":19}
+{"name":"paste is not reindented","source":"Rule {\r  Word\r    ","caret":18,"typed":"}","event":"input.paste","result":"Rule {\r  Word\r    }","finalCaret":19}

@@ -140,18 +140,24 @@ fn projects_gfm_table_headers_alignment_and_cell_text() {
 
 #[test]
 fn projects_code_as_literal_text_without_fences_or_structural_indent() {
-    for (raw, body) in [
+    for (raw, body, language) in [
         (
             "~~~~rust\r\nfn main() {\r\n\t$literal$\r\n}\r\n~~~~\r\n",
             "fn main() {\n\t$literal$\n}\n",
+            Some("rust"),
         ),
         (
             "    let x = 1;\n        next();\n",
             "let x = 1;\n    next();\n",
+            None,
         ),
-        ("```\n```", ""),
-        ("```text\nstill code\n```", "still code\n"),
-        ("```\r\nbody\r\n  ```  \r\n", "body\n"),
+        ("```\n```", "", None),
+        (
+            "```text extra\nstill code\n```",
+            "still code\n",
+            Some("text"),
+        ),
+        ("```\r\nbody\r\n  ```  \r\n", "body\n", None),
     ] {
         let mut doc = Document::new(raw.into());
         let sections = doc.sections();
@@ -160,7 +166,10 @@ fn projects_code_as_literal_text_without_fences_or_structural_indent() {
         assert_eq!(code.kind, SectionKind::ReadOnly);
         assert_eq!(
             code.preview,
-            Some(BlockPreview::Code { body: body.into() }),
+            Some(BlockPreview::Code {
+                body: body.into(),
+                language: language.map(str::to_owned)
+            }),
             "{raw:?}"
         );
         assert_eq!(

@@ -3,28 +3,84 @@
 use std::{collections::HashMap, ops::Range, path::PathBuf, time::Duration};
 
 use crate::{
+    app::developer::FieldColors,
     document::{Heading, Markdown, Section, SectionKind},
     theme::Theme,
     workspace::Workspace,
 };
 use gpui::{
-    AnyElement, App, AvailableSpace, Bounds, ClipboardItem, Context, CursorStyle,
-    ElementInputHandler, EntityInputHandler, EventEmitter, FocusHandle, Focusable, KeyBinding,
-    MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Point, ScrollHandle, Size, Task,
-    UTF16Selection, Window, WindowAppearance, actions, canvas, div, fill, point, prelude::*, px,
-    quad, rgb, size,
+    AnyElement, App, AvailableSpace, Bounds, Context, CursorStyle, ElementInputHandler,
+    EntityInputHandler, EventEmitter, FocusHandle, Focusable, KeyBinding, MouseButton,
+    MouseDownEvent, MouseMoveEvent, Pixels, Point, ScrollHandle, Size, Task, UTF16Selection,
+    Window, actions, canvas, div, fill, point, prelude::*, px, quad, rgb, rgba, size,
 };
 
 use gpui_editor_codemirror::{
-    Change, ChangeSet, EditorSelection, EditorState, History, SelectionRange, Transaction,
+    Change, ChangeDesc, ChangeSet, ConfigurationError, EditError, EditorSelection, EditorState,
+    Extension, SelectionRange, StateEffect, Transaction, TransactionCoordinates,
+    autocomplete::snippet_state_extension,
+    commands::bindings::TabFocusMode,
+    language::{brackets::bracket_matching, fold::code_folding},
+    lint,
+    theme_one_dark::view_style,
+    view::{
+        EditorView, EndScrollPadding, ViewException, Viewport, filter_clipboard_input,
+        input::{InputChange, InputHandling, run_input_handlers},
+        log_exception,
+        selection_layers::{RectangularSelection, rectangular_selection},
+    },
 };
 
+pub(crate) mod announcements;
 mod commands;
+mod document_find;
+mod draw_selection;
+mod drop_cursor;
+mod goto_line;
 mod layout;
+mod merge_review;
+#[cfg(test)]
+mod one_dark_tests;
+#[cfg(test)]
+mod placeholder_tests;
+#[cfg(test)]
+mod scroll_past_end_tests;
+mod source_brackets;
+pub mod source_collab;
+mod source_completion;
+mod source_diagnostics;
+mod source_fence;
+mod source_folds;
+mod source_keys;
+pub mod source_lsp;
+mod source_markdown;
+mod source_multi;
+mod source_rectangle;
+mod source_scroll;
+mod source_snippets;
+mod source_tab_focus;
+pub mod source_tooltip;
+mod source_visual;
+use source_completion::{
+    CloseCompletion, CompletionPageDown, CompletionPageUp, OpenCompletion, SourceCompletion,
+};
+use source_diagnostics::{NextDiagnostic, OpenDiagnostics, PreviousDiagnostic, SourceDiagnostics};
+use source_fence::SourceSyntax;
+use source_folds::ToggleSourceFold;
+use source_keys::{
+    IndentSourceSelection, InsertSourceBlankLine, SelectSourceParent, SourceIndent,
+    ToggleSourceComment,
+};
 pub(crate) mod toolbar;
 #[cfg(test)]
 use commands::Command;
-use layout::{Graphic, ItemPaint, Layout};
+pub(crate) use document_find::OpenFind;
+use document_find::{
+    FindNext, FindPanel, FindPrevious, SelectNextOccurrence, SelectSelectionMatches,
+};
+use goto_line::{GotoLinePanel, OpenGotoLine};
+use layout::{DEFAULT_LINE_HEIGHT, Graphic, ItemPaint, Layout};
+use merge_review::MergeReview;
 pub(crate) use toolbar::ToolbarAssets;
 
 actions!(
@@ -38,6 +94,10 @@ actions!(
         Down,
         SelectUp,
         SelectDown,
+        AddSourceCursorAbove,
+        AddSourceCursorBelow,
+        SelectSourcePageUp,
+        SelectSourcePageDown,
         SelectAll,
         Backspace,
         Delete,
@@ -46,12 +106,19 @@ actions!(
         Cut,
         Paste,
         Undo,
-        Redo
+        Redo,
+        UndoSelection,
+        RedoSelection,
+        ToggleEditorTabFocus
     ]
 );
 
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
+        KeyBinding::new("ctrl-shift-[", ToggleSourceFold, Some("Editor")),
+        KeyBinding::new("cmd-i", SelectSourceParent, Some("Editor")),
+        KeyBinding::new("cmd-alt-\\", IndentSourceSelection, Some("Editor")),
+        KeyBinding::new("alt-shift-m", ToggleEditorTabFocus, Some("Editor")),
         KeyBinding::new("left", Left, Some("Editor")),
         KeyBinding::new("right", Right, Some("Editor")),
         KeyBinding::new("shift-left", SelectLeft, Some("Editor")),
@@ -60,31 +127,62 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("down", Down, Some("Editor")),
         KeyBinding::new("shift-up", SelectUp, Some("Editor")),
         KeyBinding::new("shift-down", SelectDown, Some("Editor")),
+        KeyBinding::new("cmd-alt-up", AddSourceCursorAbove, Some("Editor")),
+        KeyBinding::new("cmd-alt-down", AddSourceCursorBelow, Some("Editor")),
+        KeyBinding::new("shift-pageup", SelectSourcePageUp, Some("Editor")),
+        KeyBinding::new("shift-pagedown", SelectSourcePageDown, Some("Editor")),
         KeyBinding::new("cmd-a", SelectAll, Some("Editor")),
         KeyBinding::new("backspace", Backspace, Some("Editor")),
         KeyBinding::new("delete", Delete, Some("Editor")),
         KeyBinding::new("enter", Newline, Some("Editor")),
+        KeyBinding::new("cmd-enter", InsertSourceBlankLine, Some("Editor")),
+        KeyBinding::new("cmd-/", ToggleSourceComment, Some("Editor")),
         KeyBinding::new("cmd-c", Copy, Some("Editor")),
         KeyBinding::new("cmd-x", Cut, Some("Editor")),
         KeyBinding::new("cmd-v", Paste, Some("Editor")),
         KeyBinding::new("cmd-z", Undo, Some("Editor")),
         KeyBinding::new("cmd-shift-z", Redo, Some("Editor")),
+        KeyBinding::new("cmd-u", UndoSelection, Some("Editor")),
+        KeyBinding::new("cmd-shift-u", RedoSelection, Some("Editor")),
     ]);
+    document_find::bind_keys(cx);
+    goto_line::bind_keys(cx);
+    source_completion::bind_keys(cx);
+    source_diagnostics::bind_keys(cx);
+    source_lsp::bind_keys(cx);
+    merge_review::bind_keys(cx);
 }
 
 pub struct Editor {
     focus: FocusHandle,
-    history: History<Option<Section>>,
+    view: EditorView<Option<Section>>,
+    find: Option<FindPanel>,
+    goto_line: Option<GotoLinePanel>,
+    completion: Option<SourceCompletion>,
+    source_collab: Option<source_collab::SourceCollab>,
+    diagnostics: SourceDiagnostics,
+    source_lsp: Option<source_lsp::SourceLsp>,
+    reference_panel_ui: source_lsp::ReferencePanelUi,
+    source_tooltip: Option<source_tooltip::SourceTooltip>,
+    #[cfg(test)]
+    painted_source_tooltip: Option<source_tooltip::PaintedTooltip>,
+    merge_review: Option<MergeReview>,
+    caret_blink: draw_selection::CaretBlink,
+    selection_epoch: std::time::Instant,
+    tab_focus: TabFocusMode,
     // A soft break shares a byte offset between the end of one row and the start of the next.
     upstream: bool,
     marked: Option<Range<usize>>,
     active: Option<Section>,
+    source_syntax: Option<SourceSyntax>,
     selecting: bool,
+    rectangle: Option<(RectangularSelection, Pixels, bool)>,
     layout: Option<Layout>,
     input_enabled: bool,
     scroll: ScrollHandle,
+    end_scroll_padding: EndScrollPadding,
     reveal_caret: bool,
-    reveal_source: Option<usize>,
+    reveal_source: Option<SourceReveal>,
     preferred_x: Option<Pixels>,
     graphics: HashMap<(String, SectionKind, u32), Result<Graphic, String>>,
     images: HashMap<String, ImageEntry>,
@@ -94,8 +192,23 @@ pub struct Editor {
     path: Option<PathBuf>,
     workspace: Option<Workspace>,
     hover: Option<Range<usize>>,
+    #[cfg(test)]
+    prepainted_overlay: Option<String>,
     message: Option<String>,
     message_timeout: Option<(String, Task<()>)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SourceReveal {
+    offset: usize,
+    alignment: RevealAlignment,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum RevealAlignment {
+    Nearest,
+    Center,
+    Start(Pixels),
 }
 
 #[derive(Clone, Copy)]
@@ -112,23 +225,95 @@ enum ImageEntry {
 
 impl Editor {
     pub fn new(source: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let focus = cx.focus_handle();
-        cx.on_blur(&focus, window, |editor, _, cx| {
-            editor.selecting = false;
-            editor.finish_composition();
+        Self::with_native_extensions(source, Extension::default(), window, cx)
+            .expect("editor extensions")
+    }
+
+    /// Create a Markdown editor with trusted native CodeMirror extensions.
+    /// The editor retains its stock extensions and validates the initial
+    /// configuration before it registers window callbacks. Source bytes are
+    /// not normalized. Extensions do not bypass the Markdown edit rules.
+    pub fn with_native_extensions(
+        source: String,
+        extensions: Extension,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Self, ConfigurationError> {
+        let state = EditorState::with_extensions(
+            source,
+            Extension::group([
+                lint::extension(),
+                bracket_matching(Default::default()),
+                code_folding(),
+                snippet_state_extension(),
+                rectangular_selection(Default::default()),
+                extensions,
+            ]),
+        )?;
+        let source_collab = source_collab::SourceCollab::install(&state)?;
+        let focus = cx.focus_handle().tab_index(0).tab_stop(true);
+        cx.on_focus(&focus, window, |editor, window, cx| {
+            editor.report_native_focus(true);
+            editor.sync_caret_blink(window, cx);
             cx.notify();
         })
         .detach();
-        Self {
+        cx.on_blur(&focus, window, |editor, _, cx| {
+            editor.caret_blink.cancel();
+            editor.finish_pointer_selection();
+            editor.completion = None;
+            editor.dismiss_keyboard_diagnostic_hover();
+            editor.dismiss_source_lsp_tooltips();
+            editor.clear_source_tooltip();
+            editor.finish_composition();
+            editor.cancel_source_snippet(cx);
+            editor.report_native_focus(false);
+            cx.notify();
+        })
+        .detach();
+        cx.observe_window_activation(window, |editor, window, cx| {
+            if !window.is_window_active() {
+                let diagnostic = editor.dismiss_keyboard_diagnostic_hover();
+                if editor.clear_source_tooltip() || diagnostic {
+                    cx.notify();
+                }
+            }
+            editor.sync_caret_blink(window, cx);
+        })
+        .detach();
+        cx.observe_keystrokes(Self::observe_editor_key).detach();
+        let mut view = EditorView::new(state);
+        let caret_blink = draw_selection::CaretBlink::install(&mut view, cx);
+        if let Some(plugin) = announcements::AnnouncementPlugin::new(window, cx) {
+            view.add_plugin(plugin);
+        }
+        Ok(Self {
             focus,
-            history: History::new(EditorState::new(source)),
+            view,
+            find: None,
+            goto_line: None,
+            completion: None,
+            source_collab,
+            diagnostics: SourceDiagnostics::new(cx.focus_handle()),
+            source_lsp: None,
+            reference_panel_ui: source_lsp::ReferencePanelUi::new(cx),
+            source_tooltip: None,
+            #[cfg(test)]
+            painted_source_tooltip: None,
+            merge_review: None,
+            caret_blink,
+            selection_epoch: cx.background_executor().now(),
+            tab_focus: TabFocusMode::default(),
             upstream: false,
             marked: None,
             active: None,
+            source_syntax: None,
             selecting: false,
+            rectangle: None,
             layout: None,
             input_enabled: true,
             scroll: ScrollHandle::new(),
+            end_scroll_padding: EndScrollPadding::default(),
             reveal_caret: false,
             reveal_source: None,
             preferred_x: None,
@@ -140,13 +325,39 @@ impl Editor {
             path: None,
             workspace: None,
             hover: None,
+            #[cfg(test)]
+            prepainted_overlay: None,
             message: None,
             message_timeout: None,
+        })
+    }
+
+    fn report_native_focus(&mut self, focused: bool) {
+        let result = self
+            .view
+            .set_focus_checked(focused, self.active.clone(), |transaction| {
+                if !transaction.changes().is_empty() {
+                    Err(EditError::InvalidRange)
+                } else if transaction.selection().is_some() {
+                    Err(EditError::InvalidSelection)
+                } else {
+                    Ok(())
+                }
+            });
+        if let Err(error) = result {
+            log_exception(
+                self.view.state(),
+                &ViewException::new(format!("Rejected focus effects: {error:?}")),
+            );
+            // Native focus has already changed. Report it without the rejected effects.
+            let _ = self
+                .view
+                .set_viewport(self.view.viewport().clone(), focused);
         }
     }
 
     pub fn source(&self) -> &str {
-        self.history.state().text().as_str()
+        self.view.state().text().as_str()
     }
 
     fn markdown(&self) -> Markdown<'_> {
@@ -164,10 +375,19 @@ impl Editor {
 
     /// Scroll to a UTF-8 byte offset without moving the caret or taking focus.
     pub(crate) fn reveal_source(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.request_source_reveal(offset, false, cx);
+    }
+
+    fn request_source_reveal(&mut self, offset: usize, center: bool, cx: &mut Context<Self>) {
         if self.is_composing() || !self.source().is_char_boundary(offset) {
             return;
         }
-        self.reveal_source = Some(offset);
+        let alignment = if center {
+            RevealAlignment::Center
+        } else {
+            RevealAlignment::Nearest
+        };
+        self.reveal_source = Some(SourceReveal { offset, alignment });
         cx.notify();
     }
 
@@ -190,31 +410,91 @@ impl Editor {
     pub(crate) fn set_input_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         debug_assert!(enabled || !self.is_composing());
         self.input_enabled = enabled;
+        if let Some(find) = &self.find {
+            find.set_editable(enabled, cx);
+        }
+        if let Some(goto_line) = &self.goto_line {
+            goto_line.set_editable(enabled, cx);
+        }
         if !enabled {
             self.selecting = false;
+            self.completion = None;
+            self.dismiss_keyboard_diagnostic_hover();
+            self.dismiss_source_lsp_tooltips();
+            self.clear_source_tooltip();
         }
         cx.notify();
     }
 
     fn anchor(&self) -> usize {
-        self.history.state().selection().main().anchor()
+        self.view.state().selection().main().anchor()
     }
 
     fn cursor(&self) -> usize {
-        self.history.state().selection().main().head()
+        self.view.state().selection().main().head()
     }
 
     fn selection(&self) -> Range<usize> {
-        self.history.state().selection().main().range()
+        self.view.state().selection().main().range()
     }
 
     fn set_selection(&mut self, anchor: usize, head: usize) {
-        self.history
+        self.completion = None;
+        self.view
             .set_selection(EditorSelection::single(anchor, head))
             .expect("selection must use source byte boundaries");
     }
 
+    fn set_user_selection(
+        &mut self,
+        anchor: usize,
+        head: usize,
+        event: &'static str,
+        cx: &mut Context<Self>,
+    ) {
+        if self.is_composing() {
+            self.set_selection(anchor, head);
+            self.finish_composition();
+            return;
+        }
+        self.completion = None;
+        let selection = EditorSelection::single(anchor, head);
+        if self.view.state().selection() == &selection {
+            return;
+        }
+        self.record_selection_transaction(
+            Transaction::default()
+                .with_selection(selection)
+                .with_user_event(event),
+            self.active.clone(),
+            cx,
+        );
+    }
+
+    fn record_selection_transaction(
+        &mut self,
+        transaction: Transaction,
+        active: Option<Section>,
+        cx: &mut Context<Self>,
+    ) {
+        self.completion = None;
+        let elapsed = cx
+            .background_executor()
+            .now()
+            .saturating_duration_since(self.selection_epoch);
+        let millis = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+        self.active = self
+            .view
+            .update(transaction.with_time(millis), self.active.clone(), |_| {
+                (None, active)
+            })
+            .expect("selection must use source byte boundaries");
+    }
+
     fn finish_active(&mut self) {
+        self.clear_source_tooltip();
+        self.rectangle = None;
+        self.source_syntax = None;
         if let Some(active) = self.active.take() {
             let snap_outside = |position| {
                 if active.source.start < position && position < active.source.end {
@@ -229,11 +509,21 @@ impl Editor {
 
     fn finish_composition(&mut self) {
         self.marked = None;
-        self.history.end_group();
+        self.view.end_group();
     }
 
     fn invalidate_edit_layout(&mut self) {
+        self.clear_source_tooltip();
+        self.rectangle = None;
+        self.completion = None;
         self.layout = None;
+        if self
+            .active
+            .as_ref()
+            .is_none_or(|section| section.kind != SectionKind::DraftCode)
+        {
+            self.source_syntax = None;
+        }
         self.upstream = false;
         self.reveal_caret = true;
         self.reveal_source = None;
@@ -244,21 +534,108 @@ impl Editor {
         if !self.input_enabled {
             return;
         }
+        let revision = self.view.revision();
         let active = if redo {
-            self.history.redo()
+            self.view.redo()
         } else {
-            self.history.undo()
+            self.view.undo()
         };
         if let Some(active) = active {
-            self.active = active;
-            self.finish_composition();
-            self.invalidate_edit_layout();
-            cx.notify();
+            self.finish_history_replay(active, revision, cx);
         }
     }
 
+    fn replay_selection_history(&mut self, redo: bool, cx: &mut Context<Self>) {
+        if !self.input_enabled || self.is_composing() {
+            return;
+        }
+        let revision = self.view.revision();
+        let active = self.active.clone();
+        let restored = if redo {
+            self.view.redo_selection(active)
+        } else {
+            self.view.undo_selection(active)
+        };
+        if let Some(active) = restored {
+            self.finish_history_replay(active, revision, cx);
+            self.leave_source_if_outside(self.cursor());
+        }
+    }
+
+    fn finish_history_replay(
+        &mut self,
+        active: Option<Section>,
+        previous_revision: u64,
+        cx: &mut Context<Self>,
+    ) {
+        self.active = if self.view.revision() == previous_revision {
+            active
+        } else {
+            active.map(|section| self.restore_source_collab_frame(section))
+        };
+        self.finish_composition();
+        self.invalidate_edit_layout();
+        cx.notify();
+    }
+
+    fn propose_native_input(
+        &self,
+        range: &Range<usize>,
+        text: &str,
+    ) -> Result<InputHandling, EditError> {
+        let state = self.view.state();
+        let change = InputChange::new(state, range.clone(), text)?;
+        run_input_handlers(change, || {
+            let transaction = if *range == self.selection() && self.has_multiple_selections() {
+                state.replace_selection(text)?
+            } else {
+                let changes = ChangeSet::single(Change::new(range.clone(), text))?;
+                let at = range
+                    .start
+                    .checked_add(text.len())
+                    .ok_or(EditError::InvalidRange)?;
+                Transaction::new(changes).with_selection(EditorSelection::single(at, at))
+            };
+            Ok(transaction
+                .with_scroll_into_view()
+                .with_user_event("input.type"))
+        })
+    }
+
     fn replace(&mut self, range: Range<usize>, text: &str, cx: &mut Context<Self>) -> bool {
+        if let Some(accepted) = self.replace_multiple_selections(&range, text, false, cx) {
+            return accepted;
+        }
         self.replace_and_finish(EditScope::Active, range, text, |_, _, _| {}, cx)
+    }
+
+    fn replace_with_effect(
+        &mut self,
+        range: Range<usize>,
+        text: &str,
+        effect: StateEffect,
+        cx: &mut Context<Self>,
+    ) -> Option<ChangeDesc> {
+        let old_len = self.source().len();
+        let mut desc = None;
+        self.replace_with(
+            EditScope::Active,
+            range,
+            text,
+            |transaction| {
+                desc = Some(
+                    transaction
+                        .changes()
+                        .desc(old_len)
+                        .expect("valid Markdown edit"),
+                );
+                transaction.with_effects([effect])
+            },
+            |_, _, _| {},
+            cx,
+        )?;
+        self.finish_composition();
+        desc
     }
 
     fn replace_and_finish(
@@ -269,7 +646,10 @@ impl Editor {
         finish: impl FnOnce(&str, &mut SelectionRange, &mut Option<Section>),
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.replace_with(scope, range, text, finish, cx).is_none() {
+        if self
+            .replace_with(scope, range, text, std::convert::identity, finish, cx)
+            .is_none()
+        {
             return false;
         }
         self.finish_composition();
@@ -281,6 +661,7 @@ impl Editor {
         scope: EditScope,
         range: Range<usize>,
         text: &str,
+        decorate: impl FnOnce(Transaction) -> Transaction,
         finish: impl FnOnce(&str, &mut SelectionRange, &mut Option<Section>),
         cx: &mut Context<Self>,
     ) -> Option<usize> {
@@ -312,26 +693,119 @@ impl Editor {
         }
         let changes = ChangeSet::single(Change::new(range, inserted))
             .expect("Markdown plans a valid replacement");
-        let transaction =
-            Transaction::new(changes).with_selection(EditorSelection::single(caret, caret));
-        self.active = self
-            .history
-            .update(transaction, self.active.clone(), |state| {
+        let transaction = decorate(
+            Transaction::new(changes).with_selection(EditorSelection::single(caret, caret)),
+        );
+        let check = preserve_markdown_edit(&transaction, None);
+        let applied = self
+            .view
+            .update_checked(transaction, self.active.clone(), check, |state| {
                 let initial = state.selection().main();
                 let mut selection = initial;
                 finish(state.text().as_str(), &mut selection, &mut active);
                 let selection = (selection != initial)
                     .then(|| EditorSelection::single(selection.anchor(), selection.head()));
                 (selection, active)
-            })
-            .expect("Markdown edits and carets must use source byte boundaries");
+            });
+        let Ok(active) = applied else {
+            self.message = Some("Cannot apply this Markdown edit".into());
+            cx.notify();
+            return None;
+        };
+        self.active = active;
         self.invalidate_edit_layout();
         self.message = None;
         cx.notify();
         Some(start)
     }
 
+    fn apply_source_transaction(
+        &mut self,
+        transaction: Transaction,
+        scope: Range<usize>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.apply_source_transaction_with_receipt(transaction, scope, None, cx)
+    }
+
+    fn apply_source_transaction_with_receipt(
+        &mut self,
+        mut transaction: Transaction,
+        scope: Range<usize>,
+        receipt: Option<&mut Option<EditReceipt>>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(before) = &self.active else {
+            return false;
+        };
+        let mut after = before.clone();
+        let mut removed = 0;
+        let mut inserted = 0;
+        let mut corrections = Vec::new();
+        let markdown = self.markdown();
+        for (range, text) in transaction.changes().changes() {
+            if range.start < scope.start || range.end > scope.end {
+                return false;
+            }
+            let Ok((planned_range, planned)) =
+                markdown.plan_replacement(range.clone(), text, Some(before))
+            else {
+                return false;
+            };
+            if *range != planned_range {
+                return false;
+            }
+            let Some(suffix) = planned.strip_prefix(text) else {
+                return false;
+            };
+            if !suffix.is_empty() {
+                // The separator belongs to the fence, not to the editable body.
+                let at = range.start - removed + inserted + text.len();
+                corrections.push(Change::new(at..at, suffix));
+            }
+            removed += range.len();
+            inserted += text.len();
+            after.source.end = after.source.end - range.len() + planned.len();
+        }
+        after.content.end = after.content.end - removed + inserted;
+        if !corrections.is_empty() {
+            let Ok(changes) = ChangeSet::new(corrections) else {
+                return false;
+            };
+            let Ok(corrected) = transaction.merge(
+                Transaction::new(changes),
+                self.source().len(),
+                TransactionCoordinates::Sequential,
+            ) else {
+                return false;
+            };
+            transaction = corrected;
+        }
+        let check = preserve_markdown_edit(&transaction, receipt);
+        let Ok(active) = self
+            .view
+            .update_checked(transaction, self.active.clone(), check, |_| {
+                (None, Some(after))
+            })
+        else {
+            return false;
+        };
+        self.active = active;
+        self.finish_composition();
+        self.invalidate_edit_layout();
+        self.message = None;
+        cx.notify();
+        true
+    }
+
     fn move_horizontal(&mut self, right: bool, extend: bool, cx: &mut Context<Self>) {
+        if self.move_in_source_columns(right, extend, cx)
+            || self.source_fence().is_some()
+                && self.has_multiple_selections()
+                && !self.is_composing()
+        {
+            return;
+        }
         let selection = self.selection();
         let position = if !extend && !selection.is_empty() {
             if right {
@@ -350,6 +824,16 @@ impl Editor {
     }
 
     fn move_vertical(&mut self, down: bool, extend: bool, cx: &mut Context<Self>) {
+        if !extend && self.move_source_completion(down, false, cx) {
+            return;
+        }
+        if self.move_in_source_rows(down, extend, cx)
+            || self.source_fence().is_some()
+                && self.has_multiple_selections()
+                && !self.is_composing()
+        {
+            return;
+        }
         if let Some(((position, upstream), x)) = self.layout.as_ref().and_then(|layout| {
             layout.vertical(self.cursor(), self.upstream, self.preferred_x, down)
         }) {
@@ -361,23 +845,91 @@ impl Editor {
     }
 
     fn move_to(&mut self, position: usize, extend: bool, cx: &mut Context<Self>) {
+        self.move_caret(position, extend, "select", cx);
+    }
+
+    fn move_caret(
+        &mut self,
+        position: usize,
+        extend: bool,
+        event: &'static str,
+        cx: &mut Context<Self>,
+    ) {
         if !self.source().is_char_boundary(position) {
             return;
         }
         self.preferred_x = None;
-        self.set_selection(if extend { self.anchor() } else { position }, position);
+        self.set_user_selection(
+            if extend { self.anchor() } else { position },
+            position,
+            event,
+            cx,
+        );
         self.upstream = false;
+        self.leave_source_if_outside(position);
+        cx.notify();
+    }
+
+    fn move_to_bidi(
+        &mut self,
+        target: SelectionRange,
+        extend: bool,
+        event: &'static str,
+        cx: &mut Context<Self>,
+    ) {
+        let head = target.head();
+        let range = EditorSelection::range(
+            if extend { self.anchor() } else { head },
+            head,
+            None,
+            target.bidi_level(),
+            target.assoc(),
+        );
+        let old = self.view.state().selection().main();
+        if self.has_multiple_selections()
+            || old != range
+            || old.assoc() != range.assoc()
+            || old.bidi_level() != range.bidi_level()
+        {
+            let selection = EditorSelection::new(vec![range], 0).expect("one range");
+            self.record_selection_transaction(
+                Transaction::default()
+                    .with_selection(selection)
+                    .with_user_event(event),
+                self.active.clone(),
+                cx,
+            );
+        }
+        self.upstream =
+            target.assoc() == Some(gpui_editor_codemirror::Assoc::Before) && self.cursor() == head;
+        self.preferred_x = None;
+        cx.notify();
+    }
+
+    fn leave_source_if_outside(&mut self, position: usize) {
         if self.active.as_ref().is_some_and(|section| {
             position < section.content.start || position > section.content.end
         }) {
             self.finish_active();
         }
-        self.finish_composition();
-        cx.notify();
     }
 
     fn remove(&mut self, right: bool, cx: &mut Context<Self>) {
+        if self.unfold_at_deletion_edge(right, cx)
+            || (!right && (self.delete_source_bracket_pair(cx) || self.edit_markup(true, cx)))
+        {
+            return;
+        }
+        if self.delete_multiple_selections(right, cx).is_some() {
+            return;
+        }
         let mut selection = self.selection();
+        if !selection.is_empty() && !self.is_composing() {
+            let notice =
+                gpui_editor_codemirror::commands::announce_selection_deleted(self.view.state());
+            self.replace_with_effect(selection, "", notice, cx);
+            return;
+        }
         if selection.is_empty() {
             if let Some(layout) = &self.layout {
                 let mut at = self.cursor();
@@ -414,24 +966,63 @@ impl Editor {
                 return;
             }
         }
-        self.replace(selection, "", cx);
+        if !right
+            && !self.is_composing()
+            && self.selection().is_empty()
+            && selection.end == self.cursor()
+        {
+            self.edit_with_source_completion(
+                "delete.backward",
+                |editor, cx| editor.replace(selection, "", cx),
+                cx,
+            );
+        } else {
+            self.replace(selection, "", cx);
+        }
+    }
+
+    fn finish_pointer_selection(&mut self) {
+        self.selecting = false;
+        self.rectangle = None;
     }
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.finish_pointer_selection();
         if !self.input_enabled {
+            return;
+        }
+        if self.mouse_down_fold_gutter(event.position, cx) {
+            window.prevent_default();
+            return;
+        }
+        if self.start_source_rectangle(event, window, cx) {
             return;
         }
         let Some(layout) = &self.layout else { return };
         let (position, upstream) = layout.position_at(event.position);
+        let bidi_hit = layout
+            .bidi_hit_at(event.position)
+            .filter(|_| !self.is_composing());
         let item = layout.item_at(event.position);
+        let in_frame = layout.source_frame_contains(event.position);
         let hit = item.and_then(|item| item.target.clone());
         let block = item
             .filter(|item| matches!(item.paint, ItemPaint::Block(_)))
             .map(|item| item.source.clone());
+        if !event.modifiers.shift
+            && let Some(range) = item
+                .filter(|item| matches!(item.paint, ItemPaint::Fold(_)))
+                .map(|item| item.source.clone())
+            && self.open_source_fold(range, cx)
+        {
+            self.selecting = false;
+            window.focus(&self.focus);
+            return;
+        }
         let in_source = self.active.as_ref().is_some_and(|active| {
             active.content.start <= position
                 && position <= active.content.end
-                && layout.source_frame_contains(event.position)
+                && in_frame
                 && hit.is_none()
                 && block.is_none()
         });
@@ -450,12 +1041,13 @@ impl Editor {
         self.selecting = true;
         window.focus(&self.focus);
         if let Some(block) = block.filter(|_| !event.modifiers.shift) {
-            self.move_to(block.start, false, cx);
-            self.move_to(block.end, true, cx);
+            self.set_user_selection(block.start, block.end, "select.pointer", cx);
+            self.preferred_x = None;
+            self.upstream = false;
         } else if let Some(section) = hit.filter(|_| !event.modifiers.shift) {
             self.selecting = false;
             if section.kind == SectionKind::Link {
-                self.move_to(section.source.start, false, cx);
+                self.move_caret(section.source.start, false, "select.pointer", cx);
                 match self.link_target(&section) {
                     Ok(crate::media::Target::Web(url)) => cx.open_url(url.as_str()),
                     Ok(crate::media::Target::Local(path)) => cx.emit(OpenLocalDocument(path)),
@@ -465,8 +1057,10 @@ impl Editor {
             } else {
                 self.activate(section, false, cx);
             }
+        } else if let Some(target) = bidi_hit.filter(|_| in_source) {
+            self.move_to_bidi(target, event.modifiers.shift, "select.pointer", cx);
         } else {
-            self.move_to(position, event.modifiers.shift, cx);
+            self.move_caret(position, event.modifiers.shift, "select.pointer", cx);
             self.upstream = upstream && self.cursor() == position;
         }
     }
@@ -488,13 +1082,24 @@ impl Editor {
     }
 
     fn mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.drag_source_rectangle(event.position, cx) {
+            return;
+        }
         let Some(layout) = &self.layout else { return };
         if self.selecting {
+            if let Some(target) = layout
+                .bidi_hit_at(event.position)
+                .filter(|_| !self.is_composing())
+            {
+                self.move_to_bidi(target, true, "select.pointer", cx);
+                return;
+            }
             let (position, upstream) = layout.position_at(event.position);
-            self.move_to(position, true, cx);
+            self.move_caret(position, true, "select.pointer", cx);
             self.upstream = upstream && self.cursor() == position;
         } else if self.hover.as_ref()
             != Self::hovered_link(layout, event.position).map(|item| &item.source)
+            || lint::diagnostic_count(self.view.state()) != 0
         {
             cx.notify();
         }
@@ -552,6 +1157,35 @@ fn from_utf16(text: &str, range: Range<usize>) -> Range<usize> {
     utf16_to_byte(text, range.start)..utf16_to_byte(text, range.end)
 }
 
+struct EditReceipt {
+    proposed: Transaction,
+    resolved: Transaction,
+}
+
+fn preserve_markdown_edit<'a>(
+    transaction: &Transaction,
+    receipt: Option<&'a mut Option<EditReceipt>>,
+) -> impl FnOnce(&Transaction) -> Result<(), EditError> + use<'a> {
+    let changes = transaction.changes().clone();
+    let selection = transaction.selection().cloned();
+    let proposed = receipt.as_ref().map(|_| transaction.clone());
+    move |resolved| {
+        if &changes != resolved.changes() {
+            return Err(EditError::InvalidRange);
+        }
+        if selection.as_ref() != resolved.selection() {
+            return Err(EditError::InvalidSelection);
+        }
+        if let (Some(receipt), Some(proposed)) = (receipt, proposed) {
+            *receipt = Some(EditReceipt {
+                proposed,
+                resolved: resolved.clone(),
+            });
+        }
+        Ok(())
+    }
+}
+
 fn to_utf16(text: &str, range: Range<usize>) -> Range<usize> {
     text[..range.start].encode_utf16().count()..text[..range.end].encode_utf16().count()
 }
@@ -600,13 +1234,40 @@ impl EntityInputHandler for Editor {
         &mut self,
         range: Option<Range<usize>>,
         text: &str,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.input_enabled || self.view.state().read_only() {
+            return;
+        }
         let range = range
             .map(|range| from_utf16(self.source(), range))
             .or_else(|| self.marked.clone())
             .unwrap_or_else(|| self.selection());
+        let may_complete =
+            self.marked.is_none() && range == self.selection() && text.chars().count() == 1;
+        if !self.is_composing() {
+            match self.propose_native_input(&range, text) {
+                Ok(InputHandling::Pass) => {}
+                Ok(InputHandling::Handled(Some(transaction))) => {
+                    let edit = |editor: &mut Self, cx: &mut Context<Self>| {
+                        editor.apply_multi_edit(transaction, cx)
+                    };
+                    if may_complete {
+                        self.type_with_source_lsp_signature(text, window, cx, edit);
+                    } else {
+                        edit(self, cx);
+                    }
+                    return;
+                }
+                Ok(InputHandling::Handled(None)) => return,
+                Err(_) => {
+                    self.message = Some("Cannot apply this input".into());
+                    cx.notify();
+                    return;
+                }
+            }
+        }
         if text == "`"
             && range.is_empty()
             && range.start == self.cursor()
@@ -615,7 +1276,18 @@ impl EntityInputHandler for Editor {
         {
             return;
         }
-        self.replace(range, text, cx);
+        let edit = |editor: &mut Self, cx: &mut Context<Self>| {
+            editor.type_source_tag(&range, text, cx)
+                || editor.type_source_percent_brace(&range, text, cx)
+                || editor.type_source_bracket(&range, text, cx)
+                || editor.type_source_indent(&range, text, cx)
+                || editor.replace(range, text, cx)
+        };
+        if may_complete {
+            self.type_with_source_lsp_signature(text, window, cx, edit);
+        } else {
+            edit(self, cx);
+        }
     }
 
     fn replace_and_mark_text_in_range(
@@ -626,19 +1298,30 @@ impl EntityInputHandler for Editor {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.input_enabled || self.view.state().read_only() {
+            return;
+        }
         let range = range
             .map(|range| from_utf16(self.source(), range))
             .or_else(|| self.marked.clone())
             .unwrap_or_else(|| self.selection());
         let starting = self.marked.is_none();
         if starting {
-            self.history.start_group();
+            let lsp = self.dismiss_source_lsp_tooltips();
+            if self.clear_source_tooltip() || lsp {
+                cx.notify();
+            }
+            self.cancel_source_snippet(cx);
+            self.collapse_multiple_selections(cx);
+            self.view.start_group();
         }
         let start = range.start;
+        let revision = self.view.revision();
         let applied = self.replace_with(
             EditScope::Active,
             range,
             text,
+            std::convert::identity,
             |_, selection, _| {
                 if !text.is_empty()
                     && let Some(selected) = selected
@@ -649,10 +1332,18 @@ impl EntityInputHandler for Editor {
             },
             cx,
         );
+        if self.view.revision() != revision
+            && let Some(collab) = &mut self.source_collab
+        {
+            collab.note_ime_edit();
+        }
         match applied {
-            Some(start) if !text.is_empty() => self.marked = Some(start..start + text.len()),
+            Some(start) if !text.is_empty() => {
+                self.dismiss_keyboard_diagnostic_hover();
+                self.marked = Some(start..start + text.len());
+            }
             Some(_) => self.finish_composition(),
-            None if starting => self.history.end_group(),
+            None if starting => self.view.end_group(),
             None => {}
         }
     }
@@ -665,9 +1356,12 @@ impl EntityInputHandler for Editor {
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         let offset = from_utf16(self.source(), range).start;
-        self.layout
-            .as_ref()?
-            .bounds_at(offset, offset == self.cursor() && self.upstream)
+        let layout = self.layout.as_ref()?;
+        if offset == self.cursor() {
+            layout.bounds_at_selection(self.view.state().selection().main(), self.upstream)
+        } else {
+            layout.bounds_at(offset, false)
+        }
     }
 
     fn character_index_for_point(
@@ -688,20 +1382,65 @@ fn wrap_width(viewport_width: Pixels) -> Pixels {
     (viewport_width - px(2. * HORIZONTAL_PADDING + 2.)).max(px(1.))
 }
 
+impl Editor {
+    fn panel_input_colors(
+        cx: &Context<Self>,
+    ) -> impl Fn(&App) -> Option<FieldColors> + Clone + use<> {
+        let editor = cx.weak_entity();
+        // GPUI renders the field after the parent render returns. Read the current
+        // extension then, without a field update or a notification to its observers.
+        move |cx| {
+            let style = view_style(editor.upgrade()?.read(cx).view.state())?;
+            Some(FieldColors {
+                surface: rgba(style.panels.background.rgba32()),
+                text: rgba(style.panels.foreground.rgba32()),
+                // The dark base .cm-textfield border in @codemirror/view 6.44.0.
+                border: rgb(0x555555),
+                accent: rgba(style.caret.rgba32()),
+                selection: rgba(style.selection.rgba32()),
+            })
+        }
+    }
+}
+
 impl Render for Editor {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_caret_blink(window, cx);
+        if self.is_reviewing_changes() {
+            #[cfg(test)]
+            {
+                self.painted_source_tooltip = None;
+            }
+            return self.render_merge_review(window, cx).into_any_element();
+        }
+        self.retain_source_lsp_diagnostics();
+        self.sync_source_diagnostics(cx);
         let editor = cx.entity();
         // The Shell can change the body width without resizing the window. Use
         // the space GPUI assigned us before laying out the scrollable document.
-        canvas(
-            move |bounds, window, cx| {
-                let mut body = editor.update(cx, |editor, cx| editor.body(bounds.size, window, cx));
-                body.prepaint_as_root(bounds.origin, bounds.size.into(), window, cx);
-                body
-            },
-            |_, mut body, window, cx| body.paint(window, cx),
-        )
-        .size_full()
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .children(self.render_find(window, cx))
+            .children(self.render_goto_line(window, cx))
+            .children(self.render_source_diagnostics(window, cx))
+            .child(
+                canvas(
+                    move |bounds, window, cx| {
+                        let mut body =
+                            editor.update(cx, |editor, cx| editor.body(bounds.size, window, cx));
+                        body.prepaint_as_root(bounds.origin, bounds.size.into(), window, cx);
+                        body
+                    },
+                    |_, mut body, window, cx| body.paint(window, cx),
+                )
+                .flex_1()
+                .min_h_0()
+                .w_full(),
+            )
+            .children(self.render_source_lsp_references(window, cx))
+            .into_any_element()
     }
 }
 
@@ -709,27 +1448,28 @@ impl Editor {
     fn body(
         &mut self,
         viewport: Size<Pixels>,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = Theme::for_window(window);
-        let dark = matches!(
-            window.appearance(),
-            WindowAppearance::Dark | WindowAppearance::VibrantDark
-        );
+        let tooltip = view_style(self.view.state()).map(|style| style.tooltip);
         self.expire_message(cx);
         let previous = self.scroll.bounds();
         if viewport.width != previous.size.width
             && self
                 .layout
                 .as_ref()
-                .and_then(|layout| layout.bounds_at(self.cursor(), self.upstream))
+                .and_then(|layout| {
+                    layout.bounds_at_selection(self.view.state().selection().main(), self.upstream)
+                })
                 .is_some_and(|caret| previous.intersects(&caret))
         {
             self.reveal_caret = true;
         }
         let wrap_width = wrap_width(viewport.width);
-        let layout = self.shape_for_width(window, cx, wrap_width);
+        let (layout, isolation_cache) = self.shape_for_paint(window, cx, wrap_width);
+        let drop_cursor_revision = self.view.revision();
+        let theme = layout.theme;
+        let dark = theme.view.is_some_and(|style| style.dark);
         let frame = layout.source_frame.as_ref().map(|frame| frame.bounds);
         let width = layout
             .rows
@@ -737,13 +1477,24 @@ impl Editor {
             .map(|row| row.width)
             .max()
             .unwrap_or(px(0.))
-            .max(frame.map_or(wrap_width, |bounds| bounds.right()));
+            .max(frame.map_or(wrap_width, |bounds| bounds.right()))
+            + px(2.);
+        let top_padding = px(VERTICAL_PADDING);
+        let end_padding = self
+            .end_scroll_padding
+            .update(
+                self.view.state(),
+                viewport.height.into(),
+                DEFAULT_LINE_HEIGHT.into(),
+                top_padding.into(),
+            )
+            .map(Pixels::from);
         let height = layout
             .rows
             .last()
-            .map_or(px(26.), |row| row.y + row.height)
+            .map_or(DEFAULT_LINE_HEIGHT, |row| row.y + row.height)
             .max(frame.map_or(px(0.), |bounds| bounds.bottom()))
-            .max(viewport.height - px(2. * VERTICAL_PADDING));
+            .max(viewport.height - (top_padding + end_padding.unwrap_or(top_padding)));
         let editor = cx.entity();
         let overlay_editor = editor.clone();
         div()
@@ -754,24 +1505,199 @@ impl Editor {
             .overflow_scroll()
             .track_scroll(&self.scroll)
             .px(px(HORIZONTAL_PADDING))
-            .py(px(VERTICAL_PADDING))
-            .cursor(CursorStyle::IBeam)
+            .pt(top_padding)
+            .pb(if end_padding.is_some() {
+                px(0.)
+            } else {
+                top_padding
+            })
+            .cursor(
+                if self.input_enabled && window.modifiers().alt && self.source_fence().is_some() {
+                    CursorStyle::Crosshair
+                } else {
+                    CursorStyle::IBeam
+                },
+            )
             .key_context("Editor")
             .track_focus(&self.focus)
+            .on_key_down(cx.listener(|editor, event, window, cx| {
+                if !editor.handle_editor_tab(event, window, cx) {
+                    if editor.focus.is_focused(window) {
+                        editor.commit_source_completion(event, cx);
+                    }
+                    editor.source_key_down(event, cx);
+                }
+            }))
+            .on_action(cx.listener(|editor, _: &SelectSourceParent, _, cx| {
+                if !editor.select_source_parent(cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|editor, _: &IndentSourceSelection, _, cx| {
+                if !editor.indent_source(SourceIndent::Selection, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|editor, _: &InsertSourceBlankLine, _, cx| {
+                if !editor.indent_source(SourceIndent::BlankLine, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|editor, _: &ToggleSourceComment, _, cx| {
+                if !editor.toggle_source_comment(cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|editor, _: &ToggleSourceFold, _, cx| {
+                if !editor.toggle_source_fold(cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|editor, _: &OpenDiagnostics, window, cx| {
+                if !editor.open_source_diagnostics(window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|editor, _: &NextDiagnostic, window, cx| {
+                if !editor.jump_source_diagnostic(false, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|editor, _: &PreviousDiagnostic, window, cx| {
+                if !editor.jump_source_diagnostic(true, window, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|editor, _: &OpenCompletion, _, cx| {
+                if !editor.request_source_completion(true, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(
+                cx.listener(|editor, _: &source_lsp::ShowSignatureHelp, window, cx| {
+                    if window.is_window_active()
+                        && editor.focus.is_focused(window)
+                        && editor.request_source_lsp_signature_help()
+                    {
+                        cx.notify();
+                    } else {
+                        cx.propagate();
+                    }
+                }),
+            )
+            .on_action(
+                cx.listener(|editor, _: &source_lsp::PreviousSignature, window, cx| {
+                    if editor.cycle_source_lsp_signature(false, window) {
+                        cx.notify();
+                    } else {
+                        cx.propagate();
+                    }
+                }),
+            )
+            .on_action(
+                cx.listener(|editor, _: &source_lsp::NextSignature, window, cx| {
+                    if editor.cycle_source_lsp_signature(true, window) {
+                        cx.notify();
+                    } else {
+                        cx.propagate();
+                    }
+                }),
+            )
+            .on_action(cx.listener(|editor, _: &CloseCompletion, _, cx| {
+                let dismissed = if editor.is_composing() {
+                    false
+                } else {
+                    let lint = editor.dismiss_keyboard_diagnostic_hover();
+                    let lsp = editor.dismiss_source_lsp_tooltips();
+                    editor.clear_source_tooltip() || lsp || lint
+                };
+                if dismissed {
+                    cx.notify();
+                }
+                if editor.is_composing()
+                    || (!editor.close_source_completion(cx)
+                        && !editor.cancel_source_snippet(cx)
+                        && !editor.collapse_multiple_selections(cx)
+                        && !dismissed)
+                {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|editor, _: &ToggleEditorTabFocus, _, cx| {
+                if !editor.toggle_editor_tab_focus(cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|editor, _: &CompletionPageUp, _, cx| {
+                if !editor.move_source_completion(false, true, cx)
+                    && !editor.page_in_source_rows(false, false, cx)
+                {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|editor, _: &CompletionPageDown, _, cx| {
+                if !editor.move_source_completion(true, true, cx)
+                    && !editor.page_in_source_rows(true, false, cx)
+                {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|editor, _: &SelectSourcePageUp, _, cx| {
+                if !editor.page_in_source_rows(false, true, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|editor, _: &SelectSourcePageDown, _, cx| {
+                if !editor.page_in_source_rows(true, true, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|editor, _: &OpenFind, window, cx| editor.open_find(window, cx)))
+            .on_action(
+                cx.listener(|editor, _: &OpenGotoLine, window, cx| {
+                    editor.open_goto_line(window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|editor, _: &FindNext, window, cx| {
+                    editor.repeat_find(false, window, cx)
+                }),
+            )
+            .on_action(cx.listener(|editor, _: &SelectNextOccurrence, _, cx| {
+                if !editor.select_search_occurrences(false, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|editor, _: &SelectSelectionMatches, _, cx| {
+                if !editor.select_search_occurrences(true, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|editor, _: &FindPrevious, window, cx| {
+                editor.repeat_find(true, window, cx)
+            }))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_move(cx.listener(Self::mouse_move))
+            .on_modifiers_changed(cx.listener(|editor, _, _, cx| {
+                if editor.source_fence().is_some() {
+                    cx.notify();
+                }
+            }))
             .on_hover(cx.listener(|editor, hovered, _, cx| {
-                if !hovered && editor.hover.take().is_some() {
+                if !hovered
+                    && (editor.hover.take().is_some()
+                        || lint::diagnostic_count(editor.view.state()) != 0)
+                {
                     cx.notify();
                 }
             }))
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|editor, _, _, _| editor.selecting = false),
+                cx.listener(|editor, _, _, _| editor.finish_pointer_selection()),
             )
             .on_mouse_up_out(
                 MouseButton::Left,
-                cx.listener(|editor, _, _, _| editor.selecting = false),
+                cx.listener(|editor, _, _, _| editor.finish_pointer_selection()),
             )
             .on_action(cx.listener(|e, _: &Left, _, cx| e.move_horizontal(false, false, cx)))
             .on_action(cx.listener(|e, _: &Right, _, cx| e.move_horizontal(true, false, cx)))
@@ -779,6 +1705,16 @@ impl Editor {
             .on_action(cx.listener(|e, _: &SelectRight, _, cx| e.move_horizontal(true, true, cx)))
             .on_action(cx.listener(|e, _: &Up, _, cx| e.move_vertical(false, false, cx)))
             .on_action(cx.listener(|e, _: &Down, _, cx| e.move_vertical(true, false, cx)))
+            .on_action(cx.listener(|e, _: &AddSourceCursorAbove, _, cx| {
+                if !e.add_source_cursor(false, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|e, _: &AddSourceCursorBelow, _, cx| {
+                if !e.add_source_cursor(true, cx) {
+                    cx.propagate();
+                }
+            }))
             .on_action(cx.listener(|e, _: &SelectUp, _, cx| e.move_vertical(false, true, cx)))
             .on_action(cx.listener(|e, _: &SelectDown, _, cx| e.move_vertical(true, true, cx)))
             .on_action(cx.listener(|e, _: &SelectAll, _, cx| {
@@ -786,7 +1722,7 @@ impl Editor {
                     .active
                     .as_ref()
                     .map_or(0..e.source().len(), |section| section.content.clone());
-                e.set_selection(range.start, range.end);
+                e.set_user_selection(range.start, range.end, "select", cx);
                 e.upstream = false;
                 e.reveal_caret = true;
                 e.preferred_x = None;
@@ -795,52 +1731,120 @@ impl Editor {
             .on_action(cx.listener(|e, _: &Backspace, _, cx| e.remove(false, cx)))
             .on_action(cx.listener(|e, _: &Delete, _, cx| e.remove(true, cx)))
             .on_action(cx.listener(|e, _: &Newline, window, cx| {
-                e.replace_text_in_range(None, "\n", window, cx)
-            }))
-            .on_action(cx.listener(|e, _: &Copy, _, cx| {
-                if !e.selection().is_empty() {
-                    cx.write_to_clipboard(ClipboardItem::new_string(
-                        e.source()[e.selection()].to_owned(),
-                    ));
+                if !e.accept_source_completion(None, cx)
+                    && !e.indent_source(SourceIndent::Newline, cx)
+                    && !e.edit_markup(false, cx)
+                {
+                    e.replace_text_in_range(None, "\n", window, cx);
                 }
             }))
-            .on_action(cx.listener(|e, _: &Cut, _, cx| {
-                if !e.selection().is_empty() {
-                    let text = e.source()[e.selection()].to_owned();
-                    if e.replace(e.selection(), "", cx) {
-                        cx.write_to_clipboard(ClipboardItem::new_string(text));
-                    }
-                }
-            }))
+            .on_action(cx.listener(|e, _: &Copy, _, cx| e.copy_or_cut(false, cx)))
+            .on_action(cx.listener(|e, _: &Cut, _, cx| e.copy_or_cut(true, cx)))
             .on_action(cx.listener(|e, _: &Paste, _, cx| {
-                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                if e.input_enabled
+                    && !e.view.state().read_only()
+                    && let Some(raw) = cx.read_from_clipboard().and_then(|item| item.text())
+                    && let Ok(text) = filter_clipboard_input(e.view.state(), raw)
+                {
                     let range = e.marked.clone().unwrap_or_else(|| e.selection());
-                    e.replace(range, &text, cx);
+                    if !e.paste_source_lines(&text, cx)
+                        && !e.paste_source_link(&text, cx)
+                        && e.replace_multiple_selections(&range, &text, true, cx)
+                            .is_none()
+                    {
+                        e.replace(range, &text, cx);
+                    }
                 }
             }))
             .on_action(cx.listener(|e, _: &Undo, _, cx| e.replay_history(false, cx)))
             .on_action(cx.listener(|e, _: &Redo, _, cx| e.replay_history(true, cx)))
+            .on_action(
+                cx.listener(|e, _: &UndoSelection, _, cx| e.replay_selection_history(false, cx)),
+            )
+            .on_action(
+                cx.listener(|e, _: &RedoSelection, _, cx| e.replay_selection_history(true, cx)),
+            )
             .child(
                 canvas(
                     move |bounds, window, cx| {
-                        let layout = Layout {
-                            origin: bounds.origin,
-                            ..layout
-                        };
+                        let mut layout = layout;
+                        layout.origin = bounds.origin;
+                        let viewport = window.content_mask().bounds;
+                        let bracket_marks = overlay_editor.update(cx, |e, _| {
+                            layout.prepare_fold_gutter(e, viewport);
+                            if e.focus.is_focused(window) {
+                                e.source_bracket_marks()
+                            } else {
+                                Vec::new()
+                            }
+                        });
+                        let completion = overlay_editor.update(cx, |editor, cx| {
+                            editor.prepaint_source_completion(&layout, viewport, window, cx)
+                        });
                         let (hover, overlay) = overlay_editor.read(cx).overlay(
                             &layout,
-                            window.content_mask().bounds,
+                            viewport,
                             window,
+                            completion.is_some(),
                         );
-                        let overlay =
-                            overlay.and_then(|overlay| overlay.prepaint(theme, window, cx));
-                        (layout, hover, overlay)
+                        #[cfg(test)]
+                        let overlay_text = overlay.as_ref().map(|overlay| overlay.text.clone());
+                        let source_tooltip = if overlay.is_none()
+                            && completion.is_none()
+                            && overlay_editor.read(cx).source_tooltip.is_some()
+                        {
+                            overlay_editor.update(cx, |editor, cx| {
+                                editor.prepaint_source_tooltip(&layout, viewport, window, cx)
+                            })
+                        } else {
+                            None
+                        };
+                        let overlay = overlay
+                            .and_then(|overlay| overlay.prepaint(theme, tooltip, window, cx));
+                        #[cfg(test)]
+                        overlay_editor.update(cx, |editor, _| {
+                            editor.prepainted_overlay = overlay.as_ref().and(overlay_text);
+                        });
+                        (
+                            layout,
+                            hover,
+                            overlay,
+                            completion,
+                            source_tooltip,
+                            bracket_marks,
+                        )
                     },
-                    move |bounds, (layout, hover, overlay), window, cx| {
+                    move |bounds,
+                          (
+                        mut layout,
+                        hover,
+                        overlay,
+                        completion,
+                        source_tooltip,
+                        bracket_marks,
+                    ),
+                          window,
+                          cx| {
+                        layout.prepare_isolated_paint(isolation_cache.as_ref(), window, cx);
                         let e = editor.read(cx);
                         let selection = e.selection();
-                        let caret = layout.bounds_at(e.cursor(), e.upstream);
+                        let native_selection = e.view.state().selection();
+                        let secondary: Vec<_> = native_selection
+                            .ranges()
+                            .iter()
+                            .enumerate()
+                            .filter(|(index, _)| *index != native_selection.main_index())
+                            .map(|(_, range)| range.range())
+                            .collect();
+                        let caret = layout.bounds_at_selection(native_selection.main(), e.upstream);
                         let focus = e.focus.clone();
+                        let focused = focus.is_focused(window);
+                        let active_lines = layout.active_source_highlights(
+                            e.view.state(),
+                            focused,
+                            e.input_enabled,
+                        );
+                        let diagnostic_marks = e.source_diagnostic_paint_marks();
                         if e.input_enabled {
                             window.handle_input(
                                 &focus,
@@ -855,7 +1859,53 @@ impl Editor {
                         let top = clip.top() - layout.origin.y;
                         let bottom = clip.bottom() - layout.origin.y;
                         let first = layout.rows.partition_point(|row| row.y + row.height <= top);
-                        for row in layout.rows[first..].iter().take_while(|row| row.y < bottom) {
+                        let last =
+                            layout.rows[first..].partition_point(|row| row.y < bottom) + first;
+                        let visible_rows = &layout.rows[first..last];
+                        let (find_marks, selection_marks) = editor
+                            .update(cx, |e, cx| {
+                                let visible_ranges = visible_rows.iter().flat_map(|row| {
+                                    row.items.iter().filter_map(|item| {
+                                        let left = layout.origin.x + item.left;
+                                        (!matches!(item.paint, ItemPaint::Fold(_))
+                                            && left < clip.right()
+                                            && left + item.width > clip.left())
+                                        .then(|| item.source.clone())
+                                    })
+                                });
+                                let viewport =
+                                    Viewport::around(e.view.state().text(), visible_ranges).ok()?;
+                                e.view.set_viewport_geometry(viewport).ok()?;
+                                let find = e.find_marks(cx);
+                                let selection = e.selection_match_marks(focused);
+                                Some((find, selection))
+                            })
+                            .unwrap_or_default();
+                        for row in visible_rows {
+                            if let Some(frame) = &layout.source_frame {
+                                active_lines.paint_row(
+                                    frame,
+                                    layout.origin,
+                                    row,
+                                    theme,
+                                    window,
+                                    #[cfg(test)]
+                                    &mut layout.painted_active_lines,
+                                );
+                                frame.paint_gutter_row(
+                                    layout.origin,
+                                    row,
+                                    theme,
+                                    window,
+                                    cx,
+                                    #[cfg(test)]
+                                    &mut layout.painted_active_lines,
+                                );
+                            }
+                            let row_bounds = Bounds::new(
+                                layout.origin + point(px(0.), row.y),
+                                size(row.width, row.height),
+                            );
                             for item in &row.items {
                                 let top = layout.origin + point(item.left, row.y);
                                 let framed = item.framed_graphic()
@@ -900,20 +1950,47 @@ impl Editor {
                                 } else {
                                     None
                                 };
-                                let start = selection.start.max(item.source.start);
-                                let end = selection.end.min(item.source.end);
-                                if start < end {
-                                    let x = item.x(start);
-                                    window.paint_quad(fill(
-                                        Bounds::new(
-                                            layout.origin + point(x, row.y),
-                                            size(item.x(end) - x, row.height),
-                                        ),
-                                        theme.selection,
-                                    ));
+                                if item.is_text() {
+                                    source_brackets::paint_source_brackets(
+                                        &bracket_marks,
+                                        item,
+                                        row_bounds,
+                                        theme.view,
+                                        window,
+                                        #[cfg(test)]
+                                        &mut layout.painted_bracket_quads,
+                                    );
                                 }
+                                if let Some(marks) = &selection_marks
+                                    && item.is_text()
+                                {
+                                    document_find::paint_selection_matches(
+                                        marks,
+                                        find_marks.as_deref(),
+                                        item,
+                                        row_bounds,
+                                        theme,
+                                        window,
+                                        #[cfg(test)]
+                                        &mut layout.painted_find_quads,
+                                    );
+                                }
+                                document_find::paint_find_and_selection(
+                                    find_marks.as_deref(),
+                                    (&selection, &secondary),
+                                    item,
+                                    row_bounds,
+                                    theme,
+                                    window,
+                                    #[cfg(test)]
+                                    &mut layout.painted_find_quads,
+                                );
                                 match &item.paint {
                                     ItemPaint::Text(line) => {
+                                        let _ = line.paint(top, row.height, window, cx);
+                                    }
+                                    ItemPaint::Isolated(native) => native.paint(top, window),
+                                    ItemPaint::Fold(line) => {
                                         let _ = line.paint(top, row.height, window, cx);
                                     }
                                     ItemPaint::Block(block) => block.paint_text(top, window, cx),
@@ -927,28 +2004,88 @@ impl Editor {
                                         );
                                     }
                                 }
+                                if item.is_text() {
+                                    source_diagnostics::paint_range_marks(
+                                        &diagnostic_marks,
+                                        item,
+                                        row_bounds,
+                                        theme,
+                                        dark,
+                                        window,
+                                    );
+                                }
                             }
                         }
-                        if selection.is_empty()
-                            && focus.is_focused(window)
-                            && let Some(caret) = caret
-                        {
-                            window.paint_quad(fill(caret, theme.accent));
+                        source_diagnostics::paint_point_marks(
+                            &layout,
+                            &diagnostic_marks,
+                            theme,
+                            dark,
+                            window,
+                        );
+                        layout.paint_placeholders(window, cx);
+                        draw_selection::paint(
+                            editor.read(cx),
+                            &mut layout,
+                            caret,
+                            clip,
+                            window,
+                            cx,
+                        );
+                        drop_cursor::paint(
+                            editor.read(cx),
+                            &mut layout,
+                            drop_cursor_revision,
+                            clip,
+                            window,
+                        );
+                        #[cfg(test)]
+                        let mut painted_source_tooltip = None;
+                        if let Some(source_tooltip) = source_tooltip {
+                            source_tooltip.paint(
+                                window,
+                                cx,
+                                #[cfg(test)]
+                                &mut painted_source_tooltip,
+                            );
                         }
                         if let Some(mut overlay) = overlay {
                             overlay.paint(window, cx);
                         }
+                        if let Some(mut completion) = completion {
+                            completion.paint(window, cx);
+                        }
                         editor.update(cx, |e, _| {
+                            #[cfg(test)]
+                            {
+                                e.painted_source_tooltip = painted_source_tooltip;
+                            }
                             // Scroll bounds and wrap positions now match this frame.
                             let reveal_caret = std::mem::take(&mut e.reveal_caret);
-                            let target = if let Some(offset) = e.reveal_source.take()
+                            let snapshot = e.view.take_scroll_snapshot();
+                            let scrolled = if let Some(reveal) = e.reveal_source.take()
                                 && !e.is_composing()
                             {
-                                layout.source_bounds(offset)
+                                layout.source_bounds(reveal.offset).is_some_and(|bounds| {
+                                    e.reveal_source_bounds(reveal.offset, bounds, reveal.alignment)
+                                })
+                            } else if !reveal_caret
+                                && !e.is_composing()
+                                && let Some(snapshot) = snapshot
+                            {
+                                e.restore_source_scroll(&layout, snapshot)
                             } else {
-                                caret.filter(|_| reveal_caret && focus.is_focused(window))
+                                caret.is_some_and(|bounds| {
+                                    reveal_caret
+                                        && focus.is_focused(window)
+                                        && e.reveal_source_bounds(
+                                            e.cursor(),
+                                            bounds,
+                                            RevealAlignment::Nearest,
+                                        )
+                                })
                             };
-                            if target.is_some_and(|bounds| reveal_bounds(&e.scroll, bounds)) {
+                            if scrolled {
                                 window.on_next_frame(|window, _| window.refresh());
                             }
                             e.layout = Some(layout);
@@ -956,8 +2093,14 @@ impl Editor {
                         });
                     },
                 )
-                .w(width + px(2.))
-                .h(height),
+                .w(width)
+                .h(height)
+                .map(|content| match end_padding {
+                    // Put the padding on the content so retained padding in a
+                    // short viewport cannot make the viewport itself taller.
+                    Some(padding) => div().w(width).pb(padding).child(content).into_any_element(),
+                    None => content.into_any_element(),
+                }),
             )
             .into_any_element()
     }
@@ -967,6 +2110,7 @@ impl Editor {
         layout: &Layout,
         viewport: Bounds<Pixels>,
         window: &Window,
+        completion_visible: bool,
     ) -> (Option<Range<usize>>, Option<Overlay>) {
         let pointer = window.mouse_position();
         let link = (!self.selecting && viewport.contains(&pointer))
@@ -974,7 +2118,9 @@ impl Editor {
             .flatten();
         let hover = link.map(|item| item.source.clone());
         let caret = (self.selection().is_empty() && self.focus.is_focused(window))
-            .then(|| layout.bounds_at(self.cursor(), self.upstream))
+            .then(|| {
+                layout.bounds_at_selection(self.view.state().selection().main(), self.upstream)
+            })
             .flatten();
         if let Some(message) = &self.message {
             return (
@@ -984,6 +2130,7 @@ impl Editor {
                     anchor: None,
                     viewport,
                     caret,
+                    prefer_above: false,
                 }),
             );
         }
@@ -1004,9 +2151,21 @@ impl Editor {
                 anchor: Some(anchor),
                 viewport,
                 caret,
+                prefer_above: false,
             })
         });
-        (hover, overlay)
+        (
+            hover,
+            overlay
+                .or_else(|| self.source_diagnostic_tooltip(layout, viewport, window))
+                .or_else(|| {
+                    if completion_visible {
+                        None
+                    } else {
+                        self.source_lsp_tooltip(layout, viewport, window, caret)
+                    }
+                }),
+        )
     }
 }
 
@@ -1015,22 +2174,32 @@ struct Overlay {
     anchor: Option<Bounds<Pixels>>,
     viewport: Bounds<Pixels>,
     caret: Option<Bounds<Pixels>>,
+    prefer_above: bool,
 }
 
 impl Overlay {
-    fn prepaint(self, theme: Theme, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
+    fn prepaint(
+        self,
+        theme: Theme,
+        tooltip: Option<gpui_editor_codemirror::theme_one_dark::TooltipStyle>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<AnyElement> {
         let viewport = self.viewport.inset(px(10.));
         if viewport.size.width <= px(0.) || viewport.size.height <= px(0.) {
             return None;
         }
         let (background, foreground) = if self.anchor.is_some() {
-            (theme.tooltip, theme.on_tooltip)
+            (
+                tooltip.map_or(theme.tooltip, |style| rgba(style.background.rgba32())),
+                theme.on_tooltip,
+            )
         } else {
             (theme.error_bg, theme.error)
         };
         // This element has neither event handlers nor a hitbox. It floats over
         // the scroll viewport without consuming space or intercepting input.
-        let mut element = div()
+        let element = div()
             .max_w(viewport.size.width.min(px(440.)))
             .max_h(viewport.size.height)
             .overflow_hidden()
@@ -1040,8 +2209,14 @@ impl Overlay {
             .text_sm()
             .bg(background)
             .text_color(foreground)
-            .child(self.text)
-            .into_any_element();
+            .child(self.text);
+        #[cfg(test)]
+        let element = element
+            .debug_selector(|| "stock-editor-overlay".into())
+            .children(self.anchor.and_then(|_| {
+                one_dark_tests::overlay_text_probe(one_dark_tests::OverlayText::Anchored)
+            }));
+        let mut element = element.into_any_element();
         let size = element.layout_as_root(
             size(AvailableSpace::MaxContent, AvailableSpace::MaxContent),
             window,
@@ -1052,10 +2227,12 @@ impl Overlay {
             let above = anchor.top() - size.height - px(4.);
             point(
                 anchor.left(),
-                if below + size.height <= viewport.bottom() {
-                    below
-                } else {
+                if self.prefer_above && above >= viewport.top()
+                    || below + size.height > viewport.bottom()
+                {
                     above
+                } else {
+                    below
                 },
             )
         } else {
@@ -1084,54 +2261,137 @@ impl Overlay {
     }
 }
 
-fn reveal_bounds(scroll: &ScrollHandle, target: Bounds<Pixels>) -> bool {
-    let viewport = scroll.bounds().inset(px(4.));
-    if viewport.size.width <= px(0.) || viewport.size.height <= px(0.) {
-        return false;
-    }
-    let current = scroll.offset();
-    let limit = scroll.max_offset();
-    let adjust = |start: Pixels, end: Pixels, low: Pixels, high: Pixels| {
-        if start < low {
-            low - start
-        } else if end > high {
-            high - end
-        } else {
-            px(0.)
-        }
-    };
-    let next = point(
-        (current.x
-            + adjust(
-                target.left(),
-                target.right(),
-                viewport.left(),
-                viewport.right(),
-            ))
-        .clamp(-limit.width, px(0.)),
-        (current.y
-            + adjust(
-                target.top(),
-                target.bottom(),
-                viewport.top(),
-                viewport.bottom(),
-            ))
-        .clamp(-limit.height, px(0.)),
-    );
-    if next == current {
-        return false;
-    }
-    scroll.set_offset(next);
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
 
-    use gpui::{Modifiers, TestAppContext};
+    use gpui::{ClipboardItem, Modifiers, TestAppContext};
+    use gpui_editor_codemirror::autocomplete::brackets::close_brackets_enabled;
 
     use super::*;
+
+    #[gpui::test]
+    fn host_focus_delivers_effects_outside_layout_and_rejects_document_edits(
+        cx: &mut TestAppContext,
+    ) {
+        use gpui_editor_codemirror::{
+            StateEffectType, StateField, transaction_filter, view::focus_change_effect,
+        };
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new("a字b".into(), window, cx));
+        let affected = StateEffectType::<bool>::new();
+        let field = StateField::<Vec<bool>>::new(|_| Ok(Vec::new()), {
+            let affected = affected.clone();
+            move |previous, update| {
+                let mut next = previous.clone();
+                next.extend(
+                    update
+                        .transaction()
+                        .effects()
+                        .iter()
+                        .filter_map(|effect| effect.get(&affected))
+                        .copied(),
+                );
+                Ok(next)
+            }
+        });
+        let reject = Arc::new(AtomicBool::new(false));
+        cx.update(|window, cx| {
+            window.activate_window();
+            bind_keys(cx);
+            editor.update(cx, |editor, _| {
+                let reject = reject.clone();
+                let config = Extension::group([
+                    field.extension(),
+                    focus_change_effect(move |_, focus| Some(affected.of(focus))),
+                    transaction_filter(move |_, transaction| {
+                        if reject.load(Ordering::Relaxed) && transaction.is_focus_change() {
+                            let changes =
+                                ChangeSet::single(Change::new(0..1, "not allowed")).unwrap();
+                            Ok(Transaction::new(changes))
+                        } else {
+                            Ok(transaction)
+                        }
+                    }),
+                ]);
+                editor
+                    .view
+                    .update(
+                        Transaction::default().with_effects([config.append()]),
+                        None,
+                        |_| (None, None),
+                    )
+                    .unwrap();
+                window.focus(&editor.focus);
+            });
+        });
+        cx.run_until_parked();
+        let observe = |editor: &Editor, focused, expected: &[bool]| {
+            assert_eq!(editor.view.focused(), focused);
+            assert_eq!(
+                editor
+                    .view
+                    .state()
+                    .context()
+                    .field(&field)
+                    .unwrap()
+                    .unwrap()
+                    .as_slice(),
+                expected
+            );
+            assert_eq!(editor.source(), "a字b");
+            assert!(!editor.view.can_undo());
+        };
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                observe(editor, true, &[true]);
+                editor.open_find(window, cx);
+            })
+        });
+        cx.run_until_parked();
+        cx.update(|_, cx| observe(editor.read(cx), false, &[true, false]));
+        reject.store(true, Ordering::Relaxed);
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        cx.update(|_, cx| observe(editor.read(cx), true, &[true, false]));
+    }
+
+    #[gpui::test]
+    fn selection_history_shortcuts_restore_ranges_before_falling_back_to_text_history(
+        cx: &mut TestAppContext,
+    ) {
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new("a字b".into(), window, cx));
+        let executor = cx.update(|window, cx| {
+            bind_keys(cx);
+            window.focus(&editor.read(cx).focus);
+            cx.background_executor().clone()
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("right");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).selection(), 1..1));
+        executor.advance_clock(Duration::from_millis(501));
+        cx.simulate_keystrokes("shift-right");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).selection(), 1..4));
+        cx.simulate_keystrokes("cmd-u");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).selection(), 1..1));
+        cx.simulate_keystrokes("cmd-shift-u");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).selection(), 1..4));
+        cx.simulate_keystrokes("cmd-u cmd-u");
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert_eq!(e.selection(), 0..0);
+            assert_eq!(e.source(), "a字b");
+            assert!(!e.view.can_undo());
+        });
+        cx.simulate_input("X");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "Xa字b"));
+        cx.simulate_keystrokes("cmd-u");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), "a字b"));
+    }
 
     #[gpui::test]
     fn navigation_never_uses_layout_offsets_from_before_an_edit(cx: &mut TestAppContext) {
@@ -1173,6 +2433,133 @@ mod tests {
             let e = editor.read(cx);
             assert_eq!(e.anchor(), "ABCDE\nX".len());
             assert_eq!(e.cursor(), "ABCDE\nX\nABCD".len());
+        });
+    }
+
+    #[gpui::test]
+    fn source_brackets_preserve_empty_fences_and_history(cx: &mut TestAppContext) {
+        let original = "```mermaid\r\n```\r\n\r\nOutside [ ]";
+        let paired = "```mermaid\r\n[]\r\n```\r\n\r\nOutside [ ]";
+        let (editor, cx) =
+            cx.add_window_view(|window, cx| Editor::new(original.into(), window, cx));
+        cx.update(|window, cx| {
+            bind_keys(cx);
+            editor.update(cx, |e, cx| {
+                window.focus(&e.focus);
+                let section = e
+                    .markdown()
+                    .sections()
+                    .into_iter()
+                    .find(|section| section.kind == SectionKind::Mermaid)
+                    .unwrap();
+                e.activate(section, false, cx);
+                let start = e.cursor();
+                assert_eq!(close_brackets_enabled(e.view.state()), Ok(false));
+                e.replace_text_in_range(None, "[", window, cx);
+                assert_eq!(close_brackets_enabled(e.view.state()), Ok(true));
+                assert_eq!(e.source(), paired);
+                assert_eq!(e.cursor(), start + 1);
+                assert_eq!(e.active.as_ref().unwrap().content, start..start + 2);
+                let hit = e.source_bracket_match().unwrap();
+                assert_eq!(hit.start, start..start + 1);
+                assert_eq!(hit.end, Some(start + 1..start + 2));
+                assert!(hit.matched);
+                e.replace_text_in_range(None, "]", window, cx);
+                assert_eq!(e.source(), paired);
+                assert_eq!(e.cursor(), start + 2);
+            });
+        });
+        cx.simulate_keystrokes("cmd-z");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), original));
+        cx.simulate_keystrokes("cmd-shift-z");
+        cx.update(|_, cx| assert_eq!(editor.read(cx).source(), paired));
+        cx.simulate_keystrokes("backspace");
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert_eq!(e.source(), "```mermaid\r\n\r\n```\r\n\r\nOutside [ ]");
+            let start = "```mermaid\r\n".len();
+            assert_eq!(e.active.as_ref().unwrap().content, start..start);
+        });
+    }
+
+    #[gpui::test]
+    fn source_bracket_input_wraps_a_directed_range_but_does_not_pair_ime_text(
+        cx: &mut TestAppContext,
+    ) {
+        let original = "---\nname: 字\n---\n\nOutside ]";
+        let (editor, cx) =
+            cx.add_window_view(|window, cx| Editor::new(original.into(), window, cx));
+        cx.update(|window, cx| {
+            editor.update(cx, |e, cx| {
+                let section = e
+                    .markdown()
+                    .sections()
+                    .into_iter()
+                    .find(|section| section.kind == SectionKind::FrontMatter)
+                    .unwrap();
+                e.activate(section, false, cx);
+                let start = e.source().find('字').unwrap();
+                let len = '字'.len_utf8();
+                e.set_selection(start + len, start);
+                e.replace_text_in_range(None, "\"", window, cx);
+                assert_eq!(e.source(), "---\nname: \"字\"\n---\n\nOutside ]");
+                assert_eq!((e.anchor(), e.cursor()), (start + len + 1, start + 1));
+                e.replace_and_mark_text_in_range(None, "(", None, window, cx);
+                assert!(e.is_composing());
+                assert!(e.source_bracket_match().is_none());
+                e.replace_text_in_range(None, "[", window, cx);
+                assert!(!e.is_composing());
+                assert_eq!(e.source(), "---\nname: \"[\"\n---\n\nOutside ]");
+                let hit = e.source_bracket_match().unwrap();
+                assert_eq!(hit.start, start + 1..start + 2);
+                assert!(hit.end.is_none());
+                assert!(!hit.matched);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn source_group_shortcuts_preserve_crlf_scope_and_undo(cx: &mut TestAppContext) {
+        let original = "---\r\ntitle: alpha 世界\r\n---\r\n\r\nAfter";
+        let (editor, cx) =
+            cx.add_window_view(|window, cx| Editor::new(original.into(), window, cx));
+        cx.update(|window, cx| {
+            bind_keys(cx);
+            editor.update(cx, |e, cx| {
+                window.focus(&e.focus);
+                let section = e
+                    .markdown()
+                    .sections()
+                    .into_iter()
+                    .find(|section| section.kind == SectionKind::FrontMatter)
+                    .unwrap();
+                e.activate(section, false, cx);
+            });
+        });
+        cx.simulate_keystrokes("alt-backspace");
+        cx.update(|_, cx| {
+            editor.update(cx, |e, cx| {
+                assert_eq!(e.source(), original);
+                let caret = e.source().find('界').unwrap() + '界'.len_utf8();
+                e.move_to(caret, false, cx);
+            });
+        });
+        cx.simulate_keystrokes("alt-shift-left");
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert_eq!(&e.source()[e.selection()], "世界");
+        });
+        cx.simulate_keystrokes("alt-backspace");
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert_eq!(e.source(), original.replace("世界", ""));
+            assert_eq!(e.active.as_ref().unwrap().kind, SectionKind::FrontMatter);
+        });
+        cx.simulate_keystrokes("cmd-z");
+        cx.update(|_, cx| {
+            let e = editor.read(cx);
+            assert_eq!(e.source(), original);
+            assert_eq!(&e.source()[e.selection()], "世界");
         });
     }
 
@@ -1239,8 +2626,8 @@ mod tests {
             assert!(e.scroll.bounds().contains(&target.center()));
             assert_eq!((e.anchor(), e.cursor()), ("開頭".len(), 0));
             assert_eq!(e.source(), draft);
-            assert!(e.history.can_undo());
-            assert!(!e.history.can_redo());
+            assert!(e.view.can_undo());
+            assert!(!e.view.can_redo());
         });
         cx.simulate_keystrokes("cmd-z");
         cx.update(|_, cx| {
@@ -1512,7 +2899,7 @@ mod tests {
             let editor = editor.read(cx);
             assert!(editor.hover.is_some());
             let layout = editor.layout.as_ref().unwrap();
-            let (_, tooltip) = editor.overlay(layout, viewport, window);
+            let (_, tooltip) = editor.overlay(layout, viewport, window, false);
             assert_eq!(tooltip.unwrap().text, "https://example.com/path");
             assert_eq!(editor.scroll.bounds(), viewport);
         });
@@ -1647,7 +3034,7 @@ mod tests {
             editor.update(cx, |e, cx| {
                 let formulas: Vec<_> = (0..129).map(|n| format!("x^{n}")).collect();
                 let source: String = formulas.iter().map(|body| format!("${body}$\n")).collect();
-                e.history = History::new(EditorState::new(source));
+                e.view = EditorView::new(EditorState::new(source));
                 for body in formulas.into_iter().take(128) {
                     e.graphics.insert(
                         (

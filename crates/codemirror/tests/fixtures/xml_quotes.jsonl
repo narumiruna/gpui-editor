@@ -1,0 +1,12 @@
+{"name":"inside double-quoted attribute","source":"<root name=\"😀  \"/>","head":17,"key":"\"","after":"<root name=\"😀 \" \"/>","position":18,"handled":false}
+{"name":"inside single-quoted attribute","source":"<root name='字  '/>","head":16,"key":"'","after":"<root name='字 ' '/>","position":17,"handled":false}
+{"name":"before parsed attribute opener","source":"<root name=\"字\"/>","head":11,"key":"\"","after":"<root name=\"\"\"字\"/>","position":12,"handled":true}
+{"name":"before single-quoted attribute opener","source":"<root name='字'/>","head":11,"key":"'","after":"<root name='''字'/>","position":12,"handled":true}
+{"name":"before untracked attribute closer","source":"<root name=\"x\"/>","head":13,"key":"\"","after":"<root name=\"x\"\"/>","position":14,"handled":false}
+{"name":"after closed attribute with a space","source":"<root name=\"字\"  />","head":17,"key":"\"","after":"<root name=\"字\" \"\" />","position":18,"handled":true}
+{"name":"character and entity references","source":"<root name=\"a&#34; &amp;  \"/>","head":25,"key":"\"","after":"<root name=\"a&#34; &amp; \" \"/>","position":26,"handled":false}
+{"name":"multiline attribute with CRLF","source":"<root name=\"a\r\n😀 \"/>","head":19,"key":"\"","after":"<root name=\"a\r\n😀\" \"/>","position":20,"handled":false}
+{"name":"root text is not an attribute value","source":"<root>\"字  </root>","head":11,"key":"\"","after":"<root>\"字 \" </root>","position":12,"handled":false}
+{"name":"comment has no string context","source":"<root><!-- \"字  --> </root>","head":16,"key":"\"","after":"<root><!-- \"字 \"\" --> </root>","position":17,"handled":true}
+{"name":"processing instruction does not start a string","source":"<?xml version=\"1.0\"  ?>\r\n<root/>","head":20,"key":"\"","after":"<?xml version=\"1.0\" \"\" ?>\r\n<root/>","position":21,"handled":true}
+{"name":"unfinished attribute value","source":"<root name=\"字  />","head":16,"key":"\"","after":"<root name=\"字 \" />","position":17,"handled":false}

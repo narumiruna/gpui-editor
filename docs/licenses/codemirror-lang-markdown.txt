@@ -1,0 +1,106 @@
+Native Markdown source services
+
+Upstream packages (MIT)
+
+@codemirror/lang-markdown 6.5.2
+https://registry.npmjs.org/@codemirror/lang-markdown/-/lang-markdown-6.5.2.tgz
+sha512-AwBOdkWYuA//WcM0xO5PfHPUcmz/O2i5o0Nsg1U69SII/loCJlFI1Romd9xp2HYb1kYJRGZotyqRghuHH5n8Kw==
+Commit: f90daf6e56a72f1cf8bbe10b07867f535d0ad2e4
+MIT License
+
+Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+@lezer/markdown 1.8.2
+https://registry.npmjs.org/@lezer/markdown/-/markdown-1.8.2.tgz
+sha512-q0kGuKOFrKEMi8d3ExryIOAT5XwjW86x1JO5scQB7gcXr8LobgXP3l6Gq6ArpXUQLeDju9cwRHF2Axjk6VMhLQ==
+Commit: 8d0600bd5aaf3b16c54399c0c19aa833079a9534
+
+MIT License
+
+Copyright (C) 2020 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+Implementation and verification
+
+The native parser uses pulldown-cmark 0.13.6 for CommonMark block recognition
+and inline delimiter resolution. Its source offset events give a native Rust
+input for the editor tree without HTML rendering or a JavaScript runtime.
+The adapter adds Lezer-style source nodes, including delimiters, quote marks,
+code text ranges, reference labels and definitions, and tight-list paragraphs.
+It provides both dialects, inherited highlight tags, section and block folds,
+block comment tokens, source overlay ranges, and single-cursor list and
+blockquote edits. The Markdown root preserves indentation, as upstream does.
+
+The Rust integration tests in crates/codemirror/tests/markdown_language.rs
+record complete node names and ranges from the SRI-verified packages above.
+They compare highlight tags from @lezer/highlight 1.2.5, and folds and edits
+from CodeMirror with @codemirror/language 6.13.1 and @codemirror/state 6.7.6.
+The oracle uses the base parser for host trees and highlights. It uses
+markdown({base}) for folds and commands. Fixtures convert upstream UTF-16
+positions to UTF-8 bytes. For CRLF, the parser sees CodeMirror's logical LF
+and the fixture maps the positions back to the original CRLF bytes.
+
+A supplemental comparison used all 652 CommonMark 0.31.2 example inputs.
+In this sample, 649 host trees and 649 host highlight streams matched. The
+three differences were duplicate reference definitions (#204 and #544)
+and the outer image node in ![[foo]] (#590). Of the fold results, 646 matched.
+The six differences (#148, #149, #153, #154, #172, and #173) are embedded
+HTML folds.
+
+Known differences
+
+- Explicit mounts parse HTML and code blocks with the provided language
+  resolver. Callers can project the embedded highlights onto the source.
+  Embedded indent and fold queries are not integrated into host queries.
+- Host parsing follows pulldown-cmark for block and inline resolution. It
+  does not preserve duplicate link definitions or every ambiguous link or
+  image candidate. Multiline references inside nested prefixes can differ.
+  The extended dialect can differ on tokens that cross events, for example
+  triple tildes and bare URLs that continue through a reference candidate.
+  An empty quoted fence keeps its children in source order rather than
+  reproducing the out-of-order CodeText node upstream can emit.
+- The parser reparses the entire document. It does not reuse tree fragments,
+  implement partial/background parsing, or accept user-defined Lezer parser
+  extensions. Native trees stop adding nested frames at depth 128.
+- The native markup edit services accept a single cursor and return changes.
+  They are not registered as key bindings. CodeMirror's multi-selection
+  dispatch and tab indent-unit normalization are not included. Insertions
+  use the line's existing LF or CRLF style when one is available. Bare CR
+  is inline whitespace, not a line break, in native Text.
+- HTML tag completion, clipboard URL-to-link paste handling, browser
+  extensions, and automatic command dispatch are not included.

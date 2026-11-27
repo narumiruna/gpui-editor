@@ -1,0 +1,17 @@
+[
+  {"label":"func","detail":"declaration","text":"// π界\n  func name(params) type {\n    \n  }","stops":[[[16,20]],[[21,27]],[[29,33]],[[40,40]]]},
+  {"label":"func","detail":"method declaration","text":"// π界\n  func (receiver) name(params) type {\n    \n  }","stops":[[[17,25]],[[27,31]],[[32,38]],[[40,44]],[[51,51]]]},
+  {"label":"var","detail":"declaration","text":"// π界\n  var name = value","stops":[[[15,19]],[[22,27]]]},
+  {"label":"type","detail":"declaration","text":"// π界\n  type name type","stops":[[[16,20]],[[21,25]]]},
+  {"label":"const","detail":"declaration","text":"// π界\n  const name = value","stops":[[[17,21]],[[24,29]]]},
+  {"label":"type","detail":"alias declaration","text":"// π界\n  type name = type","stops":[[[16,20]],[[23,27]]]},
+  {"label":"for","detail":"loop","text":"// π界\n  for init; test; update {\n    \n  }","stops":[[[15,19]],[[21,25]],[[27,33]],[[40,40]]]},
+  {"label":"for","detail":"range","text":"// π界\n  for i := range value {\n    \n  }","stops":[[[15,16]],[[26,31]],[[38,38]]]},
+  {"label":"select","detail":"statement","text":"// π界\n  select {\n    \n  }","stops":[[[24,24]]]},
+  {"label":"case","detail":null,"text":"// π界\n  case :\n  ","stops":[[[16,16]],[[20,20]]]},
+  {"label":"switch","detail":"statement","text":"// π界\n  switch  {\n    \n  }","stops":[[[18,18]],[[25,25]]]},
+  {"label":"switch","detail":"type statement","text":"// π界\n  switch .(type) {\n    \n  }","stops":[[[18,18]],[[20,24]],[[32,32]]]},
+  {"label":"if","detail":"block","text":"// π界\n  if  {\n    \n  }","stops":[[[14,14]],[[21,21]]]},
+  {"label":"if","detail":"/ else block","text":"// π界\n  if  {\n    \n  } else {\n    \n  }","stops":[[[14,14]],[[21,21]],[[37,37]]]},
+  {"label":"import","detail":"declaration","text":"// π界\n  import name \"module\"\n  ","stops":[[[18,22]],[[24,30]],[[34,34]]]}
+]
