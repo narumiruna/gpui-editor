@@ -193,6 +193,32 @@ test -n "$test_home" && mkdir "$test_home/workspace" &&
 2. 點擊 front matter 預覽。只選取 `Draft`，組字並選取「測試」。按一次 `Cmd-Z` 應還原 `Draft`，再按一次 `Cmd-Shift-Z` 應恢復「測試」；正文應維持「中文」。點回正文，核對 front matter 恢復預覽並顯示新值。
 3. 存檔、關閉分頁並重開。確認 front matter 預覽及唯讀 Rust 程式碼區塊仍在。點擊程式碼區塊並嘗試輸入與刪除，確認內容不變。用 `cmp "$test_home/ime.expected" "$test_home/workspace/ime.md"` 核對檔案須逐位元組相同。
 
+#### Code Block 與 LaTeX Block：原生交接
+
+**狀態：GPUI 模擬案例通過；原生延遲未量測。** 模擬涵蓋一般段落連續輸入、程式碼存檔與重開，以及公式更新、錯誤預覽、修正與重開。執行 `cargo test --locked -p gpui-editor --lib block_editing` 可重跑短、長文件案例；其執行時間不是原生輸入延遲。
+
+在 repository 根目錄建立暫存工作區和位元組比對用的預期檔案。將 `size` 改為 `long` 可產生約 1,000 行的文件。每次重跑使用新的暫存目錄。
+
+```sh
+size=small
+run_dir="$(mktemp -d /private/tmp/gpui-block-editing.XXXXXX)" &&
+  mkdir "$run_dir/home" "$run_dir/workspace" &&
+  rustc --edition=2024 crates/app/tests/e2e/fixture.rs -o "$run_dir/fixture" &&
+  "$run_dir/fixture" "$size" start > "$run_dir/workspace/code.md" &&
+  "$run_dir/fixture" "$size" start > "$run_dir/workspace/latex.md" &&
+  "$run_dir/fixture" "$size" code > "$run_dir/expected-code.md" &&
+  "$run_dir/fixture" "$size" latex > "$run_dir/expected-latex.md" &&
+  printf 'Test directory: %s\n' "$run_dir"
+```
+
+只在獨立測試桌面或經協調後操作。自動化前執行 `swiftc crates/app/tests/e2e/preflight.swift -o "$run_dir/preflight" && "$run_dir/preflight"`。預檢不取得權限，也不能證明桌面已隔離。預檢失敗或無法確認隔離時，不啟動自動化。依本節前述隔離方式，以 `HOME="$run_dir/home"` 啟動待測建置，並在 App 內開啟 `$run_dir/workspace`。
+
+1. **段落。** 在 `Control paragraph.` 行尾輸入空格及 `12345678901234567890x`。按 Backspace 刪掉 `x`，確認順序。關閉並捨棄變更，再開原檔。
+2. **Code Block。** 在 `code.md` 的 `Code entry` 行尾按兩次向右鍵，再輸入三個反引號。確認游標在補齊的圍欄內。輸入 `let result = 123456789;`、換行、四個空格和 `return result + 2;x`，再按 Backspace。原文仍開啟時按 `Cmd-S`，點 `Leave code here.`。核對預覽、關閉並從側欄重開。用 `cmp "$run_dir/workspace/code.md" "$run_dir/expected-code.md"` 比對存檔。
+3. **LaTeX Block。** 點 `latex.md` 的第一個公式。進入原文後按 `Cmd-A`，確認只選公式內容。每次先換行再輸入公式，最後再換行，保留兩側 `$$`。依序輸入 `\sum_{i=1}^{12} i^2 + x^2`、`\frac{1}{`、`\frac{1}{2}`。每次點 `Leave formula here.`，分別核對更新預覽、可點擊的錯誤訊息及修正預覽。按 `Cmd-S`，關閉並重開，再用 `cmp "$run_dir/workspace/latex.md" "$run_dir/expected-latex.md"` 比對存檔。
+
+原生延遲工具尚未實作。後續量測只對前景測試行程送出事件，且只擷取該視窗。分別記錄進入原文、逐鍵出字、更新預覽的延遲，以及無法判讀的樣本。
+
 ## 成功衡量
 
 請首批試用者在沒有操作示範的情況下，啟動應用程式、選擇資料夾、找到指定文件、改一個標題、更新一張流程圖並儲存。記錄首次無提示完成率（無額外協助即完成全部任務的人數 ÷ 參與總人數），另記錄卡住或切換工具的步驟，以及試用者與現有做法的比較。

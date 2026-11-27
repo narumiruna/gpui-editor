@@ -7,6 +7,8 @@ use gpui::{
 
 use super::*;
 
+mod block_editing;
+
 fn click_tool(cx: &mut VisualTestContext, selector: &'static str) {
     let bounds = cx
         .debug_bounds(selector)
