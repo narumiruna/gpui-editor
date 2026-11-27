@@ -3,8 +3,8 @@ use std::sync::LazyLock;
 use super::{
     super::{
         lezer::{
-            CLOSED_BY, GROUP, LANGUAGE_DATA, LanguageFacet, NodeTypes, NormalizedEdges, OPENED_BY,
-            ParseError, Parser, ReuseStats, SyntaxTree,
+            CLOSED_BY, FOLD, GROUP, LANGUAGE_DATA, LanguageFacet, NodeTypes, NormalizedEdges,
+            OPENED_BY, ParseError, Parser, ReuseStats, SyntaxTree, stock_fold,
         },
         line_projection::NormalizedInput,
     },
@@ -26,7 +26,7 @@ pub(crate) fn stock_node_types() -> &'static NodeTypes {
             tables::REPEAT_NODE_COUNT,
             tables::TOP_TERM,
             &[0, 1, 2],
-            |term, _, props| match term {
+            |term, name, props| match term {
                 tables::TOP_TERM => props.insert(&LANGUAGE_DATA, Some(stock_data_facet().clone())),
                 4 => props.insert(&GROUP, vec!["Declaration".into(), "Declaration".into()]),
                 5 | 13 | 20..=24 | 26 | 28 | 30 | 32 | 33 | 36 | 37 | 40 | 46 => {
@@ -41,6 +41,9 @@ pub(crate) fn stock_node_types() -> &'static NodeTypes {
                 16 => props.insert(&CLOSED_BY, vec!["}".into()]),
                 34 => props.insert(&OPENED_BY, vec!["(".into()]),
                 35 => props.insert(&CLOSED_BY, vec![")".into()]),
+                _ if matches!(name, "Body" | "TokensBody" | "SkipBody" | "PrecedenceBody") => {
+                    props.insert(&FOLD, Some(stock_fold()));
+                }
                 _ => (),
             },
         )

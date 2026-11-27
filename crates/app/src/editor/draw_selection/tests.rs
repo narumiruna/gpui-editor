@@ -411,9 +411,7 @@ fn composing_and_read_only_do_not_add_caret_paint_gates(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
-fn measured_bidi_range_and_secondary_affinity_use_the_existing_caret_stops(
-    cx: &mut TestAppContext,
-) {
+fn drawn_carets_follow_measured_bidi_stops_or_the_standard_layout(cx: &mut TestAppContext) {
     const MIXED: &str = "(module (data \"ABC אב 🦀\") ;; عرب";
     let source = format!("```wast\n{MIXED}\n{MIXED}\n)\n```\n");
     let (editor, cx) = cx.add_window_view(|window, cx| {
@@ -468,8 +466,16 @@ fn measured_bidi_range_and_secondary_affinity_use_the_existing_caret_stops(
                 .unwrap()
         };
         for head in [first, second] {
-            assert!(layout.uses_bidi_carets(head));
-            assert!(at(head, Assoc::After).left() - at(head, Assoc::Before).left() > px(5.));
+            let measured = layout.uses_bidi_carets(head);
+            #[cfg(target_os = "macos")]
+            assert!(measured, "TextKit must supply caret stops for this fixture");
+            if measured {
+                assert!(at(head, Assoc::After).left() - at(head, Assoc::Before).left() > px(5.));
+            } else {
+                let standard = layout.bounds_at(head, false).unwrap();
+                assert_eq!(at(head, Assoc::After), standard);
+                assert_eq!(at(head, Assoc::Before), standard);
+            }
         }
         assert_quads(
             editor,

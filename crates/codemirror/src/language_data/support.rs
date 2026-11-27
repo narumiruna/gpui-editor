@@ -226,7 +226,7 @@ impl SupportedDocument {
         )
     }
 
-    pub(crate) fn markdown_wast_fold(
+    pub(crate) fn markdown_code_fold(
         &self,
         state: &EditorState,
         start: usize,
@@ -236,11 +236,14 @@ impl SupportedDocument {
         if splits_crlf(source, start) || splits_crlf(source, end) {
             return None;
         }
-        self.markdown_mounts.iter().find_map(|mount| {
-            mount
-                .wast()?
-                .foldable_in_markdown(state, mount.source_map(), start, end)
-        })
+        self.markdown_mounts
+            .iter()
+            .filter(|mount| mount.has_configured_folds())
+            .find_map(|mount| {
+                mount
+                    .syntax()
+                    .foldable_in_markdown(state, mount.source_map(), start..end)
+            })
     }
 
     pub(crate) fn markdown_wast_body(

@@ -2389,6 +2389,42 @@ impl Overlay {
 }
 
 #[cfg(test)]
+pub(crate) enum TestPaint<'a> {
+    Text(&'a str),
+    Graphic(&'a gpui::RenderImage),
+    Block,
+}
+
+#[cfg(test)]
+impl Editor {
+    pub(crate) fn test_painted_item(&self, offset: usize) -> (Point<Pixels>, TestPaint<'_>) {
+        let layout = self.layout.as_ref().expect("rendered document");
+        for row in &layout.rows {
+            if let Some(item) = row.items.iter().find(|item| item.source.contains(&offset)) {
+                let center =
+                    layout.origin + point(item.left + item.width / 2., row.y + row.height / 2.);
+                let paint = match &item.paint {
+                    ItemPaint::Text(line) => TestPaint::Text(line.text.as_ref()),
+                    ItemPaint::Graphic(graphic) => TestPaint::Graphic(&graphic.image),
+                    ItemPaint::Block(_) => TestPaint::Block,
+                    _ => panic!("unexpected paint at source offset {offset}"),
+                };
+                return (center, paint);
+            }
+        }
+        panic!("no item at source offset {offset}");
+    }
+
+    pub(crate) fn test_source_frame_is_visible(&self) -> bool {
+        self.layout
+            .as_ref()
+            .expect("rendered document")
+            .source_frame
+            .is_some()
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::fs;
 

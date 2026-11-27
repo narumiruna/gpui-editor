@@ -5,8 +5,9 @@ use std::sync::LazyLock;
 
 use super::{JsonNodeKind, Node};
 use crate::language::lezer::{
-    CLOSED_BY, GrammarSpec, ISOLATE, Isolation, LANGUAGE_DATA, LanguageFacet, NodeTypes, OPENED_BY,
-    ParseError, Parser, STYLE_RULES, SerializedTables, StyleRules, SyntaxTree,
+    CLOSED_BY, FOLD, GrammarSpec, ISOLATE, Isolation, LANGUAGE_DATA, LanguageFacet, NodeTypes,
+    OPENED_BY, ParseError, Parser, STYLE_RULES, SerializedTables, StyleRules, SyntaxTree,
+    stock_fold,
 };
 
 pub(super) static PARSER: LazyLock<Parser> =
@@ -83,6 +84,7 @@ pub(crate) fn stock_node_types() -> &'static NodeTypes {
                     6 | 11 => props.insert(&ISOLATE, Some(Isolation::Auto)),
                     7 => props.insert(&OPENED_BY, vec!["{".into()]),
                     8 => props.insert(&CLOSED_BY, vec!["}".into()]),
+                    9 | 16 => props.insert(&FOLD, Some(stock_fold())),
                     14 => props.insert(&OPENED_BY, vec!["[".into()]),
                     15 => props.insert(&CLOSED_BY, vec!["]".into()]),
                     _ if term == top => {

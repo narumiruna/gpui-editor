@@ -13,7 +13,9 @@ pub use extension::{
     bracket_matching_options, configured_bracket_matches, configured_bracket_matches_in,
 };
 pub(crate) use extension::{state_bracket_match_decorations, state_bracket_matches};
-pub(super) use syntax::{directional_bracket_near, match_named_siblings, named_delimiter};
+pub(super) use syntax::{
+    BracketMates, directional_bracket_near, match_named_siblings, named_delimiter, node_delimiter,
+};
 
 const DEFAULT_BRACKETS: &str = "()[]{}";
 const EDITOR_BRACKETS: &[u8] = DEFAULT_BRACKETS.as_bytes();

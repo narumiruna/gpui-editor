@@ -278,26 +278,15 @@ impl<'a> WastNode<'a> {
         self,
         line_start: usize,
         line_end: usize,
-        mut fold_range: impl FnMut(Self) -> Option<Range<usize>>,
+        fold_range: impl FnMut(Self) -> Option<Range<usize>>,
     ) -> Option<Range<usize>> {
         let node = self.resolve_at(line_end, Some(Assoc::After));
-        let mut found = None;
-        for node in std::iter::successors(Some(node), |node| node.parent()) {
-            let span = node.range();
-            if span.end <= line_end || span.start > line_end {
-                continue;
-            }
-            if found.is_some() && span.start < line_start {
-                break;
-            }
-            if let Some(range) = fold_range(node)
-                && (line_start..=line_end).contains(&range.start)
-                && line_end < range.end
-            {
-                found = Some(range);
-            }
-        }
-        found
+        super::fold::fold_on_line(
+            std::iter::successors(Some(node), |node| node.parent()),
+            line_start..line_end,
+            Self::range,
+            fold_range,
+        )
     }
 
     fn unfinished_before(self, position: usize) -> Self {
@@ -499,15 +488,6 @@ impl WastDocument {
         self.text.slice(line_start..line_end)?;
         self.root()
             .foldable_by(line_start, line_end, WastNode::fold_range)
-    }
-
-    pub(crate) fn foldable_with_state(
-        &self,
-        state: &EditorState,
-        line_start: usize,
-        line_end: usize,
-    ) -> Option<Range<usize>> {
-        self.foldable_in_scope(state, 0..state.text().len(), line_start, line_end)
     }
 
     /// Ask the configured WAST nodes for a fold in a contiguous editor body.

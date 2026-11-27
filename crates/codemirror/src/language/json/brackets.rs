@@ -1,11 +1,14 @@
 use crate::Assoc;
 
 use super::{
-    super::brackets::{
-        BracketConfig, BracketDirection,
-        BracketDirection::{Backward, Forward},
-        BracketMatch, bracket_pairs, editor_bracket_index, match_configured_editor_text,
-        match_editor_siblings, match_editor_text,
+    super::{
+        brackets::{
+            BracketConfig, BracketDirection, BracketDirection::Forward, BracketMatch,
+            bracket_pairs, directional_bracket_near, editor_bracket_index,
+            match_configured_editor_text, match_editor_siblings, match_editor_text,
+            match_named_siblings, node_delimiter,
+        },
+        line_projection::splits_crlf,
     },
     JsonDocument, JsonNode, JsonNodeKind,
 };
@@ -33,42 +36,55 @@ impl JsonDocument {
         head: usize,
         config: BracketConfig<'_>,
     ) -> Option<BracketMatch> {
-        let text = self.text();
-        let prev = text.slice(0..head)?.chars().next_back();
-        let next = text.slice(head..text.len())?.chars().next();
-        let scan = |pos, dir| self.match_configured_bracket(pos, dir, config);
-        scan(head, Backward)
-            .or_else(|| scan(head - prev?.len_utf8(), Forward))
-            .or_else(|| {
-                config.after_cursor.then(|| {
-                    scan(head, Forward).or_else(|| scan(head + next?.len_utf8(), Backward))
-                })?
-            })
+        directional_bracket_near(
+            self.text().as_str(),
+            head,
+            config.after_cursor,
+            |pos, dir| self.match_bracket_at(pos, dir, config),
+        )
     }
 
-    fn match_configured_bracket(
+    /// Match from this UTF-8 byte position and direction. `after_cursor`
+    /// applies only to caret queries. Positions inside CRLF return `None`.
+    pub fn match_bracket_at(
         &self,
         pos: usize,
         direction: BracketDirection,
         config: BracketConfig<'_>,
     ) -> Option<BracketMatch> {
-        let side = match direction {
-            Forward => Assoc::After,
-            Backward => Assoc::Before,
+        let source = self.text().as_str();
+        if splits_crlf(source, pos) {
+            return None;
+        }
+        let side = if direction == Forward {
+            Assoc::After
+        } else {
+            Assoc::Before
         };
         let start = self.node_at(pos, Some(side))?;
         let pairs = bracket_pairs(config);
         for node in std::iter::successors(Some(start), |node| node.parent()) {
             if !node.range().is_empty()
-                && let Some(expected) = matching_name(node.kind(), direction, pairs)
+                && let Some(expected) = node_delimiter(node.node_type(), direction, pairs)
             {
-                return Some(match_configured_siblings(node, direction, expected, pairs));
+                return Some(match_named_siblings(
+                    node.range(),
+                    direction,
+                    expected,
+                    node.parent().into_iter().flat_map(JsonNode::children),
+                    |sibling| (sibling.range(), sibling.kind().name()),
+                    |sibling, dir| node_delimiter(sibling.node_type(), dir, pairs).is_some(),
+                ));
             }
         }
         match_configured_editor_text(self.syntax_lines(), pos, direction, config, |at| {
-            self.node_at(at, Some(Assoc::After))
-                .is_some_and(|candidate| candidate.kind() == start.kind())
+            !splits_crlf(source, at)
+                && !splits_crlf(source, at + 1)
+                && self
+                    .node_at(at, Some(Assoc::After))
+                    .is_some_and(|candidate| candidate.kind() == start.kind())
         })
+        .filter(|hit| !splits_crlf(source, hit.start.start) && !splits_crlf(source, hit.start.end))
     }
 
     fn match_bracket(&self, at: usize, index: usize) -> Option<BracketMatch> {
@@ -91,80 +107,6 @@ impl JsonDocument {
                 .is_some_and(|candidate| candidate.kind() == node.kind())
         })
     }
-}
-
-fn match_configured_siblings(
-    node: JsonNode<'_>,
-    direction: BracketDirection,
-    expected: Option<char>,
-    pairs: &str,
-) -> BracketMatch {
-    let mut hit = BracketMatch {
-        start: node.range(),
-        end: None,
-        matched: false,
-    };
-    let forward = direction == Forward;
-    let opposite = if forward { Backward } else { Forward };
-    let mut siblings = node.parent().into_iter().flat_map(JsonNode::children);
-    let mut depth = 0;
-    while let Some(sibling) = if forward {
-        siblings.next()
-    } else {
-        siblings.next_back()
-    } {
-        let range = sibling.range();
-        if (forward && (range.start < hit.start.end || range.end <= hit.start.end))
-            || (!forward && (range.end > hit.start.start || range.start >= hit.start.start))
-        {
-            continue;
-        }
-        let kind = sibling.kind();
-        if depth == 0
-            && expected.is_some_and(|name| node_name_char(kind) == Some(name))
-            && !range.is_empty()
-        {
-            hit.end = Some(range);
-            hit.matched = true;
-            break;
-        }
-        if matching_name(kind, direction, pairs).is_some() {
-            depth += 1;
-        } else if matching_name(kind, opposite, pairs).is_some() {
-            if depth == 0 {
-                hit.end = (!range.is_empty()).then_some(range);
-                break;
-            }
-            depth -= 1;
-        }
-    }
-    hit
-}
-
-// Prefer grammar properties. A single-character node name can also act as
-// a marked bracket. An unpaired alternative has no expected name.
-fn matching_name(
-    kind: JsonNodeKind,
-    direction: BracketDirection,
-    pairs: &str,
-) -> Option<Option<char>> {
-    use JsonNodeKind::{CloseBrace, CloseBracket, OpenBrace, OpenBracket};
-    match (kind, direction) {
-        (OpenBracket, Forward) => return Some(Some(']')),
-        (CloseBracket, Backward) => return Some(Some('[')),
-        (OpenBrace, Forward) => return Some(Some('}')),
-        (CloseBrace, Backward) => return Some(Some('{')),
-        _ => {}
-    }
-    let name = node_name_char(kind)?;
-    let index = pairs.chars().position(|candidate| candidate == name)?;
-    (index.is_multiple_of(2) == (direction == Forward)).then(|| pairs.chars().nth(index ^ 1))
-}
-
-fn node_name_char(kind: JsonNodeKind) -> Option<char> {
-    let mut chars = kind.name().chars();
-    let name = chars.next()?;
-    chars.next().is_none().then_some(name)
 }
 
 // The pinned grammar's openedBy and closedBy properties.

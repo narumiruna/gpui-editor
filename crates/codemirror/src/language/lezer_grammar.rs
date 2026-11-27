@@ -238,6 +238,7 @@ pub struct LezerDocument {
     node_types: Option<NodeTypes>,
     isolate_ranges: OnceLock<IsolateRanges>,
     configured_highlights: OnceLock<Option<ConfiguredHighlights>>,
+    configured_folds: OnceLock<bool>,
 }
 
 impl LezerDocument {
@@ -297,12 +298,19 @@ impl LezerDocument {
             node_types: None,
             isolate_ranges: OnceLock::new(),
             configured_highlights: OnceLock::new(),
+            configured_folds: OnceLock::new(),
         }
     }
 
     pub(crate) fn with_node_types(mut self, node_types: NodeTypes) -> Self {
         self.node_types = Some(node_types);
         self
+    }
+
+    pub(super) fn has_configured_folds(&self) -> bool {
+        *self
+            .configured_folds
+            .get_or_init(|| self.node_types().has_different_folds(stock_node_types()))
     }
 
     pub(crate) fn node_types(&self) -> &NodeTypes {
