@@ -7,13 +7,13 @@ use super::{
         brackets::{
             BracketConfig, BracketDirection,
             BracketDirection::{Backward, Forward},
-            BracketMatch, bracket_pairs, directional_bracket_near, editor_bracket_index,
-            match_configured_editor_text, match_editor_siblings, match_editor_text,
-            named_delimiter,
+            BracketMatch, BracketMates, bracket_pairs, directional_bracket_near,
+            editor_bracket_index, match_configured_editor_text, match_editor_siblings,
+            match_editor_text, node_delimiter,
         },
         line_projection::splits_crlf,
     },
-    BRACKET_MATCHING_HANDLE, CLOSED_BY, OPENED_BY, WastDocument, WastNode, WastNodeKind,
+    BRACKET_MATCHING_HANDLE, WastDocument, WastNode, WastNodeKind,
 };
 
 impl WastDocument {
@@ -108,7 +108,7 @@ impl WastDocument {
         &self,
         token: WastNode<'_>,
         start: Range<usize>,
-        mates: Mates<'_>,
+        mates: BracketMates<'_>,
         direction: BracketDirection,
         pairs: &str,
     ) -> BracketMatch {
@@ -223,34 +223,12 @@ fn delimiter_index(kind: WastNodeKind) -> Option<usize> {
     }
 }
 
-enum Mates<'a> {
-    Configured(&'a [String]),
-    Text(Option<&'a str>),
-}
-
-impl Mates<'_> {
-    fn contains(&self, name: &str) -> bool {
-        match self {
-            Self::Configured(names) => names.iter().any(|n| n == name),
-            Self::Text(expected) => *expected == Some(name),
-        }
-    }
-}
-
 fn matching_names<'a>(
     node: WastNode<'a>,
     direction: BracketDirection,
     pairs: &'a str,
-) -> Option<Mates<'a>> {
-    let key = if direction == Forward {
-        &CLOSED_BY
-    } else {
-        &OPENED_BY
-    };
-    if let Some(names) = node.prop(key) {
-        return Some(Mates::Configured(names));
-    }
-    named_delimiter(node.node_type().name(), direction, pairs).map(Mates::Text)
+) -> Option<BracketMates<'a>> {
+    node_delimiter(node.node_type(), direction, pairs)
 }
 
 struct QuoteSyntax<'a> {

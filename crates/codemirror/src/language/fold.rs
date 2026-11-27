@@ -20,6 +20,7 @@ use crate::{
 mod commands;
 mod gutter;
 mod placeholder;
+mod syntax;
 pub use commands::{
     FoldCommand, announce_fold, fold_all, fold_code, fold_keymap, toggle_fold, unfold_all,
     unfold_code,
@@ -32,6 +33,7 @@ pub use placeholder::{
     FoldPlaceholder, FoldPlaceholderConfig, PrepareFoldPlaceholder, RenderFoldPlaceholder,
     code_folding_with_placeholders, fold_placeholder, fold_placeholder_decorations,
 };
+pub(in crate::language) use syntax::fold_on_line;
 
 type FoldService = Arc<dyn Fn(&EditorState, usize, usize) -> Option<Range<usize>> + Send + Sync>;
 static SERVICES: LazyLock<Facet<FoldService, Vec<FoldService>>> = LazyLock::new(Facet::collect);
@@ -69,9 +71,9 @@ pub fn foldable(
 }
 
 /// Ask configured services, then attached syntax, whether these line bounds
-/// have a fold. Without an attached parser, a Markdown WAST mount can supply
-/// a fold. The fold can span gaps if both endpoints belong to the mount.
-/// Ignore invalid WAST callback ranges before selecting a candidate. Bounds
+/// have a fold. Without an attached parser, a Markdown WAST, JSON, or Lezer
+/// mount can supply a fold. The fold can span gaps if both endpoints belong to
+/// the mount. Ignore invalid node callback ranges before selecting a candidate. Bounds
 /// and the returned range use original UTF-8 byte offsets.
 /// Use [`foldable`] to supply an explicit syntax rule instead.
 pub fn foldable_in_state(state: &EditorState, start: usize, end: usize) -> Option<Range<usize>> {
@@ -92,13 +94,14 @@ pub(crate) fn syntax_fallback(
                     attached = snapshot;
                     attached.syntax()
                 } else {
-                    return markdown_snapshot(state)?.markdown_wast_fold(state, start, end);
+                    return markdown_snapshot(state)?.markdown_code_fold(state, start, end);
                 }
             }
         };
-        match syntax {
-            NativeSyntax::Wast(doc) => doc.foldable_with_state(state, start, end),
-            _ => syntax.foldable(start, end),
+        if syntax.has_configured_folds() {
+            syntax.foldable_in_scope(state, 0..state.text().len(), start..end)
+        } else {
+            syntax.foldable(start, end)
         }
     }
 }

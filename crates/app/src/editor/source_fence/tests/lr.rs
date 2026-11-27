@@ -1,7 +1,8 @@
 use gpui_editor_codemirror::{
     language::{
         HighlightTag, TextDecoration,
-        lezer::{LANGUAGE_DATA, LanguageFacet, style_tags},
+        brackets::BracketMatch,
+        lezer::{CLOSED_BY, LANGUAGE_DATA, LanguageFacet, style_tags},
     },
     language_data::{json_language, lezer_language},
 };
@@ -123,6 +124,178 @@ fn configured_lr_draft_rebuilds_on_a_same_text_swap_and_rejects_invalid_edits(
             let editor = editor.read(cx);
             assert_eq!(editor.source(), edited);
             assert_eq!((editor.view.undo_depth(), editor.view.redo_depth()), (1, 0));
+        });
+    }
+}
+
+#[gpui::test]
+fn configured_lr_roles_refresh_bracket_marks_in_editable_fences(cx: &mut TestAppContext) {
+    let json = json_language();
+    let lezer = lezer_language();
+    let marks = |from, to: &str| {
+        let to = to.to_owned();
+        CLOSED_BY.add(move |row| row.is(from).then(|| vec![to.clone()]))
+    };
+    for (body, start, end, stock, configured, named) in [
+        (
+            "{\"😀\": [ 12, \"字\" ]}",
+            "12",
+            "\"字\"",
+            MarkdownCodeParser::Json(json.clone()),
+            MarkdownCodeParser::Json(json.with_node_props(&[marks("Number", "String")])),
+            true,
+        ),
+        (
+            "@top Main { word \"😀\" }",
+            "word",
+            "\"😀\"",
+            MarkdownCodeParser::Lezer(lezer.clone()),
+            MarkdownCodeParser::Lezer(lezer.with_node_props(&[marks("RuleName", "Literal")])),
+            false,
+        ),
+    ] {
+        let label = if named { "example" } else { "" };
+        let source = format!("前 😀\r\n\r\n```{label}\r\n{body}\r\n```\r\n");
+        let start_at = source.find(start).unwrap();
+        let end_at = source.find(end).unwrap();
+        let expected = BracketMatch {
+            start: start_at..start_at + start.len(),
+            end: Some(end_at..end_at + end.len()),
+            matched: true,
+        };
+        let config = Compartment::new();
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            Editor::with_native_extensions(
+                source.clone(),
+                config.of(install(stock.clone(), named)),
+                window,
+                cx,
+            )
+            .unwrap()
+        });
+        let (scope, selection) = cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                activate_code(editor, body, cx);
+                window.focus(&editor.focus);
+                editor.set_selection(start_at + 1, start_at + 1);
+                assert!(editor.source_bracket_match().is_none());
+                (
+                    editor.source_fence_with_unlabeled(true).unwrap().body,
+                    editor.view.state().selection().clone(),
+                )
+            })
+        });
+        for (parser, hit, paint_count) in [(configured, Some(expected), 2), (stock, None, 0)] {
+            cx.update(|_, cx| {
+                editor.update(cx, |editor, cx| {
+                    configure(editor, config.reconfigure(install(parser, named)), cx);
+                    assert_eq!(editor.source_bracket_match(), hit);
+                });
+            });
+            cx.run_until_parked();
+            cx.update(|_, cx| {
+                let editor = editor.read(cx);
+                let painted = &editor.layout.as_ref().unwrap().painted_bracket_quads;
+                assert_eq!(painted.len(), paint_count);
+                assert_eq!(
+                    editor.source_fence_with_unlabeled(true).unwrap().body,
+                    scope
+                );
+                assert_eq!(editor.source(), source);
+                assert_eq!(editor.view.state().selection(), &selection);
+                assert_eq!((editor.view.revision(), editor.view.undo_depth()), (0, 0));
+            });
+        }
+    }
+}
+
+#[gpui::test]
+fn configured_lr_fold_rules_drive_the_gutter_and_keyboard(cx: &mut TestAppContext) {
+    use gpui_editor_codemirror::language::{
+        fold::{FoldGutterConfig, FoldGutterState, fold_gutter},
+        lezer::{FOLD, LrFoldCallback},
+    };
+
+    for (body, row) in [
+        ("[ \r\n  \"😀\",\r 1\r\n]", "Array"),
+        ("@top Main { \r\n  \"😀\"\r  \"x\"\r\n}", "Body"),
+    ] {
+        let source = format!("前 😀\r\n\r\n```example\r\n{body}\r\n```\r\n");
+        let origin = source.find(body).unwrap();
+        let line = origin..origin + body.find('\r').unwrap();
+        let opener = origin + body.find(['[', '{']).unwrap();
+        let end = origin + body.len() - 1;
+        let expected = opener + 2..end;
+        let callback: LrFoldCallback = Arc::new({
+            let source = source.clone();
+            move |node, state| {
+                assert_eq!(state.text().as_str(), source);
+                assert_eq!(state.selection().main().head(), opener);
+                assert_eq!(node.range(), opener..end + 1);
+                assert_eq!(node.children().next().unwrap().range(), opener..opener + 1);
+                Some(opener + 2..end)
+            }
+        });
+        let rule = FOLD.add(move |node| node.is(row).then(|| Some(callback.clone())));
+        let disable = FOLD.add(move |node| node.is(row).then_some(None));
+        let (parser, disabled) = if row == "Array" {
+            let stock = json_language();
+            (
+                MarkdownCodeParser::Json(stock.with_node_props(&[rule])),
+                MarkdownCodeParser::Json(stock.with_node_props(&[disable])),
+            )
+        } else {
+            let stock = lezer_language();
+            (
+                MarkdownCodeParser::Lezer(stock.with_node_props(&[rule])),
+                MarkdownCodeParser::Lezer(stock.with_node_props(&[disable])),
+            )
+        };
+        let slot = Compartment::new();
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            Editor::with_native_extensions(
+                source.clone(),
+                Extension::group([
+                    slot.of(install(parser, true)),
+                    fold_gutter(FoldGutterConfig::default()),
+                ]),
+                window,
+                cx,
+            )
+            .unwrap()
+        });
+        cx.update(|_, cx| {
+            editor.update(cx, |editor, cx| {
+                activate_code(editor, body, cx);
+                editor.set_selection(opener, opener);
+                let body = editor.source_fence().unwrap().body;
+                let gutter = FoldGutterConfig::configured(editor.view.state()).unwrap();
+                let marker = editor
+                    .source_fold_query(&body)
+                    .unwrap()
+                    .marker(&gutter, line.clone());
+                assert_eq!(marker.unwrap().state, FoldGutterState::Open);
+                editor.click_source_fold_gutter(&body, line.clone(), &gutter, cx);
+                assert_eq!(editor.source_fold_ranges(), std::slice::from_ref(&expected));
+                assert!(editor.toggle_source_fold(cx));
+                assert!(editor.source_fold_ranges().is_empty());
+                assert!(editor.toggle_source_fold(cx));
+                assert_eq!(editor.source_fold_ranges(), [expected]);
+                assert!(editor.toggle_source_fold(cx));
+
+                configure(editor, slot.reconfigure(install(disabled, true)), cx);
+                assert!(
+                    editor
+                        .source_fold_query(&body)
+                        .unwrap()
+                        .marker(&gutter, line)
+                        .is_none()
+                );
+                assert!(!editor.toggle_source_fold(cx));
+                assert_eq!(editor.source(), source);
+                assert_eq!(editor.cursor(), opener);
+                assert_eq!((editor.view.revision(), editor.view.undo_depth()), (0, 0));
+            });
         });
     }
 }

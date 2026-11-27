@@ -309,6 +309,14 @@ impl MarkdownMount {
         matches!(&self.code_parser, Some(MarkdownCodeParser::Wast(parser)) if parser == expected)
     }
 
+    pub(crate) fn has_configured_folds(&self) -> bool {
+        self.wast().is_some()
+            || matches!(
+                &self.code_parser,
+                Some(MarkdownCodeParser::Json(_) | MarkdownCodeParser::Lezer(_))
+            )
+    }
+
     /// Syntax positions are relative to the concatenated embedded source.
     pub fn syntax(&self) -> &NativeSyntax {
         &self.syntax

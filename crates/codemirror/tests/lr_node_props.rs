@@ -31,6 +31,10 @@ macro_rules! with_lr {
 
 #[path = "lr_node_props/bidi.rs"]
 mod bidi;
+#[path = "lr_node_props/brackets.rs"]
+mod brackets;
+#[path = "lr_node_props/folds.rs"]
+mod folds;
 #[path = "lr_node_props/highlight_scopes.rs"]
 mod highlight_scopes;
 #[path = "lr_node_props/style_tags.rs"]

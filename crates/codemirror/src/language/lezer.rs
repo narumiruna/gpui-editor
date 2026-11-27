@@ -71,6 +71,7 @@ mod action;
 mod context;
 mod decode;
 mod external;
+mod fold;
 mod fragments;
 mod grammar;
 mod language_facet;
@@ -87,6 +88,8 @@ pub use external::{
     ExternalOptions, ExternalToken, ExternalTokenizer, Specialization, Specializer, TokenInput,
     Tokenizer,
 };
+pub(in crate::language) use fold::stock_fold;
+pub use fold::{FOLD, LrFoldCallback, LrFoldNode};
 pub(crate) use fragments::NormalizedEdges;
 pub use grammar::{GrammarError, GrammarSpec, Parser};
 pub use language_facet::{LANGUAGE_DATA, LanguageFacet};

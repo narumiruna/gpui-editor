@@ -22,7 +22,7 @@ actions!(editor, [ToggleSourceFold]);
 pub(super) struct SourceFoldQuery<'a> {
     body: Range<usize>,
     syntax: Option<&'a NativeSyntax>,
-    configured_wast: bool,
+    configured_fold: bool,
     state: EditorState,
 }
 
@@ -82,7 +82,7 @@ impl SourceFoldQuery<'_> {
             &self.body,
             from,
             to,
-            self.configured_wast,
+            self.configured_fold,
         )
     }
 
@@ -113,16 +113,23 @@ impl SourceFoldQuery<'_> {
     }
 }
 
+fn has_fold_props(parser: &MarkdownCodeParser) -> bool {
+    matches!(
+        parser,
+        MarkdownCodeParser::Wast(_) | MarkdownCodeParser::Json(_) | MarkdownCodeParser::Lezer(_)
+    )
+}
+
 fn syntax_fold_in(
     syntax: &NativeSyntax,
     state: &EditorState,
     body: &Range<usize>,
     from: usize,
     to: usize,
-    configured_wast: bool,
+    configured_fold: bool,
 ) -> Option<Range<usize>> {
-    if configured_wast && let NativeSyntax::Wast(doc) = syntax {
-        return doc.foldable_in_scope(state, body.clone(), from, to);
+    if configured_fold {
+        return syntax.foldable_in_scope(state, body.clone(), from..to);
     }
     let origin = body.start;
     let local = syntax.foldable(from.checked_sub(origin)?, to.checked_sub(origin)?)?;
@@ -152,7 +159,7 @@ impl Editor {
             tab_size: state.tab_size(),
             ..Default::default()
         };
-        let configured_wast = matches!(&fence.parser, Some(MarkdownCodeParser::Wast(_)));
+        let configured_fold = fence.parser.as_ref().is_some_and(has_fold_props);
         let syntax = fence.parser.and_then(|parser| {
             self.source_document(body, &parser, settings)
                 .map(|doc| doc.syntax())
@@ -160,7 +167,7 @@ impl Editor {
         Some(SourceFoldQuery {
             body: body.clone(),
             syntax,
-            configured_wast,
+            configured_fold,
             state,
         })
     }
@@ -238,7 +245,7 @@ impl Editor {
         let fence = self.source_fence().expect("checked source fence");
         let head = self.cursor();
         let parser = fence.parser.expect("checked source parser");
-        let configured_wast = matches!(&parser, MarkdownCodeParser::Wast(_));
+        let configured_fold = has_fold_props(&parser);
         let body = fence.body;
         let origin = body.start;
         let folded = self.source_fold_ranges();
@@ -264,7 +271,7 @@ impl Editor {
                 origin + candidate.start,
                 origin + candidate.end,
                 |state, start, end| {
-                    syntax_fold_in(syntax?, state, &body, start, end, configured_wast)
+                    syntax_fold_in(syntax?, state, &body, start, end, configured_fold)
                 },
             ) else {
                 continue;

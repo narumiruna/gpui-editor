@@ -5,7 +5,10 @@ use super::{
     BracketDirection::{Backward, Forward},
     BracketMatch,
 };
-use crate::language::line_projection::splits_crlf;
+use crate::language::{
+    lezer::{CLOSED_BY, NodeType, OPENED_BY},
+    line_projection::splits_crlf,
+};
 
 /// Probe logical positions around the caret in the order used by CodeMirror.
 /// A marked hit, mismatch, or unmatched result stops the search. Only `None`
@@ -70,18 +73,55 @@ pub(in crate::language) fn named_delimiter<'a>(
     )
 }
 
+pub(in crate::language) enum BracketMates<'a> {
+    Configured(&'a [String]),
+    Text(Option<&'a str>),
+}
+
+impl BracketMates<'_> {
+    pub(in crate::language) fn contains(&self, name: &str) -> bool {
+        match self {
+            Self::Configured(names) => names.iter().any(|mate| mate == name),
+            Self::Text(expected) => *expected == Some(name),
+        }
+    }
+}
+
+impl<'a> From<Option<&'a str>> for BracketMates<'a> {
+    fn from(expected: Option<&'a str>) -> Self {
+        Self::Text(expected)
+    }
+}
+
+pub(in crate::language) fn node_delimiter<'a>(
+    row: &'a NodeType,
+    direction: BracketDirection,
+    pairs: &'a str,
+) -> Option<BracketMates<'a>> {
+    let key = if direction == Forward {
+        &CLOSED_BY
+    } else {
+        &OPENED_BY
+    };
+    if let Some(names) = row.prop(key) {
+        return Some(BracketMates::Configured(names));
+    }
+    named_delimiter(row.name(), direction, pairs).map(Into::into)
+}
+
 /// Match siblings by visible grammar name before checking their depth role.
 /// The mate need not have a delimiter property of its own.
-pub(in crate::language) fn match_named_siblings<N: Copy>(
+pub(in crate::language) fn match_named_siblings<'a, N: Copy>(
     start: Range<usize>,
     direction: BracketDirection,
-    expected: Option<&str>,
+    expected: impl Into<BracketMates<'a>>,
     mut siblings: impl DoubleEndedIterator<Item = N>,
     describe: impl Fn(N) -> (Range<usize>, &'static str),
     is_delimiter: impl Fn(N, BracketDirection) -> bool,
 ) -> BracketMatch {
     let forward = direction == Forward;
     let opposite = if forward { Backward } else { Forward };
+    let expected = expected.into();
     let mut hit = BracketMatch {
         start,
         end: None,
@@ -99,7 +139,7 @@ pub(in crate::language) fn match_named_siblings<N: Copy>(
         {
             continue;
         }
-        if depth == 0 && expected == Some(name) && !range.is_empty() {
+        if depth == 0 && expected.contains(name) && !range.is_empty() {
             hit.end = Some(range);
             hit.matched = true;
             break;

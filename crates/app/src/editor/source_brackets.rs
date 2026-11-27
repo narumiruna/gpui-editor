@@ -453,7 +453,13 @@ impl Editor {
         };
         let parser = parser.expect("known source parser");
         let syntax_config = configured.map(|options| options.config()).or_else(|| {
-            matches!(&parser, MarkdownCodeParser::Wast(_)).then(BracketConfig::default)
+            matches!(
+                &parser,
+                MarkdownCodeParser::Wast(_)
+                    | MarkdownCodeParser::Json(_)
+                    | MarkdownCodeParser::Lezer(_)
+            )
+            .then(BracketConfig::default)
         });
         let settings = self.source_bracket_settings();
         let current = self.current_source_document(&scope, &parser, settings);
