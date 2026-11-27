@@ -6,11 +6,14 @@ use crate::{
     Assoc, EditorState, Extension, Text,
     commands::CommentTokens,
     language::{
-        HighlightContext, HighlightSpan, LanguageData, StreamSettings, angular, cpp, css, go, html,
+        HighlightContext, HighlightSpan, IndentContext, LanguageData, StreamSettings, angular, cpp,
+        css, go, html,
         html::{HtmlEmbeddedDocument, HtmlEmbeddedLanguage},
         java, javascript, jinja, json, language_data_provider, less,
         lezer::ParseError,
-        lezer_grammar, liquid,
+        lezer_grammar,
+        line_projection::splits_crlf,
+        liquid,
         markdown::{
             self, MarkdownCodeLanguages, MarkdownDocument, MarkdownMount, MarkdownParserConfig,
         },
@@ -30,6 +33,7 @@ mod go_install;
 mod indent_input;
 mod input;
 mod javascript_regions;
+mod lr_data;
 mod projection;
 mod route;
 mod selection;
@@ -37,8 +41,12 @@ mod tracked;
 mod update;
 
 pub use go_install::{GoCompletionSource, go_extension, go_language_extension};
+pub use lr_data::LrDataFacet;
+pub use tracked::{
+    JsonLanguage, LezerLanguage, WastLanguage, attached_language_snapshot, json_language,
+    lezer_language, wast_language,
+};
 pub(crate) use tracked::{WastConfig, active_wast_viewport};
-pub use tracked::{WastLanguage, attached_language_snapshot, wast_language};
 pub use update::SyntaxUpdateError;
 
 /// The bundled parser configuration and the native default language services.
@@ -102,7 +110,7 @@ impl NativeLanguageSupport {
             settings,
             markdown_parser: None,
             markdown_mounts: Vec::new(),
-            wast_config: None,
+            strict_parser: None,
         })
     }
 }
@@ -124,7 +132,19 @@ pub struct SupportedDocument {
     settings: StreamSettings,
     markdown_parser: Option<Arc<MarkdownParserConfig>>,
     markdown_mounts: Vec<MarkdownMount>,
-    wast_config: Option<Arc<WastConfig>>,
+    strict_parser: Option<StrictParser>,
+}
+
+#[derive(Clone)]
+enum StrictParser {
+    Lr(LrGrammar),
+    Wast(Arc<WastConfig>),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LrGrammar {
+    Json,
+    Lezer,
 }
 
 impl SupportedDocument {
@@ -142,7 +162,7 @@ impl SupportedDocument {
             settings,
             markdown_parser: Some(parser),
             markdown_mounts,
-            wast_config: None,
+            strict_parser: None,
         })
     }
 
@@ -152,6 +172,10 @@ impl SupportedDocument {
 
     pub fn syntax(&self) -> &NativeSyntax {
         &self.syntax
+    }
+
+    pub(crate) fn into_syntax(self) -> NativeSyntax {
+        self.syntax
     }
 
     /// The language at a byte offset, including native mounts. Boundary
@@ -175,24 +199,30 @@ impl SupportedDocument {
             .map(|site| site.language)
     }
 
-    pub(crate) fn wast_facet_at(&self, position: usize, side: Assoc) -> Option<&WastDataFacet> {
-        self.markdown_presence_site(position, side)?
-            .wast()?
-            .root()
-            .node_type()
-            .data_facet()
-    }
-
-    pub(crate) fn markdown_wast_data_at(
+    pub(crate) fn markdown_mounted_data_at(
         &self,
         state: &EditorState,
         position: usize,
         side: Assoc,
     ) -> Option<Vec<Arc<LanguageData>>> {
+        let NativeSyntax::Markdown(markdown) = &self.syntax else {
+            return None;
+        };
         let site = self.markdown_presence_site(position, side)?;
+        let mount = site.markdown_mount?;
+        if let Some(wast) = site.wast() {
+            let map = mount.source_map();
+            return Some(wast.configured_data_in_markdown(
+                state,
+                map,
+                || markdown.wast_sublanguage_position(position, map.bounds().start),
+                side,
+            ));
+        }
+        let row = site.lr_root_type()?;
         Some(
-            site.wast()?
-                .configured_data_at(state, site.position.at, side),
+            row.data_facet()
+                .map_or_else(Vec::new, |facet| facet.read(state)),
         )
     }
 
@@ -202,24 +232,43 @@ impl SupportedDocument {
         start: usize,
         end: usize,
     ) -> Option<Range<usize>> {
+        let source = self.text().as_str();
+        if splits_crlf(source, start) || splits_crlf(source, end) {
+            return None;
+        }
         self.markdown_mounts.iter().find_map(|mount| {
-            let doc = mount.wast()?;
-            let mut segments = mount.source_ranges();
-            let mut body = segments.next()?;
-            if start < body.start {
-                return None;
-            }
-            for segment in segments {
-                if body.end != segment.start {
-                    return None;
-                }
-                body.end = segment.end;
-            }
-            if start >= body.end {
-                return None;
-            }
-            doc.foldable_in_scope(state, body, start, end)
+            mount
+                .wast()?
+                .foldable_in_markdown(state, mount.source_map(), start, end)
         })
+    }
+
+    pub(crate) fn markdown_wast_body(
+        &self,
+        body: &Range<usize>,
+        parser: &WastLanguage,
+    ) -> Option<&MarkdownMount> {
+        self.markdown_mounts.iter().find(|mount| {
+            let map = mount.source_map();
+            mount.uses_wast_parser(parser) && map.is_contiguous() && &map.bounds() == body
+        })
+    }
+
+    pub(crate) fn markdown_wast_indentation(
+        &self,
+        state: &EditorState,
+        lines: &IndentContext<'_>,
+    ) -> Option<usize> {
+        let position = lines.position();
+        if splits_crlf(self.text().as_str(), position) {
+            return None;
+        }
+        let site = self.site(position, Assoc::Before)?;
+        let map = site.markdown_mount?.source_map();
+        // A WAST indentation strategy cannot own a position at a fence or
+        // at a gap boundary unless the mount covers both sides.
+        map.segment_at(position, Assoc::After)?;
+        site.wast()?.indentation_in_markdown(map, state, lines)
     }
 
     /// Return WAST regions in original UTF-8 bytes and source order. A WAST
@@ -227,34 +276,20 @@ impl SupportedDocument {
     /// with the stock WAST facet contribute one range per source segment.
     /// This query does not grant permission to edit those ranges.
     pub fn wast_regions(&self) -> Vec<Range<usize>> {
-        if self.language == NativeLanguage::Wast {
-            return std::iter::once(0..self.text().len()).collect();
-        }
-        self.markdown_mounts
-            .iter()
-            .filter(|mount| {
-                mount
-                    .wast()
-                    .and_then(|doc| doc.root().node_type().data_facet())
-                    == Some(WastDataFacet::stock())
-            })
-            .flat_map(MarkdownMount::source_ranges)
-            .collect()
+        self.regions_with_facet(NativeLanguage::Wast, WastDataFacet::stock())
     }
 
     /// Typed metadata for the deepest supported language, with sublanguage
-    /// data before the base data. For WAST this returns the effective root's
-    /// defaults only. Byte positions must be UTF-8 boundaries.
+    /// data before the base data. For WAST, JSON, and Lezer this returns
+    /// the effective root's defaults only. Positions must be UTF-8 boundaries.
     pub fn data_at(&self, position: usize, side: Assoc) -> Vec<Arc<LanguageData>> {
         let Some(site) = self.site(position, side) else {
             return Vec::new();
         };
-        if let Some(doc) = site.wast() {
-            return doc
-                .root()
-                .node_type()
+        if let Some(row) = site.lr_root_type() {
+            return row
                 .data_facet()
-                .and_then(WastDataFacet::base)
+                .and_then(LrDataFacet::base)
                 .cloned()
                 .into_iter()
                 .collect();
@@ -391,33 +426,27 @@ impl SupportedDocument {
         }
     }
 
-    /// Return the scope context for a nonempty highlight range in original
-    /// UTF-8 bytes. In addition to [`Self::highlight_scope`]'s native scopes,
-    /// include the actual WAST root and its facet. A direct Markdown WAST
-    /// mount matches only within one of its source segments, not across gaps
-    /// or in the surrounding Markdown.
+    /// Return the scope for a nonempty highlight range in original UTF-8
+    /// bytes. JSON, Lezer, and WAST include the actual root row and its
+    /// effective facet. A direct Markdown mount of one of these languages
+    /// supplies that context within one source segment, not across gaps.
     pub fn highlight_context(&self, range: &Range<usize>) -> Option<HighlightContext> {
-        match &self.syntax {
-            NativeSyntax::Wast(doc) => {
-                self.highlight_scope(range)?;
-                HighlightContext::from_wast_root(doc.root().node_type())
+        if matches!(&self.syntax, NativeSyntax::Markdown(_)) {
+            if range.is_empty() || !self.text().is_valid_range(range.clone()) {
+                return None;
             }
-            NativeSyntax::Markdown(_)
-                if !range.is_empty() && self.text().is_valid_range(range.clone()) =>
-            {
-                self.markdown_mounts.iter().find_map(|mount| {
-                    let doc = mount.wast()?;
-                    if mount
-                        .source_ranges()
-                        .any(|segment| segment.start <= range.start && range.end <= segment.end)
-                    {
-                        HighlightContext::from_wast_root(doc.root().node_type())
-                    } else {
-                        None
-                    }
-                })
-            }
-            _ => self.highlight_scope(range).map(HighlightContext::native),
+            return self.markdown_mounts.iter().find_map(|mount| {
+                let root = mount.syntax().lr_root_type()?;
+                mount
+                    .source_ranges()
+                    .find(|segment| segment.start <= range.start && range.end <= segment.end)?;
+                HighlightContext::from_root(mount.language(), root)
+            });
+        }
+        let language = self.highlight_scope(range)?;
+        match self.syntax.lr_root_type() {
+            Some(root) => HighlightContext::from_root(language, root),
+            None => Some(HighlightContext::native(language)),
         }
     }
 
@@ -498,7 +527,7 @@ fn metadata(language: NativeLanguage) -> LanguageData {
         LezerGrammar => lezer_grammar::language_data(),
         Markdown => markdown::language_data(),
         Asn1 => asn1::language_data(),
-        Json => json::language_data(),
+        Json => json::editor_language_data(),
         Legacy(mode) => mode.language().language_data().clone(),
         _ => LanguageData::default(),
     };
@@ -506,7 +535,6 @@ fn metadata(language: NativeLanguage) -> LanguageData {
     let brackets = match language {
         Cpp => Some((None, cpp::STRING_PREFIXES.as_slice())),
         Go | Javascript(_) | Sql(_) => Some((Some(JS_BRACKETS), [].as_slice())),
-        Json => Some((Some(["[", "{", "\""].as_slice()), [].as_slice())),
         Legacy(_) => data
             .get::<&[&str]>("closeBrackets")
             .copied()

@@ -1,12 +1,15 @@
 use std::sync::LazyLock;
 
 use super::{
-    super::{HighlightSpan, HighlightTag, TagModifier},
+    super::{
+        HighlightSpan, HighlightTag, TagModifier,
+        lezer::{NodePropSource, style_tags},
+    },
     LezerNodeKind::*,
     Node,
 };
 
-pub(super) fn collect(nodes: &[Node]) -> Vec<HighlightSpan<'static>> {
+fn tags() -> &'static [[HighlightTag; 1]; 18] {
     static TAGS: LazyLock<[[HighlightTag; 1]; 18]> = LazyLock::new(|| {
         let mut tags = [
             "lineComment",
@@ -32,6 +35,41 @@ pub(super) fn collect(nodes: &[Node]) -> Vec<HighlightSpan<'static>> {
         tags[11] = [HighlightTag::new("variableName").with_modifier(TagModifier::Definition)];
         tags
     });
+    &TAGS
+}
+
+pub(super) fn stock_styles() -> NodePropSource {
+    let selectors = [
+        "LineComment",
+        "BlockComment",
+        "AnyChar",
+        "Literal",
+        "tokens from grammar as empty prop extend specialize AtName",
+        "@top @left @right @cut @external",
+        "@precedence @tokens @context @dialects @skip @detectDelim @conflict",
+        "@extend @specialize",
+        "CharSet InvertedCharSet",
+        "CharClass",
+        "RuleName",
+        "RuleDeclaration/RuleName InlineRule/RuleName TokensBody/RuleName",
+        "PrecedenceName",
+        "Name",
+        "( )",
+        "[ ]",
+        "{ }",
+        "\"!\" ~ \"*\" + ? |",
+    ];
+    style_tags(
+        selectors
+            .into_iter()
+            .zip(tags())
+            .map(|(path, tags)| (path, tags.to_vec())),
+    )
+    .expect("verified Lezer highlight paths")
+}
+
+pub(super) fn collect(nodes: &[Node]) -> Vec<HighlightSpan<'static>> {
+    let tags = tags();
     nodes
         .iter()
         .filter(|node| !node.range.is_empty())
@@ -66,8 +104,28 @@ pub(super) fn collect(nodes: &[Node]) -> Vec<HighlightSpan<'static>> {
             };
             Some(HighlightSpan {
                 range: node.range.clone(),
-                tags: &TAGS[tag],
+                tags: &tags[tag],
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Text;
+
+    use super::{super::{LezerDocument, parser, stock_node_types}, *};
+
+    #[test]
+    fn local_fallback_keeps_stock_highlights_without_verified_terms() {
+        let source = r#"@top Main { "字" }"#;
+        let properties = [style_tags([("Grammar/...", vec![HighlightTag::new("custom-root")])]).unwrap()];
+        let configured = LezerDocument::from_nodes(Text::new(source), parser::parse(source), None)
+            .with_node_types(stock_node_types().extend(&properties));
+        assert!(configured.nodes().skip(1).all(|node| node.node_type().is_none()));
+        let start = source.find('"').unwrap();
+        let end = source.rfind('"').unwrap() + 1;
+        let spans: Vec<_> = configured.highlights(start..end).unwrap().collect();
+        assert_eq!(spans, [HighlightSpan { range: start..end, tags: &tags()[3] }]);
+    }
 }

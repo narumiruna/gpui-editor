@@ -13,7 +13,12 @@ use crate::{
 use super::{
     IndentContext, IndentOptions, StreamSettings,
     line_projection::{command_line_projection, keeps_separate_breaks},
+    markdown::markdown_snapshot,
 };
+
+mod mounted;
+
+pub use mounted::MarkdownWastIndent;
 
 /// The repeated whitespace character that forms one indentation unit.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -116,8 +121,9 @@ pub(crate) fn style(state: &EditorState) -> IndentStyle {
 }
 
 /// Get indentation at a byte position. Consult services in priority order,
-/// then current explicit syntax or the attached syntax. A matching syntax
-/// projection supplies logical line bounds to the services. Ignore stale syntax.
+/// then current explicit or attached syntax, including installed Markdown WAST
+/// mounts. A matching syntax projection supplies logical line bounds. Ignore
+/// stale syntax.
 pub fn get_indentation(
     state: &EditorState,
     position: usize,
@@ -182,6 +188,7 @@ struct Indenter<'a> {
     projection: Option<Text>,
     explicit: Option<&'a NativeSyntax>,
     tracked: Option<Arc<SupportedDocument>>,
+    markdown: Option<Arc<SupportedDocument>>,
     settings: StreamSettings,
     services: Arc<Vec<Provider>>,
 }
@@ -189,16 +196,19 @@ struct Indenter<'a> {
 impl<'a> Indenter<'a> {
     fn new(state: &'a EditorState, syntax: Option<&'a NativeSyntax>) -> Result<Self, EditError> {
         let explicit = syntax.filter(|syntax| syntax.text() == state.text());
-        let tracked = if explicit.is_none() {
-            attached_language_snapshot(state)
-        } else {
-            None
-        };
+        let tracked = explicit
+            .is_none()
+            .then(|| attached_language_snapshot(state))
+            .flatten();
+        let markdown = (explicit.is_none() && tracked.is_none())
+            .then(|| markdown_snapshot(state))
+            .flatten();
         Ok(Self {
             state,
             projection: command_line_projection(state),
             explicit,
             tracked,
+            markdown,
             settings: StreamSettings {
                 tab_size: state.tab_size(),
                 indent_unit: get_indent_unit(state),
@@ -216,27 +226,49 @@ impl<'a> Indenter<'a> {
         self.projection
             .as_ref()
             .or_else(|| self.syntax().and_then(NativeSyntax::projected_lines))
+            .or_else(|| match self.markdown.as_ref()?.syntax() {
+                NativeSyntax::Markdown(doc) => doc.projected_lines(),
+                _ => None,
+            })
             .unwrap_or(self.state.text())
     }
 
     fn at(&self, position: usize, options: IndentOptions<'_>) -> Result<Option<usize>, EditError> {
         let context = IndentContext::new(self.lines(), position, self.settings, options)
             .ok_or(EditError::InvalidRange)?;
-        for service in self.services.iter() {
-            match service(self.state, &context) {
-                IndentDecision::Defer => {}
-                IndentDecision::Inherit => return Ok(None),
-                IndentDecision::Column(column) => return Ok(Some(column)),
-            }
-        }
-        Ok(match self.syntax() {
-            Some(NativeSyntax::Wast(doc)) => {
-                doc.indentation_with_context(Some(self.state), &context)
-            }
-            Some(syntax) => syntax.indentation(position, self.settings, options),
-            None => (position == 0).then_some(0),
-        })
+        Ok(indent_with_services(
+            self.state,
+            &self.services,
+            &context,
+            || match self.syntax() {
+                Some(NativeSyntax::Wast(doc)) => {
+                    doc.indentation_with_context(Some(self.state), &context)
+                }
+                Some(syntax) => syntax.indentation(position, self.settings, options),
+                None => self
+                    .markdown
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.markdown_wast_indentation(self.state, &context))
+                    .or_else(|| (position == 0).then_some(0)),
+            },
+        ))
     }
+}
+
+fn indent_with_services(
+    state: &EditorState,
+    services: &[Provider],
+    context: &IndentContext<'_>,
+    syntax: impl FnOnce() -> Option<usize>,
+) -> Option<usize> {
+    for service in services {
+        match service(state, context) {
+            IndentDecision::Defer => {}
+            IndentDecision::Inherit => return None,
+            IndentDecision::Column(column) => return Some(column),
+        }
+    }
+    syntax()
 }
 
 fn is_space(ch: char) -> bool {

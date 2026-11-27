@@ -89,6 +89,65 @@ fn find_announces_selected_matches_without_moving_focus_or_editing(cx: &mut Test
 }
 
 #[gpui::test]
+fn find_function_keys_match_pinned_search_in_both_focus_scopes(cx: &mut TestAppContext) {
+    let mut rows =
+        include_str!("../../../../codemirror/tests/fixtures/setup_find_keys_browser.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .filter(|row| row["preset"] == "basic");
+    let panel = rows.next().unwrap();
+    let body = rows.next().unwrap();
+    assert!(rows.next().is_none());
+    let source = panel["source"].as_str().unwrap();
+    let (editor, cx, speech) = open_find(cx, source, "hit", Extension::default());
+    for row in [&panel, &body] {
+        let panel_scope = row["scope"] == "panel";
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.set_selection(0, 0);
+                if !panel_scope {
+                    window.focus(&editor.focus);
+                }
+                cx.notify();
+            });
+        });
+        cx.run_until_parked();
+        assert!(speech.lock().unwrap().is_empty());
+        for step in row["steps"].as_array().unwrap() {
+            let key = step["key"].as_str().unwrap();
+            cx.simulate_keystrokes(key);
+            cx.run_until_parked();
+            let mut delivered = std::mem::take(&mut *speech.lock().unwrap());
+            assert_eq!(delivered.len(), 1, "{} {key}", row["scope"]);
+            let (changed, selection, announced) = delivered.pop().unwrap();
+            assert!(!changed);
+            assert_eq!(
+                serde_json::json!([selection.start, selection.end]),
+                step["selection"]
+            );
+            assert_eq!(serde_json::json!(announced), step["announcements"]);
+            cx.update(|window, cx| {
+                let editor = editor.read(cx);
+                let field = editor.find.as_ref().unwrap().query.read(cx);
+                let focused = if panel_scope {
+                    field.focus_handle(cx).is_focused(window)
+                } else {
+                    editor.focus.is_focused(window)
+                };
+                assert_eq!(serde_json::json!(focused), step["focused"]);
+                assert_eq!(editor.selection(), selection);
+                assert_eq!(editor.source(), source);
+                assert_eq!(
+                    serde_json::json!(editor.view.undo_depth()),
+                    row["undoDepth"]
+                );
+                assert!(!editor.view.can_undo_selection());
+            });
+        }
+    }
+}
+
+#[gpui::test]
 fn replace_all_announces_match_count_on_the_edit_not_on_undo(cx: &mut TestAppContext) {
     let source = "😀 aa\r\n";
     let phrases = PHRASES.of(Arc::new(

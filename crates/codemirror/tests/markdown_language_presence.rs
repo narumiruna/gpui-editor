@@ -148,21 +148,25 @@ fn markdown_language_presence_matches_the_pinned_state_facet() {
                     );
                 }
                 let tokens = |tokens: &CommentTokens<'static>| (tokens.line, tokens.block);
-                let legacy_tokens = route
-                    .map(NativeLanguage::comment_tokens)
-                    .as_ref()
-                    .map(tokens)
-                    .filter(|(line, block)| line.is_some() || block.is_some());
+                let tokens_for = |language: Option<NativeLanguage>| {
+                    language
+                        .map(NativeLanguage::comment_tokens)
+                        .as_ref()
+                        .map(tokens)
+                        .filter(|(line, block)| line.is_some() || block.is_some())
+                };
+                let legacy_tokens = tokens_for(route);
                 let direct = snapshot.data_at(at, side);
                 let direct = direct
                     .iter()
                     .find_map(|data| data.get::<CommentTokens>("commentTokens"));
                 let installed = state.language_data_at::<CommentTokens>("commentTokens", at, side);
                 assert_eq!(direct.map(tokens), legacy_tokens, "direct data: {label}");
-                let installed_tokens = if expected == Some(NativeLanguage::Wast) {
-                    Some(tokens(&NativeLanguage::Wast.comment_tokens()))
-                } else {
-                    legacy_tokens
+                let installed_tokens = match expected {
+                    Some(
+                        NativeLanguage::Wast | NativeLanguage::Json | NativeLanguage::LezerGrammar,
+                    ) => tokens_for(expected),
+                    _ => legacy_tokens,
                 };
                 assert_eq!(
                     installed.first().map(tokens),

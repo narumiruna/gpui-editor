@@ -69,9 +69,10 @@ pub fn foldable(
 }
 
 /// Ask configured services, then attached syntax, whether these line bounds
-/// have a fold. Without an attached parser, a contiguous Markdown WAST mount
-/// can supply a fold. Ignore invalid WAST callback ranges before selecting a
-/// candidate. Bounds and the returned range use original UTF-8 byte offsets.
+/// have a fold. Without an attached parser, a Markdown WAST mount can supply
+/// a fold. The fold can span gaps if both endpoints belong to the mount.
+/// Ignore invalid WAST callback ranges before selecting a candidate. Bounds
+/// and the returned range use original UTF-8 byte offsets.
 /// Use [`foldable`] to supply an explicit syntax rule instead.
 pub fn foldable_in_state(state: &EditorState, start: usize, end: usize) -> Option<Range<usize>> {
     foldable(state, start, end, syntax_fallback(None))

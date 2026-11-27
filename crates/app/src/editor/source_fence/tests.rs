@@ -24,6 +24,9 @@ use crate::{
     },
 };
 
+mod indent;
+mod lr;
+
 fn markdown_parser(named: WastLanguage, fallback: Option<WastLanguage>) -> Extension {
     markdown_with_parser(
         MarkdownConfig::default(),

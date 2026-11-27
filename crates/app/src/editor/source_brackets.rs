@@ -29,12 +29,12 @@ use crate::document::SectionKind;
 #[cfg(test)]
 mod tests;
 
-struct JsonInFence {
-    document: JsonDocument,
+struct JsonInFence<'a> {
+    document: &'a JsonDocument,
     start: usize,
 }
 
-impl CloseBracketSyntax for JsonInFence {
+impl CloseBracketSyntax for JsonInFence<'_> {
     fn resolve(&self, pos: usize, side: Option<Assoc>) -> Option<usize> {
         self.document.resolve(pos.checked_sub(self.start)?, side)
     }
@@ -228,17 +228,23 @@ impl Editor {
             return false;
         }
         let (mut config, document) = self.source_bracket_context(&scope, parser.as_ref());
-        let json_syntax = if language == Some(NativeLanguage::Json) && text == "\"" {
-            self.view
-                .state()
-                .text()
-                .slice_owned(scope.clone())
-                .map(|text| JsonInFence {
-                    document: JsonDocument::parse(text),
-                    start: scope.start,
-                })
+        let document = if language == Some(NativeLanguage::Json) && text == "\"" {
+            let Some(document) = parser.as_ref().and_then(|parser| {
+                let body = self.view.state().text().slice_owned(scope.clone())?;
+                parser.parse(body, self.source_bracket_settings()).ok()
+            }) else {
+                return false;
+            };
+            Some(document)
         } else {
-            None
+            document
+        };
+        let json_syntax = match document.as_ref().map(SupportedDocument::syntax) {
+            Some(NativeSyntax::Json(document)) => Some(JsonInFence {
+                document,
+                start: scope.start,
+            }),
+            _ => None,
         };
         let wast_syntax = match document.as_ref().map(SupportedDocument::syntax) {
             Some(NativeSyntax::Wast(document)) if text == "\"" => {

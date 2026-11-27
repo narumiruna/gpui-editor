@@ -8,6 +8,7 @@ use crate::{
         javascript::{JavascriptDocument, JavascriptOptions},
         line_projection::splits_crlf,
         liquid,
+        markdown::MarkdownMount,
         wast::WastDocument,
     },
 };
@@ -26,6 +27,7 @@ pub(super) struct Site<'a> {
     pub grammar: Grammar<'a>,
     pub position: Query,
     pub html_host: HtmlHost,
+    pub markdown_mount: Option<&'a MarkdownMount>,
 }
 
 impl<'a> Site<'a> {
@@ -118,19 +120,25 @@ impl SupportedDocument {
         // At a widened endpoint, report the fence root, not any of its children.
         if site.language == NativeLanguage::Markdown
             && let Some(segment) = doc.fenced_segment_endpoint(position, side)
-            && let Some(mount) = self
-                .markdown_mounts
-                .iter()
-                .find(|mount| mount.source_ranges().any(|range| range == segment))
         {
             let inward = match side {
                 Assoc::Before => Assoc::After,
                 Assoc::After => Assoc::Before,
             };
-            let mut query =
-                Query::new(position, inward, self.text().len()).projected(mount.source_ranges())?;
-            query.side = side;
-            return Some(native(mount.language(), mount.syntax(), query));
+            let query = Query::new(position, inward, self.text().len());
+            for mount in &self.markdown_mounts {
+                let Some((range, start)) = mount.source_map().segment_at(position, inward) else {
+                    continue;
+                };
+                if range == segment {
+                    let mut query = query.enter(range, start)?;
+                    query.side = side;
+                    return Some(Site {
+                        markdown_mount: Some(mount),
+                        ..native(mount.language(), mount.syntax(), query)
+                    });
+                }
+            }
         }
         Some(site)
     }
@@ -151,9 +159,14 @@ impl SupportedDocument {
         }
         let query = Query::new(position, side, text.len());
         for mount in &self.markdown_mounts {
-            if let Some(nested) = query.projected(mount.source_ranges()) {
+            if let Some((range, start)) = mount.source_map().segment_at(position, side)
+                && let Some(nested) = query.enter(range, start)
+            {
                 host(native(self.language, &self.syntax, query));
-                return Some(locate(mount.language(), mount.syntax(), nested, &mut host));
+                return Some(Site {
+                    markdown_mount: Some(mount),
+                    ..locate(mount.language(), mount.syntax(), nested, &mut host)
+                });
             }
         }
         Some(locate(self.language, &self.syntax, query, &mut host))
@@ -235,6 +248,7 @@ fn native(language: NativeLanguage, syntax: &NativeSyntax, query: Query) -> Site
         grammar: Grammar::Native(syntax),
         position: query,
         html_host: HtmlHost::Plain,
+        markdown_mount: None,
     }
 }
 
@@ -252,6 +266,7 @@ fn html<'a>(
                     grammar: Grammar::Css(doc),
                     position: nested,
                     html_host: HtmlHost::Plain,
+                    markdown_mount: None,
                 },
                 HtmlEmbeddedDocument::Javascript(doc) => {
                     let kind = mount.language();
@@ -279,6 +294,7 @@ fn html_site(document: &HtmlDocument, query: Query, html_host: HtmlHost) -> Site
         grammar: Grammar::Html(document),
         position: query,
         html_host,
+        markdown_mount: None,
     }
 }
 
@@ -293,6 +309,7 @@ fn javascript(
         grammar: Grammar::Javascript(doc, typescript_defaults),
         position,
         html_host: HtmlHost::Plain,
+        markdown_mount: None,
     }
 }
 

@@ -49,7 +49,7 @@ pub(super) fn indentation(
 
 fn enter_unfinished(mut node: LezerNode<'_>, position: usize) -> LezerNode<'_> {
     let children = &node.data().children;
-    let index = children.partition_point(|&id| node.nodes[id].range.start < position);
+    let index = children.partition_point(|&id| node.document.nodes[id].range.start < position);
     let mut scan = index.checked_sub(1).map(|index| LezerNode {
         id: children[index],
         ..node

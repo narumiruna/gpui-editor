@@ -93,7 +93,9 @@ impl SupportedDocument {
             tab_size: indentation.tab_size,
             indent_unit: indentation.width(),
         };
-        let parsed = if matches!(self.syntax, super::NativeSyntax::Wast(_)) {
+        let parsed = if self.strict_parser.is_some()
+            || matches!(self.syntax, super::NativeSyntax::Wast(_))
+        {
             let Ok(parsed) = self.reparse(transaction.changes()) else {
                 return Ok(transaction);
             };

@@ -1,7 +1,9 @@
 use std::{any::Any, ops::Range, sync::Arc};
 
+use crate::{language::HighlightContext, language_data::NativeLanguage};
+
 use super::{
-    Parser,
+    NodeProp, NodeType, NodeTypes, Parser,
     parse::{ParseError, Work, incremental::CheckpointHistory},
 };
 
@@ -441,7 +443,28 @@ fn materialize(
     Ok(())
 }
 
+struct ConfiguredRows {
+    language: NativeLanguage,
+    types: NodeTypes,
+}
+
 impl SyntaxTree {
+    pub(crate) fn with_node_types(self, language: NativeLanguage, types: NodeTypes) -> Self {
+        self.with_metadata(ConfiguredRows { language, types })
+    }
+
+    /// Return the exact root scope from a language handle's direct parse or
+    /// a WAST tree. This is not a range or viewport coverage query.
+    pub fn highlight_context(&self) -> Option<HighlightContext> {
+        let root = self.root();
+        match root.tree_metadata::<ConfiguredRows>() {
+            Some(config) => {
+                HighlightContext::from_root(config.language, config.types.get(root.term())?)
+            }
+            None => self.wast_highlight_context(),
+        }
+    }
+
     pub(in crate::language) fn with_metadata(mut self, metadata: impl Any + Send + Sync) -> Self {
         self.metadata = Some(Arc::new(metadata));
         self
@@ -493,6 +516,20 @@ impl<'a> SyntaxNode<'a> {
 
     pub(in crate::language) fn tree_metadata<T: Any>(self) -> Option<&'a T> {
         self.tree.metadata.as_ref()?.downcast_ref()
+    }
+
+    /// Return the configured grammar row if the language installed a node
+    /// table on this tree. A bare LR parse does not install one.
+    pub fn node_type(self) -> Option<&'a NodeType> {
+        match self.tree_metadata::<ConfiguredRows>() {
+            Some(config) => config.types.get(self.term()),
+            None => self.wast_node_type(),
+        }
+    }
+
+    /// Read a node-type property by key identity.
+    pub fn prop<T: 'static>(self, key: &NodeProp<T>) -> Option<&'a T> {
+        self.node_type()?.prop(key)
     }
 
     /// Whether this node has the reserved Lezer error term (0).

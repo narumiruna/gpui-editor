@@ -2,18 +2,77 @@ use std::sync::LazyLock;
 
 use super::{
     super::{
-        lezer::{NormalizedEdges, Parser, ReuseStats, SyntaxTree},
+        lezer::{
+            CLOSED_BY, GROUP, LANGUAGE_DATA, LanguageFacet, NodeTypes, NormalizedEdges, OPENED_BY,
+            ParseError, Parser, ReuseStats, SyntaxTree,
+        },
         line_projection::NormalizedInput,
     },
-    LezerNodeKind, Node, parser, tables,
+    LezerNodeKind, Node, highlight, parser, tables,
 };
 
 static PARSER: LazyLock<Parser> = LazyLock::new(tables::parser);
+
+pub(crate) fn stock_data_facet() -> &'static LanguageFacet {
+    static FACET: LazyLock<LanguageFacet> =
+        LazyLock::new(|| LanguageFacet::new(Some(super::language_data())));
+    &FACET
+}
+
+pub(crate) fn stock_node_types() -> &'static NodeTypes {
+    static TYPES: LazyLock<NodeTypes> = LazyLock::new(|| {
+        NodeTypes::new(
+            tables::NODE_NAMES,
+            tables::REPEAT_NODE_COUNT,
+            tables::TOP_TERM,
+            &[0, 1, 2],
+            |term, _, props| match term {
+                tables::TOP_TERM => props.insert(&LANGUAGE_DATA, Some(stock_data_facet().clone())),
+                4 => props.insert(&GROUP, vec!["Declaration".into(), "Declaration".into()]),
+                5 | 13 | 20..=24 | 26 | 28 | 30 | 32 | 33 | 36 | 37 | 40 | 46 => {
+                    props.insert(&GROUP, vec!["Expression".into()]);
+                }
+                48 | 50 | 57 | 60 | 62 | 65 | 66 | 72 | 79 | 82 | 84 | 87 | 89 | 92 | 94 | 96 => {
+                    props.insert(&GROUP, vec!["Declaration".into()]);
+                }
+                6 => props.insert(&OPENED_BY, vec!["[".into()]),
+                7 => props.insert(&CLOSED_BY, vec!["]".into()]),
+                15 => props.insert(&OPENED_BY, vec!["{".into()]),
+                16 => props.insert(&CLOSED_BY, vec!["}".into()]),
+                34 => props.insert(&OPENED_BY, vec!["(".into()]),
+                35 => props.insert(&CLOSED_BY, vec![")".into()]),
+                _ => (),
+            },
+        )
+        .extend(&[highlight::stock_styles()])
+    });
+    &TYPES
+}
 
 #[derive(Debug)]
 pub(super) struct Cache {
     pub(super) tree: SyntaxTree,
     pub(super) reuse: ReuseStats,
+}
+
+/// Parse original grammar source without normalizing editor line breaks.
+/// Ranges use the source's UTF-8 bytes. A line comment ends at LF or EOF.
+/// Strict parsing skips recovery after a stall. Either mode can reach a
+/// native parser limit. Unlike [`super::LezerDocument`], this API does not
+/// fall back to a local parser.
+pub fn parse_raw(source: &str, strict: bool) -> Result<SyntaxTree, ParseError> {
+    if strict {
+        PARSER.parse_editor_strict(source)
+    } else {
+        PARSER.parse_incremental_recovering(source, &[])
+    }
+}
+
+pub(super) fn parse_strict(source: &str) -> Result<Vec<Node>, ParseError> {
+    let input = NormalizedInput::new(source);
+    let tree = parse_raw(&input.text, true)
+        .map_err(|error| error.map_offset(|at| input.original_byte(at)))?;
+    Ok(nodes(&tree, &input))
 }
 
 pub(super) fn parse(

@@ -349,6 +349,98 @@ fn rejected_batches_keep_the_view_queue_and_history_unchanged(cx: &mut TestAppCo
 }
 
 #[gpui::test]
+fn queue_and_matching_echo_reject_protected_edits_that_cancel_in_the_final_text(
+    cx: &mut TestAppContext,
+) {
+    let source = format!("plain\r\n\r\n```rs\r\n{BODY}");
+    let (editor, cx) = open(cx, "a", &source, Extension::default());
+    cx.update(|_, cx| {
+        editor.update(cx, |editor, cx| {
+            assert!(editor.replace(0..1, "P", cx));
+            assert!(editor.replace(0..1, "p", cx));
+            assert_eq!(editor.source(), source);
+            let session = collab_state(editor.view.state()).unwrap().unwrap();
+            let pending = session.sendable_updates();
+            assert_eq!(pending.len(), 2);
+            let revision = editor.view.revision();
+            let history = editor.view.undo_depth();
+            let selection = editor.view.state().selection().clone();
+            assert_eq!(
+                editor.source_collab_queue(),
+                Err(SourceCollabError::OutsideDraft)
+            );
+            assert_eq!(
+                editor.receive_source_collab_updates(BASE, pending, cx),
+                Err(SourceCollabError::OutsideDraft)
+            );
+            assert!(Arc::ptr_eq(
+                &session,
+                &collab_state(editor.view.state()).unwrap().unwrap()
+            ));
+            assert_eq!(
+                editor.source_collab.as_ref().unwrap().authority.as_str(),
+                source
+            );
+            assert_eq!(editor.source(), source);
+            assert_eq!(editor.view.state().selection(), &selection);
+            assert_eq!(
+                (editor.view.revision(), editor.view.undo_depth()),
+                (revision, history)
+            );
+        })
+    });
+}
+
+#[gpui::test]
+fn queue_does_not_disclose_or_strip_unsupported_shared_effects(cx: &mut TestAppContext) {
+    let source = format!("{PREFIX}{BODY}");
+    let marker = StateEffectType::new();
+    let expose = {
+        let marker = marker.clone();
+        collab(
+            CollabConfig::default().with_shared_effects(move |transaction| {
+                transaction
+                    .effects()
+                    .iter()
+                    .filter(|effect| effect.get(&marker).is_some())
+                    .cloned()
+                    .collect()
+            }),
+        )
+    };
+    let (editor, cx) = open(cx, "a", &source, expose);
+    cx.update(|_, cx| {
+        editor.update(cx, |editor, _| {
+            let receipt = marker.of("not a text update");
+            editor
+                .view
+                .update(
+                    Transaction::default().with_effects([receipt.clone()]),
+                    None,
+                    |_| (None, None),
+                )
+                .unwrap();
+            let session = collab_state(editor.view.state()).unwrap().unwrap();
+            assert_eq!(session.sendable_updates().len(), 1);
+            assert_eq!(
+                session.sendable_updates()[0].effects()[0].get(&marker),
+                Some(&"not a text update")
+            );
+            assert_eq!(
+                editor.source_collab_queue(),
+                Err(SourceCollabError::EffectsUnsupported)
+            );
+            assert!(Arc::ptr_eq(
+                &session,
+                &collab_state(editor.view.state()).unwrap().unwrap()
+            ));
+            assert_eq!(editor.source(), source);
+            assert_eq!((editor.view.revision(), editor.view.undo_depth()), (0, 0));
+        })
+    });
+}
+
+#[gpui::test]
 fn authority_and_optimistic_topology_are_both_checked(cx: &mut TestAppContext) {
     // Only reconciling both edits can form a closing marker: the local edit
     // supplies a tilde before the peer deletes the trailing non-marker text.
@@ -499,6 +591,172 @@ fn empty_receipts_work_without_a_body_but_remote_edits_do_not(cx: &mut TestAppCo
 }
 
 #[gpui::test]
+fn committed_ime_edit_converges_with_a_waiting_peer_update_and_one_undo_step(
+    cx: &mut TestAppContext,
+) {
+    let trace: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../codemirror/tests/fixtures/collab_ime_host_trace.json"
+    )))
+    .unwrap();
+    let source = format!("{PREFIX}{BODY}");
+    assert_eq!(trace["source"], source);
+    assert_eq!(trace["base"], BASE);
+    let mut second = cx.clone();
+    let (a, a_cx) = open(cx, "a", &source, Extension::default());
+    let (b, b_cx) = open(&mut second, "b", &source, Extension::default());
+    a_cx.update(|_, cx| super::super::bind_keys(cx));
+    activate_at_end(&a, a_cx);
+    a_cx.simulate_input("!");
+    let prefix = queue(&a, a_cx);
+    activate_at_end(&b, b_cx);
+    b_cx.simulate_input("🦊");
+    let mut authority = Authority {
+        text: Text::new(&source),
+        accepted: Vec::new(),
+    };
+    authority.submit(&queue(&b, b_cx)).unwrap();
+    a_cx.update(|window, cx| {
+        a.update(cx, |editor, cx| {
+            for interim in ["ni", "你🦀"] {
+                editor.replace_and_mark_text_in_range(None, interim, None, window, cx);
+                assert_eq!(editor.source(), format!("{source}!{interim}"));
+                assert_eq!(
+                    editor.source_collab_queue(),
+                    Err(SourceCollabError::InputBlocked)
+                );
+                assert_eq!(
+                    editor.receive_source_collab_updates(BASE, &authority.accepted, cx),
+                    Err(SourceCollabError::InputBlocked)
+                );
+            }
+            editor.replace_text_in_range(None, "你好", window, cx);
+            assert!(!editor.is_composing());
+            assert_eq!(editor.source(), format!("{source}!你好"));
+        })
+    });
+    let committed = queue(&a, a_cx);
+    let at = source.len() + 1;
+    assert_eq!(
+        committed.updates,
+        [prefix.updates[0].clone(), edit("a", at, at..at, "你好")]
+    );
+    let origin = committed.updates[1].origin_context().unwrap();
+    assert_eq!(origin.start_text().as_str(), format!("{source}!"));
+    assert_eq!(origin.new_text().as_str(), format!("{source}!你好"));
+    authority.deliver(&b, b_cx);
+    authority.deliver(&a, a_cx);
+    for (index, key) in [None, Some("secondary-z"), Some("secondary-shift-z")]
+        .into_iter()
+        .enumerate()
+    {
+        if let Some(key) = key {
+            a_cx.simulate_keystrokes(key);
+        }
+        let outgoing = queue(&a, a_cx);
+        assert_eq!(outgoing.updates.len(), if index == 0 { 2 } else { 1 });
+        authority.submit(&outgoing).unwrap();
+        authority.deliver(&b, b_cx);
+        authority.deliver(&a, a_cx);
+        assert_converged(&authority, &a, &b, a_cx);
+        a_cx.update(|_, cx| {
+            let editor = a.read(cx);
+            let expected = &trace["stages"][index];
+            assert_eq!(&editor.source()[PREFIX.len()..], expected["draft"]);
+            assert_eq!(
+                editor.source_collab_queue().unwrap().version,
+                expected["version"].as_u64().unwrap() as usize
+            );
+            assert_eq!(
+                editor.cursor(),
+                expected["caret"].as_u64().unwrap() as usize
+            );
+            assert_eq!(
+                serde_json::json!([editor.view.undo_depth(), editor.view.redo_depth()]),
+                expected["depths"]
+            );
+        });
+    }
+}
+
+#[gpui::test]
+fn canceling_ime_does_not_publish_its_marked_revisions(cx: &mut TestAppContext) {
+    let source = format!("{PREFIX}{BODY}");
+    let (editor, cx) = open(cx, "a", &source, Extension::default());
+    activate_at_end(&editor, cx);
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| {
+            editor.replace_and_mark_text_in_range(None, "你🧭", None, window, cx);
+            editor.replace_and_mark_text_in_range(None, "", None, window, cx);
+            assert!(!editor.is_composing());
+            assert_eq!(editor.source(), source);
+            assert_eq!(
+                editor.source_collab_queue().unwrap(),
+                SourceCollabQueue {
+                    version: BASE,
+                    updates: Vec::new()
+                }
+            );
+            let remote = edit("b", source.len(), source.len()..source.len(), "!");
+            editor
+                .receive_source_collab_updates(BASE, &[remote], cx)
+                .unwrap();
+            assert_eq!(editor.source(), format!("{source}!"));
+            assert_eq!(editor.source_collab_queue().unwrap().version, BASE + 1);
+        })
+    });
+}
+
+#[gpui::test]
+fn ime_outside_draft_or_invalid_queue_receipt_is_never_exported(cx: &mut TestAppContext) {
+    for (source, extra) in [
+        (
+            String::from("Prose with no code fence"),
+            Extension::default(),
+        ),
+        (
+            format!("{PREFIX}{BODY}"),
+            transaction_extender(|_, transaction| TransactionExtension {
+                scroll_into_view: transaction.changes().is_empty()
+                    && transaction.selection().is_none(),
+                ..Default::default()
+            }),
+        ),
+    ] {
+        let (editor, cx) = open(cx, "a", &source, extra);
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.set_selection(source.len(), source.len());
+                editor.replace_and_mark_text_in_range(None, "漢", None, window, cx);
+                assert!(editor.is_composing());
+                let session = collab_state(editor.view.state()).unwrap().unwrap();
+                let selection = editor.view.state().selection().clone();
+                let revision = editor.view.revision();
+                editor.unmark_text(window, cx);
+                assert_eq!(
+                    editor.source_collab_queue(),
+                    Err(SourceCollabError::ImeUnsupported)
+                );
+                assert_eq!(
+                    editor.receive_source_collab_updates(BASE, &[], cx),
+                    Err(SourceCollabError::ImeUnsupported)
+                );
+                assert!(Arc::ptr_eq(
+                    &session,
+                    &collab_state(editor.view.state()).unwrap().unwrap()
+                ));
+                assert_eq!(editor.source(), format!("{source}漢"));
+                assert_eq!(editor.view.state().selection(), &selection);
+                assert_eq!(
+                    (editor.view.revision(), editor.view.undo_depth()),
+                    (revision, 1)
+                );
+            })
+        });
+    }
+}
+
+#[gpui::test]
 fn read_only_disabled_unconfigured_and_marked_text_are_not_host_operations(
     cx: &mut TestAppContext,
 ) {
@@ -550,21 +808,17 @@ fn read_only_disabled_unconfigured_and_marked_text_are_not_host_operations(
             );
             editor.unmark_text(window, cx);
             assert_eq!(editor.source(), format!("{source}漢"));
+            let pending = editor.source_collab_queue().unwrap();
+            assert_eq!(pending.version, BASE);
             assert_eq!(
-                editor.source_collab_queue(),
-                Err(SourceCollabError::ImeUnsupported)
+                pending.updates,
+                [edit("a", source.len(), source.len()..source.len(), "漢")]
             );
-            assert_eq!(
-                editor.receive_source_collab_updates(BASE, &[remote], cx),
-                Err(SourceCollabError::ImeUnsupported)
-            );
-            assert_eq!(
-                collab_state(editor.view.state())
-                    .unwrap()
-                    .unwrap()
-                    .synced_version(),
-                BASE
-            );
+            editor
+                .receive_source_collab_updates(BASE, &[remote], cx)
+                .unwrap();
+            assert_eq!(editor.source(), format!("{source}!漢"));
+            assert_eq!(editor.source_collab_queue().unwrap().version, BASE + 1);
             assert_eq!(editor.view.undo_depth(), 1);
         })
     });

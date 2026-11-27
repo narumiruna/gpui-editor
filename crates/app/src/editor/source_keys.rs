@@ -12,8 +12,8 @@ use gpui_editor_codemirror::{
         bindings::{CommandId as SourceCommand, default_keymap},
     },
     language::{
-        IndentOptions, LanguageData, StreamSettings, language_data_provider,
-        markdown::MarkdownCodeParser,
+        IndentOptions, LanguageData, MarkdownWastIndent, StreamSettings, language_data_provider,
+        markdown::{MarkdownCodeParser, markdown_snapshot},
     },
     view::{
         ANNOUNCE,
@@ -215,10 +215,22 @@ impl Editor {
         let Some(state) = self.state_in_source(&scope) else {
             return false;
         };
-        let indent = core::Indentation {
-            tab_size: state.tab_size(),
-            ..Default::default()
+        let host =
+            matches!(&parser, MarkdownCodeParser::Wast(_)).then(|| self.view.state().clone());
+        let snapshot = host.as_ref().and_then(markdown_snapshot);
+        let mounted = match (&parser, &host, &snapshot) {
+            (MarkdownCodeParser::Wast(parser), Some(host), Some(snapshot)) => {
+                MarkdownWastIndent::new(host, snapshot, scope.clone(), parser)
+            }
+            _ => None,
         };
+        let indent = host.as_ref().filter(|_| mounted.is_some()).map_or_else(
+            || core::Indentation {
+                tab_size: state.tab_size(),
+                ..Default::default()
+            },
+            core::Indentation::for_state,
+        );
         let settings = StreamSettings {
             tab_size: indent.tab_size,
             indent_unit: indent.width(),
@@ -231,17 +243,22 @@ impl Editor {
         } else {
             "\n"
         };
-        let Some(document) = self.source_document(&scope, &parser, settings) else {
-            return false;
+        let syntax = if let Some(mounted) = &mounted {
+            mounted.syntax()
+        } else {
+            let Some(document) = self.source_document(&scope, &parser, settings) else {
+                return false;
+            };
+            document.syntax()
         };
-        let syntax = document.syntax();
         let lines = parser
             .language()
             .uses_projected_lines()
             .then(|| syntax.projected_lines())
             .flatten();
-        let indentation_at = |position, settings, options: IndentOptions<'_>| {
-            syntax.indentation(position, settings, options)
+        let indentation_at = |position, settings, options: IndentOptions<'_>| match &mounted {
+            Some(mounted) => mounted.at(position, settings, options),
+            None => syntax.indentation(position, settings, options),
         };
         let bracket_gap = |position| syntax.bracket_gap_for_indent(position);
         let transaction = match (command, lines) {
@@ -281,12 +298,14 @@ impl Editor {
         };
         let Ok(Some(transaction)) = transaction else {
             // Do not replace a rejected projected indent with a raw newline.
-            return lines.is_some();
+            return lines.is_some() || mounted.is_some();
         };
         if lines.is_some() && joins_closing_fence_break(self.source(), &scope, &transaction) {
             return true;
         }
-        transaction.changes().is_empty() || self.apply_local_source_edit(transaction, scope, cx)
+        transaction.changes().is_empty()
+            || self.apply_local_source_edit(transaction, scope, cx)
+            || mounted.is_some()
     }
 
     pub(super) fn select_source_parent(&mut self, cx: &mut Context<Self>) -> bool {

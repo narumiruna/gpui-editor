@@ -1,16 +1,16 @@
 use std::{ops::Range, sync::Arc};
 
 use crate::{
-    Text,
+    Assoc, Text,
     language::{
         HighlightSpan, StreamSettings,
         html::{HtmlDocument, HtmlOptions},
         lezer::ParseError,
-        wast::{WastDocument, project_error},
+        wast::WastDocument,
     },
     language_data::{
-        LanguageDescription, NativeLanguage, NativeSyntax, SupportedDocument, SyntaxUpdateError,
-        WastLanguage,
+        JsonLanguage, LanguageDescription, LezerLanguage, NativeLanguage, NativeSyntax,
+        SupportedDocument, SyntaxUpdateError, WastLanguage,
     },
 };
 
@@ -28,11 +28,13 @@ pub struct MarkdownParserConfig {
 /// Find a native parser for the first word of a nonempty code info string.
 pub type MarkdownCodeResolver = dyn Fn(&str) -> Option<NativeLanguage> + Send + Sync;
 
-/// A native code parser, including a WAST parser with its own configuration.
-/// Equality compares the native language and, for WAST handles, configuration identity.
+/// A native code parser. Configured variants retain their parser identity and
+/// strict policy rather than selecting the grammar's default parser.
 #[derive(Clone, PartialEq, Eq)]
 pub enum MarkdownCodeParser {
     Native(NativeLanguage),
+    Json(JsonLanguage),
+    Lezer(LezerLanguage),
     Wast(WastLanguage),
 }
 
@@ -49,6 +51,12 @@ impl MarkdownCodeParser {
                 .support()
                 .parse_with_code_languages(text, settings, &[])
                 .map_err(SyntaxUpdateError::Tokenize),
+            Self::Json(language) => language
+                .parse_for_editor(text, settings)
+                .map_err(SyntaxUpdateError::StrictSyntax),
+            Self::Lezer(language) => language
+                .parse_for_editor(text, settings)
+                .map_err(SyntaxUpdateError::StrictSyntax),
             Self::Wast(language) => language
                 .parse_for_editor(text, settings)
                 .map_err(SyntaxUpdateError::StrictSyntax),
@@ -58,6 +66,8 @@ impl MarkdownCodeParser {
     pub fn language(&self) -> NativeLanguage {
         match self {
             Self::Native(language) => *language,
+            Self::Json(_) => NativeLanguage::Json,
+            Self::Lezer(_) => NativeLanguage::LezerGrammar,
             Self::Wast(_) => NativeLanguage::Wast,
         }
     }
@@ -114,11 +124,12 @@ impl MarkdownParserConfig {
 
 /// An embedded parser result and its source map into the Markdown document.
 pub struct MarkdownMount {
-    language: NativeLanguage,
+    code_parser: Option<MarkdownCodeParser>,
     syntax: NativeSyntax,
     segments: Vec<Segment>,
 }
 
+#[derive(Debug)]
 struct Segment {
     source: Range<usize>,
     start: usize,
@@ -127,6 +138,94 @@ struct Segment {
 impl Segment {
     fn parsed_end(&self) -> usize {
         self.start + self.source.len()
+    }
+}
+
+/// The ordered, nonempty segments of one mount. This map does not grant edit access.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct MarkdownSourceMap<'a>(&'a [Segment]);
+
+impl MarkdownSourceMap<'_> {
+    pub(crate) fn bounds(self) -> Range<usize> {
+        self.0[0].source.start..self.0.last().unwrap().source.end
+    }
+
+    pub(crate) fn is_contiguous(self) -> bool {
+        self.bounds().len() == self.0.last().unwrap().parsed_end()
+    }
+
+    /// The LR parser advances to the next segment at a join, even when a
+    /// token ends there. The final segment owns EOF.
+    pub(crate) fn source_offset(self, local: usize) -> usize {
+        let i = self
+            .0
+            .partition_point(|segment| segment.parsed_end() <= local);
+        self.0.get(i).map_or_else(
+            || self.0.last().unwrap().source.end,
+            |segment| segment.source.start + (local - segment.start),
+        )
+    }
+
+    /// A callback result may use either edge of a gap, but not its interior.
+    pub(crate) fn contains_endpoint(self, at: usize) -> bool {
+        let i = self.0.partition_point(|segment| segment.source.end < at);
+        self.0
+            .get(i)
+            .is_some_and(|segment| segment.source.start <= at)
+    }
+
+    pub(crate) fn segment_at(self, at: usize, side: Assoc) -> Option<(Range<usize>, usize)> {
+        let i = self.0.partition_point(|segment| match side {
+            Assoc::Before => segment.source.end < at,
+            Assoc::After => segment.source.end <= at,
+        });
+        let segment = self.0.get(i)?;
+        let start = segment.source.start;
+        (start < at || (start == at && side == Assoc::After))
+            .then(|| (segment.source.clone(), segment.start))
+    }
+}
+
+/// Changes in the difference between original bytes and default CodeMirror
+/// UTF-16 positions. Store only the ends of characters and line endings that
+/// change the difference. A snapshot builds this index only for a predicate.
+#[derive(Debug)]
+pub(super) struct EditorOffsets(Box<[(usize, usize)]>);
+
+impl EditorOffsets {
+    pub(super) fn new(source: &str) -> Self {
+        let mut offsets = Vec::new();
+        let mut delta = 0;
+        for (at, ch) in source.char_indices() {
+            let width = ch.len_utf8();
+            let crlf = usize::from(ch == '\r' && source.as_bytes().get(at + 1) == Some(&b'\n'));
+            let removed = width - ch.len_utf16() + crlf;
+            if removed > 0 {
+                delta += removed;
+                let end = at + width + crlf;
+                offsets.push((end, end - delta));
+            }
+        }
+        Self(offsets.into_boxed_slice())
+    }
+
+    pub(super) fn editor(&self, byte: usize) -> usize {
+        let i = self.0.partition_point(|&(end, _)| end <= byte);
+        byte - self.delta(i)
+    }
+
+    pub(super) fn source(&self, editor: usize) -> usize {
+        let i = self.0.partition_point(|&(_, end)| end <= editor);
+        // Between two surrogates this yields a byte inside the scalar. Only
+        // compare that byte to node bounds; never use it to slice the text.
+        editor + self.delta(i)
+    }
+
+    fn delta(&self, i: usize) -> usize {
+        i.checked_sub(1).map_or(0, |i| {
+            let (byte, editor) = self.0[i];
+            byte - editor
+        })
     }
 }
 
@@ -173,20 +272,14 @@ impl MarkdownDocument {
                 Some(MarkdownCodeParser::Native(language)) => {
                     language.parse_with_stream_settings(text, settings).ok()?
                 }
-                Some(MarkdownCodeParser::Wast(language)) => match language.parse_document(text) {
-                    Ok(syntax) => NativeSyntax::Wast(syntax),
-                    Err(error) => {
-                        return Some(Err(project_error(error, |offset| {
-                            // At a join, the next segment owns the byte. At EOF,
-                            // report the end of the last segment.
-                            let i =
-                                segments.partition_point(|segment| segment.parsed_end() <= offset);
-                            segments.get(i).map_or_else(
-                                || segments.last().unwrap().source.end,
-                                |segment| segment.source.start + offset - segment.start,
-                            )
+                Some(parser) => match parser.parse(text, settings) {
+                    Ok(document) => document.into_syntax(),
+                    Err(SyntaxUpdateError::StrictSyntax(error)) => {
+                        return Some(Err(error.map_offset(|offset| {
+                            MarkdownSourceMap(&segments).source_offset(offset)
                         })));
                     }
+                    Err(_) => return None,
                 },
                 None => NativeSyntax::Html(HtmlDocument::parse_with_options(
                     text,
@@ -197,7 +290,7 @@ impl MarkdownDocument {
                 )),
             };
             Some(Ok(MarkdownMount {
-                language: language.map_or(NativeLanguage::Html, |parser| parser.language()),
+                code_parser: language,
                 syntax,
                 segments,
             }))
@@ -207,7 +300,13 @@ impl MarkdownDocument {
 
 impl MarkdownMount {
     pub fn language(&self) -> NativeLanguage {
-        self.language
+        self.code_parser
+            .as_ref()
+            .map_or(NativeLanguage::Html, MarkdownCodeParser::language)
+    }
+
+    pub(crate) fn uses_wast_parser(&self, expected: &WastLanguage) -> bool {
+        matches!(&self.code_parser, Some(MarkdownCodeParser::Wast(parser)) if parser == expected)
     }
 
     /// Syntax positions are relative to the concatenated embedded source.
@@ -218,6 +317,10 @@ impl MarkdownMount {
     /// The Markdown byte ranges consumed by this parser, in input order.
     pub fn source_ranges(&self) -> impl ExactSizeIterator<Item = Range<usize>> + '_ {
         self.segments.iter().map(|segment| segment.source.clone())
+    }
+
+    pub(crate) fn source_map(&self) -> MarkdownSourceMap<'_> {
+        MarkdownSourceMap(&self.segments)
     }
 
     pub(crate) fn wast(&self) -> Option<&WastDocument> {
@@ -248,5 +351,51 @@ impl MarkdownMount {
                         tags: span.tags,
                     })
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::*;
+    use crate::language::wast::WastNode;
+
+    #[test]
+    fn wast_node_projection_matches_pinned_lr_joins() {
+        let span = |node: WastNode<'_>| {
+            let range = node.range();
+            json!([node.node_type().name(), range.start, range.end])
+        };
+        for row in include_str!("../../../tests/fixtures/wast_markdown_callbacks.jsonl")
+            .lines()
+            .take(2)
+        {
+            let row: Value = serde_json::from_str(row).unwrap();
+            assert_eq!(row["step"], "LR joins");
+            let source = row["source"].as_str().unwrap();
+            let mut input = String::new();
+            let mut segments = Vec::new();
+            for range in row["ranges"].as_array().unwrap() {
+                let [from, to] = serde_json::from_value::<[usize; 2]>(range.clone()).unwrap();
+                segments.push(Segment {
+                    source: from..to,
+                    start: input.len(),
+                });
+                input.push_str(&source[from..to]);
+            }
+            let length = input.len();
+            let doc = WastDocument::parse(Text::new(input));
+            let map = MarkdownSourceMap(&segments);
+            let nodes: Vec<_> = doc
+                .nodes()
+                .map(|node| {
+                    let node = node.in_markdown(map);
+                    json!([span(node), node.parent().map(span)])
+                })
+                .collect();
+            assert_eq!(json!(nodes), row["nodes"]);
+            assert_eq!(doc.root().range(), 0..length);
+        }
     }
 }

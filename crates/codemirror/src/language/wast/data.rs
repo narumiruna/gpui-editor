@@ -1,9 +1,8 @@
 use std::sync::{Arc, LazyLock};
 
 use crate::{
-    Assoc, EditorState, Extension, Facet,
+    Assoc, EditorState,
     commands::CommentTokens,
-    extension::FacetId,
     language::{LanguageData, lezer::SyntaxTree},
     language_data::CloseBracketData,
 };
@@ -13,68 +12,15 @@ use super::{
     WastNodeTypes, parser,
 };
 
-type DataFacet = Facet<Arc<LanguageData>, Vec<Arc<LanguageData>>>;
-
-/// A facet for language data on a WAST root or sublanguage. Each definition
-/// has its own identity; clones refer to the same installed entries.
-#[derive(Clone)]
-pub struct WastDataFacet {
-    facet: Arc<DataFacet>,
-    base: Option<Arc<LanguageData>>,
-}
+pub use crate::language::lezer::LanguageFacet as WastDataFacet;
 
 impl WastDataFacet {
-    /// Define a facet with optional default data, ordered after installed entries.
-    pub fn new(base: Option<LanguageData>) -> Self {
-        let base = base.map(Arc::new);
-        let default = base.clone();
-        let facet = Arc::new(Facet::new(move |entries: &[&Arc<LanguageData>]| {
-            entries
-                .iter()
-                .copied()
-                .chain(default.iter())
-                .cloned()
-                .collect()
-        }));
-        Self { facet, base }
-    }
-
-    pub(crate) fn base(&self) -> Option<&Arc<LanguageData>> {
-        self.base.as_ref()
-    }
-
-    /// Install a data entry at the extension's precedence.
-    pub fn of(&self, data: LanguageData) -> Extension {
-        self.facet.of(Arc::new(data))
-    }
-
-    pub(crate) fn id(&self) -> FacetId {
-        self.facet.id()
-    }
-
     pub(crate) fn stock() -> &'static Self {
         static STOCK: LazyLock<WastDataFacet> =
             LazyLock::new(|| WastDataFacet::new(Some(stock_data())));
         &STOCK
     }
-
-    pub(crate) fn read(&self, state: &EditorState) -> Vec<Arc<LanguageData>> {
-        state
-            .context()
-            .facet(&self.facet)
-            .expect("typed WAST data")
-            .as_ref()
-            .clone()
-    }
 }
-
-impl PartialEq for WastDataFacet {
-    fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.facet, &other.facet)
-    }
-}
-
-impl Eq for WastDataFacet {}
 
 /// How a matched sublanguage contributes its data.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -88,8 +34,9 @@ pub enum WastSublanguageMode {
 type SublanguageTest = dyn Fn(WastNode<'_>, &EditorState) -> bool + Send + Sync;
 
 /// One positional data rule for a WAST root. The predicate receives the
-/// innermost node resolved at the query offset and side, and the current state.
-/// This changes data, not syntax, presence, edit ownership, or mounts.
+/// resolved WAST node and the current state. Markdown uses CodeMirror's
+/// mounted query offset and exposes node ranges in host bytes. This changes
+/// data, not syntax, presence, edit ownership, or mounts.
 #[derive(Clone)]
 pub struct WastSublanguage {
     mode: WastSublanguageMode,
@@ -121,6 +68,18 @@ impl WastDocument {
         let root = self.root();
         root.node_type()
             .configured_data_at(state, || Some(root.resolve_at(position, Some(side))))
+    }
+
+    pub(crate) fn configured_data_in_markdown(
+        &self,
+        state: &EditorState,
+        map: super::MarkdownSourceMap<'_>,
+        position: impl FnOnce() -> usize,
+        side: Assoc,
+    ) -> Vec<Arc<LanguageData>> {
+        let root = self.root().in_markdown(map);
+        root.node_type()
+            .configured_data_at(state, || Some(root.resolve_at(position(), Some(side))))
     }
 }
 
@@ -175,7 +134,7 @@ impl WastDataNodes {
             nodes: &self.nodes,
             node_types: &self.node_types,
             id: 0,
-            origin: 0,
+            coordinates: super::Coordinates::Linear(0),
         }
         .resolve_at(position, Some(side))
     }

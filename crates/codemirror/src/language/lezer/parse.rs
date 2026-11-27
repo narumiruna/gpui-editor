@@ -40,6 +40,21 @@ pub enum ParseError {
     LimitExceeded { offset: usize },
 }
 
+impl ParseError {
+    pub(crate) fn map_offset(mut self, map: impl FnOnce(usize) -> usize) -> Self {
+        let offset = match &mut self {
+            Self::UnexpectedToken { offset, .. }
+            | Self::Ambiguous { offset, .. }
+            | Self::InvalidTokenTerm { offset, .. }
+            | Self::InvalidTokenEnd { offset, .. }
+            | Self::InvalidTransition { offset, .. }
+            | Self::LimitExceeded { offset } => offset,
+        };
+        *offset = map(*offset);
+        self
+    }
+}
+
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

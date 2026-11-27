@@ -1,7 +1,8 @@
 use std::time::Duration;
 
 use gpui_editor_codemirror::{
-    EditorSelection, EditorState, READ_ONLY, Transaction,
+    Compartment, EditorSelection, EditorState, Extension, READ_ONLY, Transaction,
+    autocomplete::brackets::close_brackets,
     commands::bindings::TabFocusMode,
     language::{HighlightTag, HighlightTheme, highlighting_for},
     setup::{SetupEditor, basic_setup, minimal_setup},
@@ -68,6 +69,71 @@ fn basic_installs_bracket_pair_precedence_and_minimal_does_not() {
     assert_eq!(basic.view().state().selection().main().head(), 2);
     minimal.insert_text("[", at(1000), ()).unwrap();
     assert_eq!(minimal.view().state().text().as_str(), "[)");
+}
+
+#[test]
+fn close_bracket_input_follows_its_extension_without_changing_preset_keys() {
+    for line in include_str!("fixtures/setup_close_brackets.jsonl").lines() {
+        let row: serde_json::Value = serde_json::from_str(line).unwrap();
+        let position =
+            |offset: &serde_json::Value| usize::try_from(offset.as_u64().unwrap()).unwrap();
+        let mode = row["mode"].as_str().unwrap();
+        let slot = Compartment::new();
+        let extension = |enabled| {
+            if enabled {
+                close_brackets()
+            } else {
+                Extension::default()
+            }
+        };
+        let mut state = EditorState::with_extensions(
+            row["source"].as_str().unwrap(),
+            slot.of(extension(matches!(mode, "initial" | "detach"))),
+        )
+        .unwrap();
+        let selection =
+            EditorSelection::single(position(&row["select"][0]), position(&row["select"][1]));
+        state
+            .update(Transaction::default().with_selection(selection))
+            .unwrap();
+        let mut editor = if row["preset"] == "basic" {
+            basic_setup(state, KeyPlatform::Linux).unwrap()
+        } else {
+            minimal_setup(state, KeyPlatform::Linux)
+        };
+        if matches!(mode, "attach" | "detach") {
+            let change = Transaction::default()
+                .with_effects([slot.reconfigure(extension(mode == "attach"))]);
+            editor
+                .view_mut()
+                .update(change, (), |_| (None, ()))
+                .unwrap();
+        }
+        for (i, step) in row["steps"].as_array().unwrap().iter().enumerate() {
+            let input = step["key"].as_str().unwrap();
+            let now = (i as u64 + 1) * 1000;
+            if input == "Backspace" {
+                assert_eq!(
+                    key(&mut editor, input, KeyModifiers::default(), now, ()),
+                    Some(())
+                );
+            } else {
+                assert!(editor.insert_text(input, at(now), ()).unwrap());
+            }
+            let state = editor.view().state();
+            let selection = state.selection().main();
+            assert_eq!(
+                state.text().as_str(),
+                step["doc"].as_str().unwrap(),
+                "{} {mode} {input}",
+                row["preset"]
+            );
+            assert_eq!(
+                serde_json::json!([selection.anchor(), selection.head()]),
+                step["selection"]
+            );
+        }
+    }
 }
 
 #[test]

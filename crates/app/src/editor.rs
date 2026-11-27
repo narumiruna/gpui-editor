@@ -553,6 +553,7 @@ impl Editor {
         self.last_typed_at = None;
         self.marked = None;
         self.view.end_group();
+        self.finish_source_collab_composition();
     }
 
     fn invalidate_edit_layout(&mut self) {
@@ -1436,9 +1437,9 @@ impl EntityInputHandler for Editor {
             self.cancel_source_snippet(cx);
             self.collapse_multiple_selections(cx);
             self.view.start_group();
+            self.start_source_collab_composition();
         }
         let start = range.start;
-        let revision = self.view.revision();
         let applied = self.replace_with(
             EditScope::Active,
             range,
@@ -1454,18 +1455,13 @@ impl EntityInputHandler for Editor {
             },
             cx,
         );
-        if self.view.revision() != revision
-            && let Some(collab) = &mut self.source_collab
-        {
-            collab.note_ime_edit();
-        }
         match applied {
             Some(start) if !text.is_empty() => {
                 self.dismiss_keyboard_diagnostic_hover();
                 self.marked = Some(start..start + text.len());
             }
             Some(_) => self.finish_composition(),
-            None if starting => self.view.end_group(),
+            None if starting => self.finish_composition(),
             None => {}
         }
     }

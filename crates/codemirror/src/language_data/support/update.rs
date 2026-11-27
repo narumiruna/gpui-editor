@@ -9,7 +9,7 @@ use crate::{
     stream_parser::TokenizeError,
 };
 
-use super::{NativeLanguage, NativeSyntax, SupportedDocument, markdown_mounts};
+use super::{NativeLanguage, NativeSyntax, StrictParser, SupportedDocument, markdown_mounts};
 
 /// An incremental update that did not change the current syntax snapshot.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -49,7 +49,7 @@ impl From<StreamUpdateError> for SyntaxUpdateError {
 impl SupportedDocument {
     /// Apply edits in old-document byte coordinates. Reuse validated parser
     /// state when the current grammar supports it. Otherwise parse a new
-    /// snapshot. An invalid edit or a strict mount failure leaves the existing
+    /// snapshot. An invalid edit or a strict parse failure leaves the existing
     /// syntax and mounts intact.
     pub fn apply_changes(&mut self, changes: &ChangeSet) -> Result<(), SyntaxUpdateError> {
         if changes.is_empty() {
@@ -67,7 +67,41 @@ impl SupportedDocument {
 
     /// Create a new snapshot without changing the one held by the old state.
     pub(crate) fn reparse(&self, changes: &ChangeSet) -> Result<Self, SyntaxUpdateError> {
-        let syntax = match &self.syntax {
+        let syntax = if let Some(parser) = &self.strict_parser {
+            let mut text = self.text().clone();
+            changes.apply_to(&mut text)?;
+            match parser {
+                StrictParser::Lr(grammar) => {
+                    let node_types = match &self.syntax {
+                        NativeSyntax::Json(doc) => doc.node_types(),
+                        NativeSyntax::LezerGrammar(doc) => doc.node_types(),
+                        _ => unreachable!("strict LR attachment has the corresponding grammar"),
+                    };
+                    grammar.parse_editor(text, true, node_types)
+                }
+                StrictParser::Wast(config) => config.parse_document(text).map(NativeSyntax::Wast),
+            }
+            .map_err(SyntaxUpdateError::StrictSyntax)?
+        } else {
+            self.reparse_permissive(changes)?
+        };
+        Ok(Self {
+            language: self.language,
+            settings: self.settings,
+            markdown_parser: self.markdown_parser.clone(),
+            strict_parser: self.strict_parser.clone(),
+            markdown_mounts: markdown_mounts(
+                &syntax,
+                self.settings,
+                self.markdown_parser.as_deref(),
+            )
+            .map_err(SyntaxUpdateError::StrictSyntax)?,
+            syntax,
+        })
+    }
+
+    fn reparse_permissive(&self, changes: &ChangeSet) -> Result<NativeSyntax, SyntaxUpdateError> {
+        Ok(match &self.syntax {
             NativeSyntax::Asn1(_) | NativeSyntax::Legacy(_) => {
                 // Stream checkpoints support in-place updates only.
                 let mut text = self.text().clone();
@@ -100,32 +134,9 @@ impl SupportedDocument {
                 NativeSyntax::Sql(dialect.language().reparse(doc, changes)?)
             }
             NativeSyntax::Vue(doc) => NativeSyntax::Vue(doc.reparse(changes)?),
-            NativeSyntax::Wast(doc) => {
-                NativeSyntax::Wast(if let Some(config) = &self.wast_config {
-                    let mut text = doc.text().clone();
-                    changes.apply_to(&mut text)?;
-                    config
-                        .parse_document(text)
-                        .map_err(SyntaxUpdateError::StrictSyntax)?
-                } else {
-                    doc.reparse(changes)?
-                })
-            }
+            NativeSyntax::Wast(doc) => NativeSyntax::Wast(doc.reparse(changes)?),
             NativeSyntax::Xml(doc) => NativeSyntax::Xml(doc.reparse(changes)?),
             NativeSyntax::Yaml(doc) => NativeSyntax::Yaml(doc.reparse(changes)?),
-        };
-        Ok(Self {
-            language: self.language,
-            settings: self.settings,
-            markdown_parser: self.markdown_parser.clone(),
-            wast_config: self.wast_config.clone(),
-            markdown_mounts: markdown_mounts(
-                &syntax,
-                self.settings,
-                self.markdown_parser.as_deref(),
-            )
-            .map_err(SyntaxUpdateError::StrictSyntax)?,
-            syntax,
         })
     }
 

@@ -5,7 +5,10 @@
 //! GFM and Pandoc-style scripts and emoji. All positions are original UTF-8
 //! byte offsets, including in documents with CRLF or lone CR line breaks.
 
-use std::ops::Range;
+use std::{
+    ops::Range,
+    sync::{Arc, OnceLock},
+};
 
 use crate::{Assoc, ChangeSet, EditError, Text};
 
@@ -25,6 +28,8 @@ mod parser;
 mod paste_link;
 mod table;
 
+use mounts::EditorOffsets;
+pub(crate) use mounts::MarkdownSourceMap;
 pub use mounts::{
     MarkdownCodeLanguages, MarkdownCodeParser, MarkdownCodeParserResolver, MarkdownCodeResolver,
     MarkdownMount, MarkdownParserConfig,
@@ -232,6 +237,7 @@ pub struct MarkdownDocument {
     dialect: MarkdownDialect,
     root: MarkdownNode,
     highlights: Vec<(Range<usize>, Vec<HighlightTag>)>,
+    editor_offsets: OnceLock<Arc<EditorOffsets>>,
     parsed_bytes: usize,
     reused_blocks: usize,
 }
@@ -301,6 +307,7 @@ impl MarkdownDocument {
             dialect,
             root,
             highlights,
+            editor_offsets: OnceLock::new(),
             parsed_bytes,
             reused_blocks,
         }
@@ -320,8 +327,21 @@ impl MarkdownDocument {
         &self.text
     }
 
+    pub(crate) fn wast_sublanguage_position(&self, at: usize, origin: usize) -> usize {
+        let offsets = self
+            .editor_offsets
+            .get_or_init(|| Arc::new(EditorOffsets::new(self.text.as_str())));
+        // CodeMirror calls top.resolve(pos - top.from, side) on a node whose
+        // positions still refer to the host. The subtraction uses UTF-16.
+        offsets.source(offsets.editor(at) - offsets.editor(origin))
+    }
+
+    pub(super) fn projected_lines(&self) -> Option<&Text> {
+        self.editor_lines.as_ref()
+    }
+
     fn syntax_lines(&self) -> &Text {
-        self.editor_lines.as_ref().unwrap_or(&self.text)
+        self.projected_lines().unwrap_or(&self.text)
     }
 
     pub fn root(&self) -> &MarkdownNode {
@@ -474,14 +494,18 @@ impl MarkdownDocument {
         let (fence, _) = self
             .path(position, side == Assoc::Before)
             .find(|(node, _)| node.kind == FencedCode)?;
-        fence
-            .children()
-            .filter(|node| node.kind == CodeText && !node.range.is_empty())
+        let endpoint = |node: &MarkdownNode| match side {
+            Assoc::Before => node.range.start,
+            Assoc::After => node.range.end,
+        };
+        let first = fence
+            .children
+            .partition_point(|node| endpoint(node) < position);
+        fence.children[first..]
+            .iter()
+            .take_while(|node| endpoint(node) == position)
+            .find(|node| node.kind == CodeText && !node.range.is_empty())
             .map(MarkdownNode::range)
-            .find(|range| match side {
-                Assoc::Before => position == range.start,
-                Assoc::After => position == range.end,
-            })
     }
 
     fn path(

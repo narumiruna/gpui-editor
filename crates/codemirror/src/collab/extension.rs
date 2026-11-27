@@ -4,11 +4,16 @@ use std::{
 };
 
 use crate::{
-    AnnotationType, ConfigurationError, EditError, EditorState, Extension, Facet, StateEffect,
-    StateField, Transaction, extension::Reconfiguration, state_config::PRESERVE_REPLACEMENTS,
+    AnnotationType, ChangeSet, ConfigurationError, EditError, EditorSelection, EditorState,
+    Extension, Facet, StateEffect, StateField, Text, Transaction,
+    extension::{Extensions, Reconfiguration},
+    state_config::PRESERVE_REPLACEMENTS,
 };
 
-use super::{Collab, CollabError, SharedEffects, TransactionContext, Update};
+use super::{
+    Collab, CollabError, OriginStates, SharedEffects, SharedEffectsContext, TransactionContext,
+    Update,
+};
 
 /// Settings for the collaboration state extension.
 #[derive(Clone, Default)]
@@ -51,8 +56,17 @@ impl CollabConfig {
     /// Select effects using the accepted transaction and its text and selection
     /// snapshots. This replaces any previously configured sharing callback.
     pub fn with_shared_effects_context(
-        mut self,
+        self,
         share: impl Fn(&TransactionContext) -> Vec<StateEffect> + Send + Sync + 'static,
+    ) -> Self {
+        self.with_shared_effects_state(move |context| share(context.transaction))
+    }
+
+    /// Select effects using both state views of the accepted transaction.
+    /// The queued update keeps the resolved fields and facets available to the host.
+    pub fn with_shared_effects_state(
+        mut self,
+        share: impl Fn(&SharedEffectsContext<'_>) -> Vec<StateEffect> + Send + Sync + 'static,
     ) -> Self {
         self.share = Some(Arc::new(share));
         self
@@ -150,15 +164,12 @@ static COLLAB_STATE: LazyLock<StateField<Collab>> = LazyLock::new(|| {
                 // Publish the reconfiguration transaction with its start policy.
                 next.client_id.clone_from(&start_config.client_id);
                 next.share.clone_from(&start_config.share);
-                next.record(
-                    transaction.clone(),
-                    (start.text(), start.selection()),
-                    (text, update.state().selection()),
-                )
-                .map_err(|_| ConfigurationError::InvalidFieldData)?;
+                next.record(transaction.clone(), *start, *update.state())
+                    .map_err(|_| ConfigurationError::InvalidFieldData)?;
                 next
             };
             if previous.client_id != config.client_id {
+                next.identity = Arc::new(());
                 next.generation = Arc::new(());
             }
             next.client_id.clone_from(&config.client_id);
@@ -185,6 +196,31 @@ pub fn collab(config: CollabConfig) -> Extension {
         CONFIG.of(input),
         PRESERVE_REPLACEMENTS.of(()),
     ])
+}
+
+pub(crate) fn capture_origin_states(
+    before: &Extensions,
+    after: &Extensions,
+    text: &Text,
+    selection: &EditorSelection,
+) -> Result<(), ConfigurationError> {
+    if let Some(field) = LazyLock::get(&COLLAB_STATE)
+        && let Some(session) = after.context(text, selection).field(field)?
+    {
+        session.capture_origin_states(before, after);
+    }
+    Ok(())
+}
+
+pub(super) fn origin_states(before: &Extensions, after: &Extensions) -> OriginStates {
+    // This private field is the only registry entry that can own the queue
+    // under construction. Capturing it would let the origin own itself and
+    // would retain the entire pending vector at each earlier origin.
+    let field = COLLAB_STATE.reader();
+    OriginStates {
+        start: before.capture_without(field),
+        result: after.capture_without(field),
+    }
 }
 
 /// Read the configured client ID, synchronized version, and sendable updates.
@@ -257,11 +293,108 @@ pub fn receive_updates(
         } else {
             ((*current).clone(), Transaction::default())
         };
-    Ok(transaction
+    Ok(session_receipt(transaction, &current, next))
+}
+
+/// Prepare a receipt that replaces the text-only suffix queued since `start`
+/// with one update. If the text matches `start`, remove the suffix instead.
+/// The host must keep this suffix private until dispatching the receipt.
+///
+/// The receipt does not edit the document or add history. It uses the current
+/// queue generation, so dispatch rejects it if subsequent updates change that
+/// queue. The returned change set describes the grouped edit in `start` bytes.
+/// Return `None` if there are no new queued updates.
+pub fn prepare_text_update_group(
+    start: &EditorState,
+    state: &EditorState,
+) -> Result<Option<(Transaction, ChangeSet)>, CollabError> {
+    let initial = require_collab(start)?;
+    let current = require_collab(state)?;
+    initial.check_state(start.text())?;
+    current.check_state(state.text())?;
+    let length = initial.pending.len();
+    let Some((prefix, suffix)) = current.pending.split_at_checked(length) else {
+        return Err(CollabError::StateMismatch);
+    };
+    if !Arc::ptr_eq(&current.identity, &initial.identity)
+        || current.version != initial.version
+        || current.synced_text != initial.synced_text
+        || prefix.iter().zip(initial.pending.iter()).any(|(a, b)| {
+            a != b
+                || match (&a.origin, &b.origin) {
+                    (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
+                    (None, None) => false,
+                    _ => true,
+                }
+        })
+    {
+        return Err(CollabError::StateMismatch);
+    }
+    let Some((first, rest)) = suffix.split_first() else {
+        return if start.text() == state.text() {
+            Ok(None)
+        } else {
+            Err(CollabError::StateMismatch)
+        };
+    };
+    if suffix.iter().any(|update| !update.effects.is_empty()) {
+        return Err(CollabError::SharedEffectsInTextGroup);
+    }
+    if suffix
+        .iter()
+        .any(|update| update.client_id != current.client_id)
+    {
+        return Err(CollabError::StateMismatch);
+    }
+    let mut combined = first.edit.clone();
+    for update in rest {
+        combined = combined.compose(&update.edit)?;
+    }
+    let mut result = start.text().clone();
+    combined.check_length(result.len())?;
+    combined.changes.apply_to(&mut result)?;
+    if &result != state.text() {
+        return Err(CollabError::StateMismatch);
+    }
+    let mut pending = prefix.to_vec();
+    let changes = if start.text() == state.text() {
+        ChangeSet::default()
+    } else {
+        let changes = combined.changes.clone();
+        let transaction = Transaction::new(changes.clone())
+            .with_selection(state.selection().clone())
+            .with_user_event("input.type.compose");
+        let origin = Arc::new(TransactionContext::new(
+            transaction,
+            start.context(),
+            state.context(),
+        ));
+        origin
+            .states
+            .get_or_init(|| origin_states(&start.extensions, &state.extensions));
+        pending.push(Update {
+            client_id: current.client_id.clone(),
+            edit: combined,
+            effects: Vec::new(),
+            origin: Some(origin),
+        });
+        changes
+    };
+    let mut next = (*current).clone();
+    next.pending = Arc::new(pending);
+    next.generation = Arc::new(());
+    Ok(Some((
+        session_receipt(Transaction::default(), &current, next),
+        changes,
+    )))
+}
+
+fn session_receipt(transaction: Transaction, current: &Collab, next: Collab) -> Transaction {
+    transaction
         .with_annotation(ACKNOWLEDGED.of(Acknowledged {
             from: current.generation.clone(),
             next,
         }))
         .with_add_to_history(false)
-        .without_filtering())
+        .without_filtering()
 }

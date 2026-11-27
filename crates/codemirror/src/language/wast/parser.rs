@@ -39,7 +39,7 @@ fn parse_tree(
     strict: bool,
 ) -> Result<SyntaxTree, ParseError> {
     if strict {
-        PARSER.parse_wast_strict(source)
+        PARSER.parse_editor_strict(source)
     } else {
         PARSER.parse_incremental_wast_recovering(source, fragments)
     }
@@ -48,25 +48,8 @@ fn parse_tree(
 pub(super) fn parse_strict(source: &str) -> Result<Vec<Node>, ParseError> {
     let input = NormalizedInput::new(source);
     let tree = parse_tree(&input.text, &[], true)
-        .map_err(|error| project_error(error, |at| input.original_byte(at)))?;
+        .map_err(|error| error.map_offset(|at| input.original_byte(at)))?;
     Ok(convert(&tree, |at| input.original_byte(at)))
-}
-
-pub(crate) fn project_error(
-    mut error: ParseError,
-    original_byte: impl FnOnce(usize) -> usize,
-) -> ParseError {
-    use ParseError::*;
-    let offset = match &mut error {
-        UnexpectedToken { offset, .. }
-        | Ambiguous { offset, .. }
-        | InvalidTokenTerm { offset, .. }
-        | InvalidTokenEnd { offset, .. }
-        | InvalidTransition { offset, .. }
-        | LimitExceeded { offset } => offset,
-    };
-    *offset = original_byte(*offset);
-    error
 }
 
 pub(super) fn parse(

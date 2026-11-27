@@ -8,8 +8,8 @@ use std::{
 use super::{
     CONFIGURATION, CompareValue, Compartment, ConfigurationChange, ConfigurationError, Dependency,
     Extension, ExtensionKind, FacetComparison, FacetInput, FacetReader, FieldDefinition,
-    InputSource, Key, Precedence, StateContext, StateUpdate, Value, Values, from_value,
-    initializer,
+    InputSource, Key, Precedence, StateContext, StateFieldReader, StateUpdate, Value, Values,
+    from_value, initializer,
 };
 use crate::{ChangeDesc, EditorSelection, Text, Transaction};
 
@@ -19,6 +19,29 @@ pub(crate) struct Extensions(Option<Arc<Snapshot>>);
 struct Snapshot {
     config: Arc<Configuration>,
     values: HashMap<Key, Resolved>,
+}
+
+#[derive(Debug)]
+pub(crate) struct ResolvedValues(HashMap<Key, Value>);
+
+impl ResolvedValues {
+    pub(crate) fn context<'a>(
+        &'a self,
+        text: &'a Text,
+        selection: &'a EditorSelection,
+    ) -> StateContext<'a> {
+        StateContext {
+            text,
+            selection,
+            values: self,
+        }
+    }
+}
+
+impl Values for ResolvedValues {
+    fn get(&self, key: Key) -> Result<Option<Value>, ConfigurationError> {
+        Ok(self.0.get(&key).cloned())
+    }
 }
 
 /// A flattened prospective configuration. No callbacks have run for it yet.
@@ -169,6 +192,17 @@ impl Extensions {
         }
     }
 
+    pub(crate) fn capture_without<T>(&self, field: StateFieldReader<T>) -> ResolvedValues {
+        ResolvedValues(
+            self.0
+                .iter()
+                .flat_map(|snapshot| &snapshot.values)
+                .filter(|(key, _)| **key != field.key)
+                .filter_map(|(&key, slot)| slot.value.state_value().map(|value| (key, value)))
+                .collect(),
+        )
+    }
+
     pub(crate) fn compartment(&self, compartment: &Compartment) -> Option<&Extension> {
         self.0.as_ref()?.config.compartments.get(&compartment.0)
     }
@@ -245,7 +279,7 @@ impl Extensions {
                 None => return Ok(Self::default()),
             },
         };
-        Self::evaluate(
+        let result = Self::evaluate(
             config,
             new.0,
             new.1,
@@ -256,7 +290,9 @@ impl Extensions {
                 changes,
             },
             HashMap::new(),
-        )
+        )?;
+        crate::collab::capture_origin_states(self, &result, new.0, new.1)?;
+        Ok(result)
     }
 
     fn evaluate(

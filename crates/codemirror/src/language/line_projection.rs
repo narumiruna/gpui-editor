@@ -139,7 +139,7 @@ pub(super) struct NormalizedInput<'a> {
     pub(super) offsets: NormalizedOffsets,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(super) struct NormalizedOffsets(Vec<(usize, usize)>);
 
 impl<'a> NormalizedInput<'a> {

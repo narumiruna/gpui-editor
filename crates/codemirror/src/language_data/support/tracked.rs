@@ -2,18 +2,25 @@ use std::sync::{Arc, LazyLock};
 
 use crate::{
     ConfigurationError, EditorState, Extension, Facet, StateContext, StateField, StateFieldOptions,
-    Text, language::language_data_provider,
+    Text,
+    language::{StreamSettings, language_data_provider},
 };
 
 use super::{NativeLanguageSupport, NativeSyntax, SupportedDocument, SyntaxUpdateError};
 
+mod json;
+mod lezer;
+mod lr;
 mod wast;
+pub use json::{JsonLanguage, json_language};
+pub use lezer::{LezerLanguage, lezer_language};
 pub(crate) use wast::WastConfig;
 pub use wast::{WastLanguage, wast_language};
 
 #[derive(Clone)]
 enum Attachment {
     Native(NativeLanguageSupport),
+    Lr(Arc<lr::LrConfig>),
     Wast(Arc<WastConfig>),
     WastViewport(Arc<WastConfig>),
 }
@@ -22,6 +29,7 @@ impl Attachment {
     fn same_parser(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Native(a), Self::Native(b)) => a == b,
+            (Self::Lr(a), Self::Lr(b)) => Arc::ptr_eq(a, b),
             (Self::Wast(a), Self::Wast(b)) => Arc::ptr_eq(a, b),
             _ => false,
         }
@@ -29,6 +37,10 @@ impl Attachment {
 
     fn parse(&self, text: Text) -> Result<Option<SupportedDocument>, ConfigurationError> {
         match self {
+            Self::Lr(config) => config
+                .parse(text, StreamSettings::default())
+                .map(Some)
+                .map_err(ConfigurationError::StrictSyntax),
             Self::Wast(config) => wast::parse(text, config).map(Some),
             Self::WastViewport(_) => Ok(None),
             Self::Native(support) => Ok(support.parse(text).ok()),
@@ -114,7 +126,12 @@ fn install_attachment(attachment: Attachment) -> Extension {
             if let Some(document) = attached_language_snapshot(state) {
                 return match document.syntax() {
                     NativeSyntax::Wast(syntax) => syntax.configured_data_at(state, position, side),
-                    _ => document.data_at(position, side),
+                    syntax => match syntax.lr_root_type() {
+                        Some(row) => row
+                            .data_facet()
+                            .map_or_else(Vec::new, |facet| facet.read(state)),
+                        None => document.data_at(position, side),
+                    },
                 };
             }
             state.wast_viewport_data(position, side)

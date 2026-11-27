@@ -14,6 +14,7 @@ use std::{
 use crate::{
     Assoc, ChangeSet, EditError, RangeSet, Text,
     autocomplete::brackets::{CloseBracketConfig, CloseBracketSyntax},
+    language_data::CloseBracketData,
     lint::Diagnostic,
     view::{MarkDecoration, Viewport},
 };
@@ -21,9 +22,12 @@ use crate::{
 use super::{
     BidiIsolateOptions, HighlightSpan, HighlightTag, IndentContext, IndentOptions, LanguageData,
     StreamSettings,
-    bidi::isolate_marks,
-    lezer::{ReuseStats, SyntaxTree, TreeFragment},
-    line_projection::{NormalizedInput, editor_lines},
+    bidi::IsolateRanges,
+    lezer::{
+        ConfiguredHighlights, ISOLATE, Isolation, NodeType, NodeTypes, NormalizedEdges, ParseError,
+        ReuseStats, StyleTags, StyledNode, SyntaxTree, TreeFragment, select_tags,
+    },
+    line_projection::{NormalizedInput, NormalizedOffsets, editor_lines},
 };
 
 mod brackets;
@@ -32,6 +36,9 @@ mod linter;
 mod lr;
 mod parser;
 
+pub use lr::parse_raw;
+pub(crate) use lr::{stock_data_facet, stock_node_types};
+
 /// Brackets the upstream language asks the editor to close automatically.
 pub const CLOSE_BRACKETS: [char; 3] = ['[', '{', '"'];
 
@@ -39,6 +46,16 @@ pub fn language_data() -> LanguageData {
     LanguageData::default()
         .with("closeBrackets", CLOSE_BRACKETS)
         .with("indentOnInput", indent_on_input as fn(&str) -> bool)
+}
+
+pub(crate) fn editor_language_data() -> LanguageData {
+    language_data().with(
+        "closeBrackets",
+        CloseBracketData {
+            brackets: Some(close_bracket_config().brackets),
+            ..Default::default()
+        },
+    )
 }
 
 pub fn close_bracket_config() -> CloseBracketConfig<'static> {
@@ -147,17 +164,33 @@ struct Node {
 /// nonempty error may have a child for a recognized but unexpected token.
 #[derive(Clone, Copy)]
 pub struct JsonNode<'a> {
-    nodes: &'a [Node],
+    document: &'a JsonDocument,
     id: usize,
 }
 
 impl<'a> JsonNode<'a> {
     fn data(self) -> &'a Node {
-        &self.nodes[self.id]
+        &self.document.nodes[self.id]
     }
 
     pub fn kind(self) -> JsonNodeKind {
         self.data().kind
+    }
+
+    /// Return the configured row for this JSON grammar term.
+    pub fn node_type(self) -> &'a NodeType {
+        self.document
+            .node_types()
+            .get(lr::term(self.kind()))
+            .expect("JSON node has a term")
+    }
+
+    /// Select the rule for this node and its actual ancestors. This does not
+    /// include inherited tags; use the document's spans for those.
+    pub fn style_tags(self) -> Option<StyleTags<'a>> {
+        let ancestors = std::iter::successors(self.parent(), |node| node.parent())
+            .map(|node| node.kind().name());
+        select_tags(self.node_type(), ancestors)
     }
 
     pub fn range(self) -> Range<usize> {
@@ -180,14 +213,15 @@ impl<'a> JsonNode<'a> {
     // error at the end marks an unfinished node. A skipped token does not.
     fn enter_unfinished_before(mut self, position: usize) -> Self {
         let children = &self.data().children;
-        let before = children.partition_point(|&id| self.nodes[id].range.start < position);
+        let nodes = &self.document.nodes;
+        let before = children.partition_point(|&id| nodes[id].range.start < position);
         let mut scan = before.checked_sub(1).map(|i| children[i]);
         while let Some(id) = scan {
-            let node = &self.nodes[id];
+            let node = &nodes[id];
             let Some((&last, previous)) = node.children.split_last() else {
                 break;
             };
-            let end = &self.nodes[last];
+            let end = &nodes[last];
             if end.range.end != node.range.end {
                 break;
             }
@@ -221,6 +255,24 @@ impl<'a> JsonNode<'a> {
     }
 }
 
+impl<'a> StyledNode<'a> for JsonNode<'a> {
+    fn child(self, index: usize) -> Option<Self> {
+        self.children().nth(index)
+    }
+
+    fn range(self) -> Range<usize> {
+        self.range()
+    }
+
+    fn name(self) -> &'a str {
+        self.kind().name()
+    }
+
+    fn node_type(self) -> Option<&'a NodeType> {
+        Some(self.node_type())
+    }
+}
+
 /// One JSON document and its recovered syntax tree.
 #[derive(Debug)]
 pub struct JsonDocument {
@@ -228,13 +280,32 @@ pub struct JsonDocument {
     nodes: Vec<Node>,
     diagnostic: OnceLock<Option<Diagnostic>>,
     incremental: Option<Box<SyntaxTree>>,
+    editor_offsets: Option<NormalizedOffsets>,
     editor_lines: OnceLock<Option<Text>>,
-    isolate_ranges: OnceLock<Vec<Range<usize>>>,
+    isolate_ranges: OnceLock<IsolateRanges>,
+    node_types: Option<NodeTypes>,
+    configured_highlights: OnceLock<Option<ConfiguredHighlights>>,
 }
 
 impl JsonDocument {
+    /// Parse the original bytes. The whole-document language attachment
+    /// projects editor line breaks before parsing instead.
     pub fn parse(text: Text) -> Self {
         Self::parse_with_fragments(text, &[])
+    }
+
+    pub(crate) fn parse_editor(text: Text) -> Self {
+        Self::parse_editor_with_reuse(text, None)
+    }
+
+    pub(crate) fn parse_editor_strict(text: Text) -> Result<Self, ParseError> {
+        let (tree, offsets) = {
+            let input = NormalizedInput::new(text.as_str());
+            let tree = parse_raw(&input.text, true)
+                .map_err(|error| error.map_offset(|at| input.original_byte(at)))?;
+            (tree, input.offsets)
+        };
+        Ok(Self::finish_parse(text, Ok(tree), Some(offsets)))
     }
 
     /// Apply edits and parse the result. Reuse an unchanged strict prefix and
@@ -245,6 +316,15 @@ impl JsonDocument {
         let mut text = self.text.clone();
         changes.apply_to(&mut text)?;
         let old_len = self.text.len();
+        if self.editor_offsets.is_some() {
+            let reuse = self
+                .incremental
+                .as_deref()
+                .map(|tree| NormalizedEdges::new(tree, old_len, changes));
+            let mut document = Self::parse_editor_with_reuse(text, reuse);
+            document.node_types = self.node_types.clone();
+            return Ok(document);
+        }
         let desc = changes.desc(old_len)?;
         let fragments = if let Some(tree) = &self.incremental {
             desc.gaps()
@@ -265,9 +345,14 @@ impl JsonDocument {
     }
 
     pub fn reuse_stats(&self) -> ReuseStats {
-        self.incremental
+        let mut reuse = self
+            .incremental
             .as_deref()
-            .map_or_else(ReuseStats::default, SyntaxTree::reuse_stats)
+            .map_or_else(ReuseStats::default, SyntaxTree::reuse_stats);
+        if let Some(offsets) = &self.editor_offsets {
+            reuse.resumed_at = offsets.original_byte(reuse.resumed_at);
+        }
+        reuse
     }
 
     /// Consuming token decisions reused in a shifted suffix. This does not
@@ -279,29 +364,71 @@ impl JsonDocument {
     }
 
     fn parse_with_fragments(text: Text, fragments: &[TreeFragment<'_>]) -> Self {
-        let source = text.as_str();
-        let (nodes, diagnostic, incremental) =
-            if let Ok(tree) = lr::PARSER.parse_incremental_json_recovering(source, fragments) {
-                let nodes = lr::nodes(&tree);
-                // Keep diagnostic positions independent of the recovery markers.
-                let diagnostic = if nodes.iter().any(|node| node.kind == JsonNodeKind::Error) {
-                    OnceLock::new()
-                } else {
-                    OnceLock::from(None)
-                };
-                let incremental = tree.has_incremental_state().then(|| Box::new(tree));
-                (nodes, diagnostic, incremental)
+        let tree = lr::PARSER.parse_incremental_json_recovering(text.as_str(), fragments);
+        Self::finish_parse(text, tree, None)
+    }
+
+    fn parse_editor_with_reuse(text: Text, reuse: Option<NormalizedEdges<'_>>) -> Self {
+        let (tree, offsets) = {
+            let input = NormalizedInput::new(text.as_str());
+            let fragments = reuse.map_or_else(Vec::new, |edges| {
+                edges.fragments(text.as_str(), input.text.len(), |at| {
+                    input.normalized_byte(at)
+                })
+            });
+            let tree = lr::PARSER.parse_incremental_json_recovering(&input.text, &fragments);
+            (tree, input.offsets)
+        };
+        Self::finish_parse(text, tree, Some(offsets))
+    }
+
+    fn finish_parse(
+        text: Text,
+        tree: Result<SyntaxTree, ParseError>,
+        editor_offsets: Option<NormalizedOffsets>,
+    ) -> Self {
+        let (nodes, diagnostic, incremental) = if let Ok(tree) = tree {
+            let mut nodes = lr::nodes(&tree);
+            if let Some(offsets) = &editor_offsets {
+                for node in &mut nodes {
+                    node.range = offsets.original_byte(node.range.start)
+                        ..offsets.original_byte(node.range.end);
+                }
+            }
+            // Diagnostic positions do not depend on Lezer's recovery markers.
+            let diagnostic = if nodes.iter().any(|node| node.kind == JsonNodeKind::Error) {
+                OnceLock::new()
             } else {
-                let (nodes, diagnostic) = parser::parse(source);
-                (nodes, OnceLock::from(diagnostic), None)
+                OnceLock::from(None)
             };
+            let incremental = tree.has_incremental_state().then(|| Box::new(tree));
+            (nodes, diagnostic, incremental)
+        } else {
+            let (nodes, diagnostic) = parser::parse(text.as_str());
+            (nodes, OnceLock::from(diagnostic), None)
+        };
         Self {
             text,
             nodes,
             diagnostic,
             incremental,
+            editor_offsets,
             editor_lines: OnceLock::new(),
             isolate_ranges: OnceLock::new(),
+            node_types: None,
+            configured_highlights: OnceLock::new(),
+        }
+    }
+
+    pub(crate) fn with_node_types(mut self, node_types: NodeTypes) -> Self {
+        self.node_types = Some(node_types);
+        self
+    }
+
+    pub(crate) fn node_types(&self) -> &NodeTypes {
+        match &self.node_types {
+            Some(types) => types,
+            None => stock_node_types(),
         }
     }
 
@@ -310,7 +437,7 @@ impl JsonDocument {
     }
 
     /// Text for syntax line queries. Treat lone CR as a break without changing
-    /// the original byte offsets. Parsing and linting use [`Self::text`].
+    /// the original byte offsets. [`Self::text`] retains all source bytes.
     pub fn syntax_lines(&self) -> &Text {
         self.editor_lines
             .get_or_init(|| editor_lines(self.text.as_str()))
@@ -321,17 +448,14 @@ impl JsonDocument {
     /// The root spans the full document, including skipped whitespace.
     pub fn root(&self) -> JsonNode<'_> {
         JsonNode {
-            nodes: &self.nodes,
+            document: self,
             id: 0,
         }
     }
 
     /// All nodes in pre-order, with each parent before its children.
     pub fn nodes(&self) -> impl ExactSizeIterator<Item = JsonNode<'_>> {
-        (0..self.nodes.len()).map(|id| JsonNode {
-            nodes: &self.nodes,
-            id,
-        })
+        (0..self.nodes.len()).map(|id| JsonNode { document: self, id })
     }
 
     /// Resolve the deepest node at a byte position. Select a side to
@@ -359,6 +483,28 @@ impl JsonDocument {
         range: Range<usize>,
     ) -> Option<impl Iterator<Item = HighlightSpan<'_>>> {
         self.text.slice(range.clone())?;
+        let configured = self
+            .configured_highlights
+            .get_or_init(|| {
+                self.node_types
+                    .as_ref()
+                    .filter(|types| types.has_different_styles(stock_node_types()))
+                    .map(|_| ConfiguredHighlights::build(self.root()))
+            })
+            .as_ref();
+        let stock = configured
+            .is_none()
+            .then(|| self.stock_highlights(range.clone()));
+        let configured = configured.map(|spans| spans.clipped(range));
+        Some(
+            stock
+                .into_iter()
+                .flatten()
+                .chain(configured.into_iter().flatten()),
+        )
+    }
+
+    fn stock_highlights(&self, range: Range<usize>) -> impl Iterator<Item = HighlightSpan<'_>> {
         // Only the last node that starts before the range can be a styled
         // leaf that overlaps its start. All other styled nodes start inside it.
         let first = self
@@ -368,7 +514,7 @@ impl JsonDocument {
         let end = self
             .nodes
             .partition_point(|node| node.range.start < range.end);
-        Some(self.nodes[first..end].iter().filter_map(move |node| {
+        self.nodes[first..end].iter().filter_map(move |node| {
             let tags = node.kind.highlight()?;
             let start = node.range.start.max(range.start);
             let end = node.range.end.min(range.end);
@@ -376,14 +522,13 @@ impl JsonDocument {
                 range: start..end,
                 tags,
             })
-        }))
+        })
     }
 
-    /// Build automatic `cm-iso` marks for property names and strings that touch
-    /// the visible ranges. The viewport selects full nodes without clipping the
-    /// marks. Default options restrict marks to the ranges selected by the
-    /// CodeMirror RTL line optimization. Empty recovery nodes have no text to
-    /// isolate.
+    /// Build `cm-iso` marks for nodes with a configured isolation direction.
+    /// By default, strings and property names use automatic direction. The
+    /// viewport selects full nodes without clipping. Default options restrict
+    /// marks to RTL line ranges. Empty recovery nodes supply no mark.
     ///
     /// Return [`EditError::InvalidRange`] for viewport endpoints outside this
     /// document or between UTF-8 bytes of a character.
@@ -397,13 +542,22 @@ impl JsonDocument {
         options: BidiIsolateOptions,
     ) -> Result<Arc<RangeSet<MarkDecoration>>, EditError> {
         let ranges = self.isolate_ranges.get_or_init(|| {
-            self.nodes
-                .iter()
-                .filter(|node| node.kind.isolates_direction() && !node.range.is_empty())
-                .map(|node| node.range.clone())
-                .collect()
+            let configured = self
+                .node_types
+                .as_ref()
+                .is_some_and(|types| !types.same_set(stock_node_types()));
+            IsolateRanges::new(self.nodes().filter_map(|node| {
+                let direction = if configured {
+                    (*node.node_type().prop(&ISOLATE)?)?
+                } else {
+                    node.kind()
+                        .isolates_direction()
+                        .then_some(Isolation::Auto)?
+                };
+                Some((node.range(), direction))
+            }))
         });
-        isolate_marks(&self.text, self.syntax_lines(), ranges, viewport, options)
+        ranges.marks(&self.text, self.syntax_lines(), viewport, options)
     }
 
     /// Find a fold that begins on the supplied line and continues past its end.

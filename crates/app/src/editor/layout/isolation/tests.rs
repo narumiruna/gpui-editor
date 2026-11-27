@@ -241,6 +241,102 @@ fn java_json_and_sql_fences_apply_opt_in_live_isolation(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
+fn configured_lr_isolation_repaints_the_same_editable_body(cx: &mut TestAppContext) {
+    use gpui_editor_codemirror::{
+        language::{
+            lezer::{ISOLATE, Isolation},
+            markdown::{
+                MarkdownCodeLanguages, MarkdownCodeParser, MarkdownConfig, MarkdownParserConfig,
+                markdown_with_parser,
+            },
+        },
+        language_data::{json_language, lezer_language},
+        view::bidi::Direction,
+    };
+
+    let json = json_language();
+    let lezer = lezer_language();
+    let json_next = json.with_node_props(&[ISOLATE.add(|row| match row.name() {
+        "String" => Some(Some(Isolation::Rtl)),
+        "PropertyName" => Some(None),
+        _ => None,
+    })]);
+    let lezer_next = lezer
+        .with_node_props(&[ISOLATE.add(|row| row.is("Literal").then_some(Some(Isolation::Ltr)))]);
+    for (body, stock, configured, stock_marks, configured_marks) in [
+        (
+            r#"{"😀": "אב"}"#,
+            MarkdownCodeParser::Json(json.clone()),
+            MarkdownCodeParser::Json(json_next),
+            &[("\"😀\"", None), ("\"אב\"", None)][..],
+            &[("\"אב\"", Some(Direction::Rtl))][..],
+        ),
+        (
+            r#"@top Main { "אב" }"#,
+            MarkdownCodeParser::Lezer(lezer.clone()),
+            MarkdownCodeParser::Lezer(lezer_next),
+            &[][..],
+            &[("\"אב\"", Some(Direction::Ltr))][..],
+        ),
+    ] {
+        let source = format!("Before\r\n\r\n```example\r\n{body}\r\n```\r\n\r\nAfter");
+        let install = |parser: MarkdownCodeParser| {
+            markdown_with_parser(
+                MarkdownConfig::default(),
+                MarkdownParserConfig {
+                    code_languages: Some(MarkdownCodeLanguages::Configured {
+                        resolve: Arc::new(move |info| (info == "example").then(|| parser.clone())),
+                        fallback: None,
+                    }),
+                    ..Default::default()
+                },
+            )
+        };
+        let slot = Compartment::new();
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            Editor::with_native_extensions(
+                source.clone(),
+                Extension::group([slot.of(install(stock.clone())), bidi_isolates(true)]),
+                window,
+                cx,
+            )
+            .unwrap()
+        });
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                let scope = activate(editor, cx);
+                let selection = editor.view.state().selection().clone();
+                for (parser, expected) in [
+                    (stock.clone(), stock_marks),
+                    (configured, configured_marks),
+                    (stock, stock_marks),
+                ] {
+                    configure(editor, slot.reconfigure(install(parser)), cx);
+                    let marks: Vec<_> = editor
+                        .source_isolates()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|mark| (&body[mark.from..mark.to], mark.direction))
+                        .collect();
+                    assert_eq!(marks, expected);
+                    let layout = editor.shape_for_width(window, cx, px(440.));
+                    if expected.is_empty() {
+                        assert_eq!(isolated(&layout).count(), 0);
+                    } else {
+                        let (_, item, native) = isolated(&layout).next().unwrap();
+                        assert_eq!(item.source, scope);
+                        assert_eq!(native.layout.source(), body);
+                    }
+                    assert_eq!(editor.source(), source);
+                    assert_eq!(editor.view.state().selection(), &selection);
+                    assert_eq!((editor.view.revision(), editor.view.undo_depth()), (0, 0));
+                }
+            })
+        });
+    }
+}
+
+#[gpui::test]
 fn wrapped_wat_rows_keep_native_selection_and_crlf_ranges(cx: &mut TestAppContext) {
     let source = format!("```wat\r\n{MIXED}\r\n\r\n)\r\n```\r\n");
     let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source.clone(), window, cx));

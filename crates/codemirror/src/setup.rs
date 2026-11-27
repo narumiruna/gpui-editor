@@ -26,7 +26,7 @@ use crate::{
         fold::{FoldCommand, code_folding, syntax_fallback},
         line_projection::{command_line_projection, editor_line_extension},
     },
-    language_data::{NativeLanguageSupport, NativeSyntax},
+    language_data::{NativeLanguageSupport, NativeSyntax, attached_language_snapshot},
     lint::LintCommand,
     search::{SearchActionResult, SearchPanelInput, selection_match_extension},
     transaction_filter,
@@ -138,6 +138,9 @@ fn minimal_view_extensions() -> Extension {
     ])
 }
 
+/// Construct the basic preset, including reindentation for the current
+/// synchronous language attachment. Attaching or removing a language later
+/// changes the input rule without replacing the preset.
 pub fn basic_setup<M: Clone>(
     state: EditorState,
     platform: KeyPlatform,
@@ -145,39 +148,45 @@ pub fn basic_setup<M: Clone>(
     basic(state, platform, None)
 }
 
-/// Also install the selected native language's reindent-on-input filter.
-/// The host can supply current parsed syntax for shortcuts and fold markers.
+/// Use the selected native language for reindentation instead of the active
+/// attachment. The host can still supply syntax for shortcuts and folds.
 pub fn basic_setup_with_language<M: Clone>(
     state: EditorState,
     platform: KeyPlatform,
     language: NativeLanguageSupport,
 ) -> Result<SetupEditor<M>, EditError> {
-    let indent_on_input = transaction_filter(move |state, transaction| {
-        language.reindent_input(state, transaction, Indentation::for_state(state))
-    });
-    basic(state, platform, Some(indent_on_input))
+    basic(state, platform, Some(language))
 }
 
 fn basic<M: Clone>(
     mut state: EditorState,
     platform: KeyPlatform,
-    indent_on_input: Option<Extension>,
+    language: Option<NativeLanguageSupport>,
 ) -> Result<SetupEditor<M>, EditError> {
-    let extensions = Extension::group(
-        render::gutter_extensions()
-            .into_iter()
-            .chain([
-                code_folding(),
-                minimal_view_extensions(),
-                ViewHighlight::ActiveLine.extension(),
-                bracket_matching(Default::default()),
-                selection_match_extension(Default::default()),
-                drop_cursor(),
-                ALLOW_MULTIPLE_SELECTIONS.of(true),
-            ])
-            .chain(indent_on_input)
-            .chain([close_brackets(), rectangular_selection(Default::default())]),
-    );
+    let indent_on_input = transaction_filter(move |state, transaction| {
+        if transaction.changes().is_empty() {
+            return Ok(transaction);
+        }
+        if let Some(language) = language {
+            language.reindent_input(state, transaction, Indentation::for_state(state))
+        } else if let Some(document) = attached_language_snapshot(state) {
+            document.reindent_input(state, transaction, Indentation::for_state(state))
+        } else {
+            Ok(transaction)
+        }
+    });
+    let extensions = Extension::group(render::gutter_extensions().into_iter().chain([
+        code_folding(),
+        minimal_view_extensions(),
+        ViewHighlight::ActiveLine.extension(),
+        bracket_matching(Default::default()),
+        selection_match_extension(Default::default()),
+        drop_cursor(),
+        ALLOW_MULTIPLE_SELECTIONS.of(true),
+        indent_on_input,
+        close_brackets(),
+        rectangular_selection(Default::default()),
+    ]));
     install(&mut state, extensions)?;
     Ok(SetupEditor::new(state, platform, true))
 }
@@ -300,7 +309,8 @@ impl<M: Clone> SetupEditor<M> {
     }
 
     /// Handle ordinary typed text. Do not use this for uncommitted IME text.
-    /// The basic preset supports automatic pairs. Both presets record history.
+    /// Use automatic pairs when their input extension is installed. Only the
+    /// basic preset installs it by default. Both presets record history.
     pub fn insert_text(
         &mut self,
         text: &str,
@@ -311,7 +321,7 @@ impl<M: Clone> SetupEditor<M> {
         if state.read_only() {
             return Ok(false);
         }
-        let paired = if self.basic && text.chars().count() == 1 && close_brackets_enabled(state)? {
+        let paired = if text.chars().count() == 1 && close_brackets_enabled(state)? {
             insert_bracket(state, text)?
         } else {
             None

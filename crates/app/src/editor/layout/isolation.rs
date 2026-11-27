@@ -147,6 +147,7 @@ impl Editor {
             language,
             NativeLanguage::Java
                 | NativeLanguage::Json
+                | NativeLanguage::LezerGrammar
                 | NativeLanguage::Wast
                 | NativeLanguage::Sql(_)
         ) {
@@ -183,6 +184,10 @@ impl Editor {
                 doc.bidi_isolate_marks(&viewport, options).ok()?,
             ),
             NativeSyntax::Json(doc) => (
+                doc.syntax_lines(),
+                doc.bidi_isolate_marks(&viewport, options).ok()?,
+            ),
+            NativeSyntax::LezerGrammar(doc) => (
                 doc.syntax_lines(),
                 doc.bidi_isolate_marks(&viewport, options).ok()?,
             ),

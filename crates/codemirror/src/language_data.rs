@@ -50,9 +50,10 @@ pub use async_load::{LanguageLoadFuture, NativeAsyncLanguageLoad};
 pub use catalog::LANGUAGES;
 pub use load::NativeLanguageLoad;
 pub use support::{
-    CloseBracketData, GoCompletionSource, NativeLanguageSupport, SupportedDocument,
-    SyntaxUpdateError, WastLanguage, attached_language_snapshot, go_extension,
-    go_language_extension, wast_language,
+    CloseBracketData, GoCompletionSource, JsonLanguage, LezerLanguage, LrDataFacet,
+    NativeLanguageSupport, SupportedDocument, SyntaxUpdateError, WastLanguage,
+    attached_language_snapshot, go_extension, go_language_extension, json_language, lezer_language,
+    wast_language,
 };
 pub(crate) use support::{WastConfig, active_wast_viewport};
 
@@ -61,21 +62,14 @@ pub(crate) use support::{WastConfig, active_wast_viewport};
 /// This is opt-in. It does not install linting, completion, key bindings,
 /// bracket matching, automatic bracket closing, or reindentation on input.
 pub fn json_extension() -> Extension {
-    static EXTENSION: LazyLock<Extension> =
-        LazyLock::new(|| NativeLanguage::Json.support().tracked_syntax_extension());
-    EXTENSION.clone()
+    json_language().extension()
 }
 
 /// Attach the Lezer grammar language to the whole editor state. Track the
 /// active syntax and metadata without installing any keys, matching, or input
 /// handlers. See [`attached_language_snapshot`] for the current snapshot.
 pub fn lezer_extension() -> Extension {
-    static EXTENSION: LazyLock<Extension> = LazyLock::new(|| {
-        NativeLanguage::LezerGrammar
-            .support()
-            .tracked_syntax_extension()
-    });
-    EXTENSION.clone()
+    lezer_language().extension()
 }
 
 /// Install WAST metadata and synchronous syntax for state-only indentation,

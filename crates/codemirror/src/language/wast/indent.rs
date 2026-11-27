@@ -16,9 +16,10 @@ pub type WastIndentStrategy = Arc<dyn Fn(&WastIndentContext<'_>) -> Option<usize
 
 /// The configured WAST node and the line context for one indentation query.
 pub struct WastIndentContext<'a> {
-    document: &'a WastDocument,
+    root: WastNode<'a>,
     node: WastNode<'a>,
     state: Option<&'a EditorState>,
+    fallback: Option<usize>,
     lines: &'a IndentContext<'a>,
     remaining: &'a Cell<usize>,
 }
@@ -43,21 +44,21 @@ impl<'a> WastIndentContext<'a> {
     /// the start of that line, use its reference line instead.
     pub fn base_indent(&self) -> Option<usize> {
         let text = self.lines.text();
-        let start = self.node.data().range.start;
+        let start = self.node.range().start;
         let mut reference = text.line_at(start)?.range.start;
         loop {
-            let mut at_break = self.document.path(reference, false).last()?;
+            let mut at_break = self.root.resolve_at(reference, None);
             // Treat nodes that share a start as one reference.
             while let Some(parent) = at_break
                 .parent()
-                .filter(|parent| parent.data().range.start == at_break.data().range.start)
+                .filter(|parent| parent.range().start == at_break.range().start)
             {
                 at_break = parent;
             }
-            if at_break.data().range.end > start {
+            if at_break.range().end > start {
                 break;
             }
-            let earlier = text.line_at(at_break.data().range.start)?.range.start;
+            let earlier = text.line_at(at_break.range().start)?.range.start;
             if earlier >= reference {
                 break; // An empty node can have no earlier reference line.
             }
@@ -75,9 +76,9 @@ impl<'a> WastIndentContext<'a> {
         }))
     }
 
-    /// Get the result of the next ancestor strategy. If no strategy remains,
-    /// return column zero. If another call would exceed the query limit of 64
-    /// strategy calls (including repeated calls), return `None`.
+    /// Get the next ancestor strategy's result. Without another strategy,
+    /// return zero in a standalone tree or `None` in a Markdown fence.
+    /// Return `None` if another call would exceed 64 strategies in this query.
     pub fn continue_indent(&self) -> Option<usize> {
         self.indent_from(self.node.parent())
     }
@@ -89,7 +90,7 @@ impl<'a> WastIndentContext<'a> {
                 return strategy(&Self { node, ..*self });
             }
         }
-        Some(0)
+        self.fallback
     }
 }
 
@@ -111,20 +112,36 @@ impl WastDocument {
         state: Option<&EditorState>,
         lines: &IndentContext<'_>,
     ) -> Option<usize> {
-        let position = lines.position();
-        let node = self
-            .path(position, false)
-            .last()?
-            .unfinished_before(position);
-        let context = WastIndentContext {
-            document: self,
-            node,
-            state,
-            lines,
-            remaining: &Cell::new(STRATEGY_LIMIT),
-        };
-        context.indent_from(Some(node))
+        indentation_from_root(self.root(), state, lines, Some(0))
     }
+
+    pub(crate) fn indentation_in_markdown(
+        &self,
+        map: super::MarkdownSourceMap<'_>,
+        state: &EditorState,
+        lines: &IndentContext<'_>,
+    ) -> Option<usize> {
+        indentation_from_root(self.root().in_markdown(map), Some(state), lines, None)
+    }
+}
+
+fn indentation_from_root(
+    root: WastNode<'_>,
+    state: Option<&EditorState>,
+    lines: &IndentContext<'_>,
+    fallback: Option<usize>,
+) -> Option<usize> {
+    let position = lines.position();
+    let node = root.resolve_at(position, None).unfinished_before(position);
+    let context = WastIndentContext {
+        root,
+        node,
+        state,
+        fallback,
+        lines,
+        remaining: &Cell::new(STRATEGY_LIMIT),
+    };
+    context.indent_from(Some(node))
 }
 
 pub(super) fn app_indent(context: &WastIndentContext<'_>) -> Option<usize> {

@@ -66,26 +66,32 @@
 //! composition can change where a pending edit lands. An echo must match
 //! individual deletion boundaries, not just the resulting text.
 
-use std::{borrow::Cow, fmt, ops::Range, sync::Arc};
+use std::{
+    borrow::Cow,
+    fmt,
+    ops::Range,
+    sync::{Arc, OnceLock},
+};
 
 use crate::{
-    ChangeDesc, ChangeSet, EditError, EditorSelection, EditorState, StateEffect, Text, Transaction,
+    ChangeDesc, ChangeSet, EditError, EditorSelection, EditorState, StateContext, StateEffect,
+    Text, Transaction,
+    extension::{Extensions, ResolvedValues},
 };
 
 mod extension;
-pub(crate) use extension::validate_receipt;
 pub use extension::{
-    CollabConfig, collab, collab_state, get_client_id, get_synced_version, receive_updates,
-    sendable_updates,
+    CollabConfig, collab, collab_state, get_client_id, get_synced_version,
+    prepare_text_update_group, receive_updates, sendable_updates,
 };
+pub(crate) use extension::{capture_origin_states, validate_receipt};
 
 /// Whether a transaction is marked as coming from another source.
 pub fn is_remote(transaction: &Transaction) -> bool {
     transaction.is_remote()
 }
 
-/// The accepted local transaction and its text and selection before and after
-/// application. The snapshots do not retain editor fields or facets.
+/// The accepted local transaction and its state before and after application.
 #[derive(Debug)]
 pub struct TransactionContext {
     transaction: Transaction,
@@ -93,9 +99,27 @@ pub struct TransactionContext {
     start_selection: EditorSelection,
     new_text: Text,
     new_selection: EditorSelection,
+    states: OnceLock<OriginStates>,
+}
+
+#[derive(Debug)]
+struct OriginStates {
+    start: ResolvedValues,
+    result: ResolvedValues,
 }
 
 impl TransactionContext {
+    fn new(transaction: Transaction, start: StateContext<'_>, state: StateContext<'_>) -> Self {
+        Self {
+            transaction,
+            start_text: start.text().clone(),
+            start_selection: start.selection().clone(),
+            new_text: state.text().clone(),
+            new_selection: state.selection().clone(),
+            states: OnceLock::new(),
+        }
+    }
+
     pub fn transaction(&self) -> &Transaction {
         &self.transaction
     }
@@ -115,6 +139,51 @@ impl TransactionContext {
     /// The applied selection, including an implicit selection mapped over the edit.
     pub fn new_selection(&self) -> &EditorSelection {
         &self.new_selection
+    }
+
+    /// Read the resolved start fields and facets. The private collaboration
+    /// queue is not part of this snapshot. While selecting effects, use the
+    /// live state views from [`SharedEffectsContext`] instead.
+    pub fn start_state(&self) -> Option<StateContext<'_>> {
+        Some(
+            self.states
+                .get()?
+                .start
+                .context(&self.start_text, &self.start_selection),
+        )
+    }
+
+    /// Read the resolved result fields and facets. See [`Self::start_state`].
+    pub fn state(&self) -> Option<StateContext<'_>> {
+        Some(
+            self.states
+                .get()?
+                .result
+                .context(&self.new_text, &self.new_selection),
+        )
+    }
+}
+
+/// The transaction and both state views while selecting shared effects.
+/// The result view includes computed fields and facets. It cannot read the
+/// collaboration field while that field is selecting effects.
+pub struct SharedEffectsContext<'a> {
+    transaction: &'a TransactionContext,
+    start: StateContext<'a>,
+    result: StateContext<'a>,
+}
+
+impl SharedEffectsContext<'_> {
+    pub fn transaction(&self) -> &Transaction {
+        self.transaction.transaction()
+    }
+
+    pub fn start(&self) -> &StateContext<'_> {
+        &self.start
+    }
+
+    pub fn state(&self) -> &StateContext<'_> {
+        &self.result
     }
 }
 
@@ -220,6 +289,7 @@ pub enum CollabError {
     UnexpectedAcknowledgement,
     MismatchedAcknowledgement,
     StateMismatch,
+    SharedEffectsInTextGroup,
     NotConfigured,
 }
 
@@ -242,10 +312,11 @@ pub struct Collab {
     optimistic_text: Text,
     pending: Arc<Vec<Update>>,
     share: Option<Arc<SharedEffects>>,
+    identity: Arc<()>,
     generation: Arc<()>,
 }
 
-type SharedEffects = dyn Fn(&TransactionContext) -> Vec<StateEffect> + Send + Sync;
+type SharedEffects = dyn Fn(&SharedEffectsContext<'_>) -> Vec<StateEffect> + Send + Sync;
 
 impl fmt::Debug for Collab {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -271,6 +342,7 @@ impl Collab {
             optimistic_text: text.clone(),
             pending: Arc::new(Vec::new()),
             share: None,
+            identity: Arc::new(()),
             generation: Arc::new(()),
         }
     }
@@ -287,8 +359,17 @@ impl Collab {
     /// Select effects using the accepted transaction and its text and selection
     /// snapshots. This replaces any previously configured sharing callback.
     pub fn with_shared_effects_context(
-        mut self,
+        self,
         share: impl Fn(&TransactionContext) -> Vec<StateEffect> + Send + Sync + 'static,
+    ) -> Self {
+        self.with_shared_effects_state(move |context| share(context.transaction))
+    }
+
+    /// Select effects using both state views of the accepted transaction.
+    /// The queued update keeps the resolved fields and facets available to the host.
+    pub fn with_shared_effects_state(
+        mut self,
+        share: impl Fn(&SharedEffectsContext<'_>) -> Vec<StateEffect> + Send + Sync + 'static,
     ) -> Self {
         self.share = Some(Arc::new(share));
         self
@@ -319,11 +400,8 @@ impl Collab {
         let mut candidate = state.clone();
         let edit = candidate.apply_with_replacement_policy(accepted.clone(), true)?;
         accepted.changes = edit.map_or_else(ChangeSet::default, |edit| edit.forward);
-        self.record(
-            accepted,
-            (state.text(), state.selection()),
-            (candidate.text(), candidate.selection()),
-        )?;
+        self.record(accepted, state.context(), candidate.context())?;
+        self.capture_origin_states(&state.extensions, &candidate.extensions);
         *state = candidate;
         Ok(())
     }
@@ -331,21 +409,18 @@ impl Collab {
     fn record(
         &mut self,
         transaction: Transaction,
-        (start_text, start_selection): (&Text, &EditorSelection),
-        (new_text, new_selection): (&Text, &EditorSelection),
+        start: StateContext<'_>,
+        state: StateContext<'_>,
     ) -> Result<(), EditError> {
         if !transaction.changes().is_empty() || self.share.is_some() {
-            let origin = Arc::new(TransactionContext {
-                transaction,
-                start_text: start_text.clone(),
-                start_selection: start_selection.clone(),
-                new_text: new_text.clone(),
-                new_selection: new_selection.clone(),
+            let origin = Arc::new(TransactionContext::new(transaction, start, state));
+            let effects = self.share.as_ref().map_or_else(Vec::new, |share| {
+                share(&SharedEffectsContext {
+                    transaction: &origin,
+                    start,
+                    result: state,
+                })
             });
-            let effects = self
-                .share
-                .as_ref()
-                .map_or_else(Vec::new, |share| share(&origin));
             let changes = origin.transaction().changes();
             if !changes.is_empty() || !effects.is_empty() {
                 let mut update =
@@ -356,8 +431,20 @@ impl Collab {
                 self.generation = Arc::new(());
             }
         }
-        self.optimistic_text = new_text.clone();
+        self.optimistic_text = state.text().clone();
         Ok(())
+    }
+
+    fn capture_origin_states(&self, before: &Extensions, after: &Extensions) {
+        if let Some(origin) = self
+            .pending
+            .last()
+            .and_then(|update| update.origin.as_deref())
+        {
+            origin
+                .states
+                .get_or_init(|| extension::origin_states(before, after));
+        }
     }
 
     /// Apply contiguous authoritative updates, acknowledge matching local updates,

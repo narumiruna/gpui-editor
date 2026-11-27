@@ -14,7 +14,7 @@ use std::{
 use crate::{ChangeDesc, EditorSelection, StateEffect, StateEffectType, Text, Transaction};
 
 mod registry;
-pub(crate) use registry::{Extensions, InitialConfiguration, Reconfiguration};
+pub(crate) use registry::{Extensions, InitialConfiguration, Reconfiguration, ResolvedValues};
 
 type Key = usize;
 type Value = Arc<dyn Any + Send + Sync>;

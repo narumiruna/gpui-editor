@@ -4,10 +4,24 @@
 use std::sync::LazyLock;
 
 use super::{JsonNodeKind, Node};
-use crate::language::lezer::{GrammarSpec, Parser, SerializedTables, SyntaxTree};
+use crate::language::lezer::{
+    CLOSED_BY, GrammarSpec, ISOLATE, Isolation, LANGUAGE_DATA, LanguageFacet, NodeTypes, OPENED_BY,
+    ParseError, Parser, STYLE_RULES, SerializedTables, StyleRules, SyntaxTree,
+};
 
 pub(super) static PARSER: LazyLock<Parser> =
     LazyLock::new(|| Parser::deserialize(JSON_GRAMMAR).expect("verified @lezer/json tables"));
+
+/// Parse original JSON source without editor line normalization. Ranges
+/// use UTF-8 bytes. Strict mode stops when no branch can advance. Both modes
+/// are bounded and may fail without producing a tree. This is not JSON lint.
+pub fn parse_raw(source: &str, strict: bool) -> Result<SyntaxTree, ParseError> {
+    if strict {
+        PARSER.parse_editor_strict(source)
+    } else {
+        PARSER.parse_incremental_json_recovering(source, &[])
+    }
+}
 
 const JSON: SerializedTables<'_> = SerializedTables {
     version: 14,
@@ -49,6 +63,51 @@ const KINDS: [JsonNodeKind; 17] = {
         Array,
     ]
 };
+
+pub(crate) fn stock_data_facet() -> &'static LanguageFacet {
+    static FACET: LazyLock<LanguageFacet> =
+        LazyLock::new(|| LanguageFacet::new(Some(super::editor_language_data())));
+    &FACET
+}
+
+pub(crate) fn stock_node_types() -> &'static NodeTypes {
+    static TYPES: LazyLock<NodeTypes> = LazyLock::new(|| {
+        let top = JSON_GRAMMAR.top_rule[1];
+        NodeTypes::new(
+            JSON_GRAMMAR.node_names,
+            JSON_GRAMMAR.repeat_node_count,
+            top,
+            &[0],
+            |term, _, props| {
+                match term {
+                    6 | 11 => props.insert(&ISOLATE, Some(Isolation::Auto)),
+                    7 => props.insert(&OPENED_BY, vec!["{".into()]),
+                    8 => props.insert(&CLOSED_BY, vec!["}".into()]),
+                    14 => props.insert(&OPENED_BY, vec!["[".into()]),
+                    15 => props.insert(&CLOSED_BY, vec!["]".into()]),
+                    _ if term == top => {
+                        props.insert(&LANGUAGE_DATA, Some(stock_data_facet().clone()))
+                    }
+                    _ => (),
+                }
+                if let Some(tags) = KINDS
+                    .get(usize::from(term))
+                    .and_then(|kind| kind.highlight())
+                {
+                    props.insert(&STYLE_RULES, StyleRules::normal(tags));
+                }
+            },
+        )
+    });
+    &TYPES
+}
+
+pub(super) fn term(kind: JsonNodeKind) -> u16 {
+    KINDS
+        .iter()
+        .position(|&row| row == kind)
+        .expect("JSON kind has a grammar term") as u16
+}
 
 pub(super) fn nodes(tree: &SyntaxTree) -> Vec<Node> {
     let mut nodes: Vec<Node> = Vec::new();

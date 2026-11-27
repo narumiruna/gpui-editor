@@ -387,6 +387,104 @@ fn review_uses_configured_wast_without_recovering_an_invalid_saved_fence(cx: &mu
 }
 
 #[gpui::test]
+fn review_keeps_invalid_saved_lr_fences_plain(cx: &mut TestAppContext) {
+    use gpui_editor_codemirror::{
+        language::{HighlightTag, lezer::style_tags, markdown::MarkdownCodeParser},
+        language_data::{json_language, lezer_language},
+    };
+
+    const ACCENT: u32 = 0xff2266;
+    const RULES: &[HighlightRule<'static>] = &[HighlightRule::new(
+        &[HighlightSelector::new("configured-review-token")],
+        HighlightProperties {
+            foreground: Some(Color::from_rgba32((ACCENT << 8) | 0xff)),
+            bold: false,
+            italic: false,
+            text_decoration: None,
+        },
+    )];
+    let style = [style_tags([(
+        "Number @top",
+        vec![HighlightTag::new("configured-review-token")],
+    )])
+    .unwrap()];
+    for (parser, saved_body, draft_body, saved_token, draft_token) in [
+        (
+            MarkdownCodeParser::Json(
+                json_language()
+                    .with_node_props(&style)
+                    .configure(Some(true), None),
+            ),
+            "{\"😀\": 11",
+            "{\"😀\": 22}",
+            "11",
+            "22",
+        ),
+        (
+            MarkdownCodeParser::Lezer(
+                lezer_language()
+                    .with_node_props(&style)
+                    .configure(Some(true), None),
+            ),
+            "@top Main { \"😀\"",
+            "@top Main { \"字\" }",
+            "@top",
+            "@top",
+        ),
+    ] {
+        let root = match &parser {
+            MarkdownCodeParser::Json(handle) => handle.node_types().find(|row| row.is_top()),
+            MarkdownCodeParser::Lezer(handle) => handle.node_types().find(|row| row.is_top()),
+            _ => unreachable!(),
+        }
+        .unwrap();
+        let layer = highlight_layer(HighlightLayer::Active(
+            HighlightStyle::define(RULES).with_node_type_scope(root),
+        ));
+        let syntax = markdown_with_parser(
+            MarkdownConfig::default(),
+            MarkdownParserConfig {
+                code_languages: Some(MarkdownCodeLanguages::Configured {
+                    resolve: Arc::new(move |label| (label == "example").then(|| parser.clone())),
+                    fallback: None,
+                }),
+                ..Default::default()
+            },
+        );
+        let saved = format!("```example\r\n{saved_body}\r\n```\r\n");
+        let draft = format!("```example\r\n{draft_body}\r\n```\r\n");
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            Editor::with_native_extensions(
+                draft.clone(),
+                Extension::group([syntax, layer]),
+                window,
+                cx,
+            )
+            .unwrap()
+        });
+        cx.simulate_resize(size(px(650.), px(420.)));
+        take_painted();
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| editor.review_changes(&saved, window, cx))
+        });
+        cx.run_until_parked();
+        let sides = take_painted();
+        for (side, body, token, color) in [
+            (0, saved_body, saved_token, 0x172336),
+            (1, draft_body, draft_token, ACCENT),
+        ] {
+            let line = sides[side].values().find(|line| line.text == body).unwrap();
+            line.colors_text(token, rgb(color).into());
+        }
+        cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            assert_eq!(editor.source(), draft);
+            assert_eq!((editor.view.revision(), editor.view.undo_depth()), (0, 0));
+        });
+    }
+}
+
+#[gpui::test]
 fn review_restores_a_single_chunk_and_undo_reopens_its_difference(cx: &mut TestAppContext) {
     let shared = "same\r\n".repeat(24);
     let saved = format!("before\r\n{shared}last\r\n");

@@ -1,6 +1,6 @@
 use crate::{
     extension::FacetId,
-    language::wast::{WastDataFacet, WastNodeType, WastNodeTypeId},
+    language::lezer::{LanguageFacet, NodeType, NodeTypeId},
     language_data::NativeLanguage,
 };
 
@@ -98,13 +98,13 @@ pub enum HighlightTheme {
     Dark,
 }
 
-/// Scope information for a parsed span. For WAST, it includes the exact
-/// root row and the effective language-data facet on that row.
+/// Scope information for a parsed span. For languages with configured
+/// node-type rows this also identifies the root and its effective data facet.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HighlightContext {
     language: NativeLanguage,
-    wast_node_type: Option<WastNodeTypeId>,
-    wast_facet: Option<FacetId>,
+    node_type: Option<NodeTypeId>,
+    data_facet: Option<FacetId>,
 }
 
 impl HighlightContext {
@@ -115,16 +115,16 @@ impl HighlightContext {
     pub(crate) fn native(language: NativeLanguage) -> Self {
         Self {
             language,
-            wast_node_type: None,
-            wast_facet: None,
+            node_type: None,
+            data_facet: None,
         }
     }
 
-    pub(crate) fn from_wast_root(row: &WastNodeType) -> Option<Self> {
+    pub(crate) fn from_root(language: NativeLanguage, row: &NodeType) -> Option<Self> {
         row.is_top().then(|| Self {
-            language: NativeLanguage::Wast,
-            wast_node_type: Some(row.id()),
-            wast_facet: row.data_facet().map(WastDataFacet::id),
+            language,
+            node_type: Some(row.id()),
+            data_facet: row.data_facet().map(LanguageFacet::id),
         })
     }
 }
@@ -149,8 +149,10 @@ pub struct HighlightStyle<'a> {
 enum Scope<'a> {
     Tag(&'a HighlightTag),
     Native(NativeLanguage),
+    Facet(FacetId),
+    NodeType(NodeTypeId),
     WastFacet(FacetId),
-    WastNodeType(WastNodeTypeId),
+    WastNodeType(NodeTypeId),
 }
 
 #[derive(Clone, Copy)]
@@ -164,11 +166,17 @@ impl Scope<'_> {
         match (self, input) {
             (Self::Tag(scope), ScopeInput::Tag(Some(tag))) => scope == tag,
             (Self::Native(scope), ScopeInput::Parsed(Some(context))) => scope == context.language,
+            (Self::Facet(scope), ScopeInput::Parsed(Some(context))) => {
+                Some(scope) == context.data_facet
+            }
+            (Self::NodeType(scope), ScopeInput::Parsed(Some(context))) => {
+                Some(scope) == context.node_type
+            }
             (Self::WastFacet(scope), ScopeInput::Parsed(Some(context))) => {
-                Some(scope) == context.wast_facet
+                context.language == NativeLanguage::Wast && Some(scope) == context.data_facet
             }
             (Self::WastNodeType(scope), ScopeInput::Parsed(Some(context))) => {
-                Some(scope) == context.wast_node_type
+                context.language == NativeLanguage::Wast && Some(scope) == context.node_type
             }
             _ => false,
         }
@@ -205,12 +213,30 @@ impl<'a> HighlightStyle<'a> {
         self
     }
 
+    /// Restrict this style to a root with this effective data facet. The
+    /// match uses facet identity, not the name or defaults. This replaces
+    /// the previous scope. Use [`highlighting_for_context`] to resolve it.
+    #[must_use]
+    pub fn with_data_facet_scope(mut self, facet: &LanguageFacet) -> Self {
+        self.scope = Some(Scope::Facet(facet.id()));
+        self
+    }
+
+    /// Restrict this style to an exact root row, not its grammar or term ID.
+    /// A non-root row does not match. This replaces the previous scope.
+    /// Use [`highlighting_for_context`] to resolve it.
+    #[must_use]
+    pub fn with_node_type_scope(mut self, row: &NodeType) -> Self {
+        self.scope = Some(Scope::NodeType(row.id()));
+        self
+    }
+
     /// Restrict this style to WAST roots with this effective data facet.
     /// Sublanguage predicates do not affect the match. The style stores the
     /// facet identity by value and replaces any previous scope. Use
     /// [`highlighting_for_context`] to resolve this style.
     #[must_use]
-    pub fn with_wast_facet_scope(mut self, facet: &WastDataFacet) -> Self {
+    pub fn with_wast_facet_scope(mut self, facet: &LanguageFacet) -> Self {
         self.scope = Some(Scope::WastFacet(facet.id()));
         self
     }
@@ -220,7 +246,7 @@ impl<'a> HighlightStyle<'a> {
     /// identity by value and replaces any previous scope. Use
     /// [`highlighting_for_context`] to resolve this style.
     #[must_use]
-    pub fn with_wast_node_type_scope(mut self, row: &WastNodeType) -> Self {
+    pub fn with_wast_node_type_scope(mut self, row: &NodeType) -> Self {
         self.scope = Some(Scope::WastNodeType(row.id()));
         self
     }

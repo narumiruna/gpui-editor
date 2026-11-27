@@ -20,7 +20,7 @@ use super::{
     Attachment, NativeLanguageSupport, SupportedDocument, active_support, active_wast_viewport,
     attached_language_snapshot, install_attachment,
 };
-use crate::language_data::{NativeLanguage, NativeSyntax};
+use crate::language_data::{NativeLanguage, NativeSyntax, support::StrictParser};
 
 /// One installable WAST language and its parser configuration. Configured
 /// copies have separate parser identities and share WAST's original facet.
@@ -139,10 +139,6 @@ impl WastLanguage {
         parse_raw_with_node_types(source, self.config.strict, self.config.node_types.clone())
     }
 
-    pub(crate) fn parse_document(&self, text: Text) -> Result<WastDocument, ParseError> {
-        self.config.parse_document(text)
-    }
-
     pub(crate) fn parse_for_editor(
         &self,
         text: Text,
@@ -168,7 +164,7 @@ impl WastLanguage {
             Attachment::Wast(config) | Attachment::WastViewport(config) => {
                 Some(Arc::clone(&config.name))
             }
-            Attachment::Native(_) => None,
+            Attachment::Native(_) | Attachment::Lr(_) => None,
         }
     }
 
@@ -184,7 +180,7 @@ impl WastLanguage {
             return config.root_node_type().data_facet() == Some(self.data_facet());
         }
         language_document(state)
-            .is_some_and(|doc| doc.wast_facet_at(position, side) == Some(self.data_facet()))
+            .is_some_and(|doc| doc.root_facet_at(position, side) == Some(self.data_facet()))
     }
 
     /// Return this language's regions in original UTF-8 bytes. An active
@@ -229,6 +225,8 @@ fn parse_configured(
         settings,
         markdown_parser: None,
         markdown_mounts: Vec::new(),
-        wast_config: config.strict.then(|| Arc::clone(config)),
+        strict_parser: config
+            .strict
+            .then(|| StrictParser::Wast(Arc::clone(config))),
     })
 }

@@ -257,15 +257,16 @@ fn configured_markdown_mounts_match_pinned_data_regions_and_highlights() {
 }
 
 #[test]
-fn mounted_sublanguage_rules_use_child_positions_without_changing_presence() {
+fn mounted_sublanguage_replaces_stock_data_without_changing_presence() {
     let stock = wast_language();
-    let facet = WastDataFacet::new(Some(LanguageData::default().with("probe", "number")));
-    let rule = WastSublanguage::new(WastSublanguageMode::Replace, facet, |node, _| {
-        node.node_type().is("Number") && node.range() == (9..11)
+    let source = "前 😀\r\n\r\n> ```wat\r\n> (module\r\n> 12)\r\n> ```";
+    let body = source.find("(module").unwrap()..source.find(')').unwrap() + 1;
+    let facet = WastDataFacet::new(Some(LanguageData::default().with("probe", "root")));
+    let rule = WastSublanguage::new(WastSublanguageMode::Replace, facet, move |node, _| {
+        node.node_type().is_top() && node.range() == body
     });
     let named = stock
         .with_node_props(&[SUBLANGUAGES.add(move |row| row.is_top().then(|| vec![rule.clone()]))]);
-    let source = "前 😀\r\n\r\n> ```wat\r\n> (module\r\n> 12)\r\n> ```";
     let state = EditorState::with_extensions(
         source,
         Extension::group([
@@ -277,8 +278,8 @@ fn mounted_sublanguage_rules_use_child_positions_without_changing_presence() {
     let number = source.find("12").unwrap() + 1;
     let gap = source.find("> 12").unwrap() + 1;
     let data = |at| state.language_data_at::<&str>("probe", at, Assoc::After);
-    assert_eq!(data(number), ["number"]);
-    assert_eq!(data(source.find("module").unwrap()), ["stock"]);
+    assert_eq!(data(number), ["root"]);
+    assert_eq!(data(source.find("module").unwrap()), ["root"]);
     assert!(data(gap).is_empty());
     assert!(stock.is_active_at(&state, number, Assoc::After));
 }

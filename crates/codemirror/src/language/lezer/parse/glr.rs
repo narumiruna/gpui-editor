@@ -31,7 +31,7 @@ const EDITOR_WORK_PER_BYTE: usize = 768;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum GlrMode {
     Strict,
-    WastStrict,
+    EditorStrict,
     Pruned,
     Recovering,
     WastRecovering,
@@ -59,13 +59,13 @@ impl Parser {
         self.run_glr(source, GlrMode::Strict)
     }
 
-    // The pinned strict WAST parser still applies the LR stack cut before
-    // scanning the next token. A stalled parse does not try error recovery.
-    pub(in crate::language) fn parse_wast_strict(
+    // The pinned strict LR parser applies the stack cut before scanning the
+    // next token. A stalled parse does not try error recovery.
+    pub(in crate::language) fn parse_editor_strict(
         &self,
         source: &str,
     ) -> Result<SyntaxTree, ParseError> {
-        self.run_glr(source, GlrMode::WastStrict)
+        self.run_glr(source, GlrMode::EditorStrict)
     }
 
     /// Use the pinned editor's score-based frontier limit without recovery.
@@ -115,7 +115,7 @@ impl<'parser, 'input> Glr<'parser, 'input> {
         };
         let work = parser.work_budget(&source, work_per_byte);
         let mut tokens = TokenCache::new(source, parser, recover);
-        if matches!(mode, GlrMode::Strict | GlrMode::WastStrict) {
+        if matches!(mode, GlrMode::Strict | GlrMode::EditorStrict) {
             tokens.reduction_gotos = Some(Box::default());
         }
         Self {
@@ -157,7 +157,7 @@ impl<'parser, 'input> Glr<'parser, 'input> {
     fn round(&mut self) -> Result<Option<Roots>, ParseError> {
         let (parser, mode, recover, max_branches) =
             (self.parser, self.mode, self.recover, self.max_branches);
-        let cut_depth = recover || mode == GlrMode::WastStrict;
+        let cut_depth = recover || mode == GlrMode::EditorStrict;
         let Self {
             work,
             tokens,

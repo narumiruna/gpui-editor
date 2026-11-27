@@ -10,6 +10,8 @@ use crate::{
     view::{MarkDecoration, Viewport, bidi::Direction},
 };
 
+use super::lezer::Isolation;
+
 /// Options and host direction for a snapshot of syntax isolation marks.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BidiIsolateOptions {
@@ -51,6 +53,65 @@ pub fn configured_bidi_isolates(state: &EditorState) -> Option<bool> {
         .expect("typed bidi isolation option")
 }
 
+#[derive(Debug, Default)]
+pub(super) struct IsolateRanges(Vec<Isolate>);
+
+#[derive(Debug)]
+struct Isolate {
+    range: Range<usize>,
+    prefix_end: usize,
+    direction: Option<Direction>,
+}
+
+impl IsolateRanges {
+    // Input is in source order. Nested ranges are permitted.
+    pub(super) fn new(ranges: impl Iterator<Item = (Range<usize>, Isolation)>) -> Self {
+        let mut prefix_end = 0;
+        Self(
+            ranges
+                .filter(|(range, _)| !range.is_empty())
+                .map(|(range, direction)| {
+                    prefix_end = prefix_end.max(range.end);
+                    Isolate {
+                        range,
+                        prefix_end,
+                        direction: match direction {
+                            Isolation::Auto => None,
+                            Isolation::Ltr => Some(Direction::Ltr),
+                            Isolation::Rtl => Some(Direction::Rtl),
+                        },
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    fn touching(
+        &self,
+        visible: Range<usize>,
+    ) -> impl Iterator<Item = (Range<usize>, Option<Direction>)> + '_ {
+        // A parent can span the viewport while its first children end before it.
+        let start = self
+            .0
+            .partition_point(|node| node.prefix_end < visible.start);
+        self.0[start..]
+            .iter()
+            .take_while(move |node| node.range.start <= visible.end)
+            .filter(move |node| node.range.end >= visible.start)
+            .map(|node| (node.range.clone(), node.direction))
+    }
+
+    pub(super) fn marks(
+        &self,
+        text: &Text,
+        lines: &Text,
+        viewport: &Viewport,
+        options: BidiIsolateOptions,
+    ) -> Result<Arc<RangeSet<MarkDecoration>>, EditError> {
+        isolate_marks_for(text, lines, viewport, options, |range| self.touching(range))
+    }
+}
+
 // The adapters supply sorted, nonoverlapping leaf ranges. If the language
 // normalizes a line break, the projection must keep original byte offsets.
 pub(super) fn isolate_marks(
@@ -69,7 +130,7 @@ pub(super) fn isolate_marks(
     })
 }
 
-pub(super) fn isolate_marks_for<Nodes>(
+fn isolate_marks_for<Nodes>(
     text: &Text,
     lines: &Text,
     viewport: &Viewport,

@@ -95,7 +95,7 @@ static DOCUMENT: LazyLock<StateField<SupportedDocument>> = LazyLock::new(|| {
                     let Some(snapshot) = markdown_snapshot(state) else {
                         return Vec::new();
                     };
-                    if let Some(data) = snapshot.markdown_wast_data_at(state, at, side) {
+                    if let Some(data) = snapshot.markdown_mounted_data_at(state, at, side) {
                         return data;
                     }
                     let mut data = snapshot.data_at(at, side);

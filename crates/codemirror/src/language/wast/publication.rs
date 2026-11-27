@@ -48,7 +48,7 @@ impl WastPublication {
         range: Range<usize>,
     ) -> impl Iterator<Item = HighlightSpan<'_>> {
         self.highlights
-            .get_or_init(|| ConfiguredHighlights::from_raw(self.output.tree.root()))
+            .get_or_init(|| ConfiguredHighlights::build(self.output.tree.root()))
             .clipped(range)
     }
 }

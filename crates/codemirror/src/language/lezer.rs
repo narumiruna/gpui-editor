@@ -19,7 +19,8 @@
 //! at EOF. It does not implement all upstream recovery heuristics. No mode
 //! supports dialects, ranged or nested parsing, or CodeMirror's time and
 //! viewport scheduling. The tree does not use Lezer's packed buffers.
-//! Direct WAST parsing can attach a WAST node-type table to the output tree.
+//! WAST, JSON, and Lezer grammar language handles can attach immutable
+//! node-type rows to the output tree. A bare LR parser does not attach rows.
 //!
 //! Upstream `TreeFragment` maps edit ranges and open edges in UTF-16. Above
 //! its input size threshold, the LR parser trims open edges, skips packed
@@ -72,7 +73,10 @@ mod decode;
 mod external;
 mod fragments;
 mod grammar;
+mod language_facet;
+mod node_props;
 mod parse;
+mod style_tags;
 mod tokenize;
 mod tree;
 
@@ -85,8 +89,17 @@ pub use external::{
 };
 pub(crate) use fragments::NormalizedEdges;
 pub use grammar::{GrammarError, GrammarSpec, Parser};
+pub use language_facet::{LANGUAGE_DATA, LanguageFacet};
+pub use node_props::{
+    CLOSED_BY, GROUP, ISOLATE, Isolation, NodeProp, NodePropSource, NodeType, OPENED_BY,
+};
+pub(crate) use node_props::{NodeTypeId, NodeTypes};
 pub(in crate::language) use parse::session;
 pub use parse::{ParseError, ReuseStats, StackView, TreeFragment};
+pub(crate) use style_tags::{
+    ConfiguredHighlights, STYLE_RULES, StyleRules, StyledNode, select_tags,
+};
+pub use style_tags::{StyleSelectorError, StyleTags, style_tags};
 pub use tokenize::LocalTokenGroup;
 pub use tree::{SyntaxNode, SyntaxTree};
 

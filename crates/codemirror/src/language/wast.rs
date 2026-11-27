@@ -14,7 +14,8 @@ use crate::{Assoc, ChangeSet, EditError, EditorState, Text};
 use super::{
     HighlightSpan, HighlightTag,
     lezer::{NormalizedEdges, ReuseStats, SyntaxTree},
-    line_projection::editor_lines,
+    line_projection::{editor_lines, splits_crlf},
+    markdown::MarkdownSourceMap,
 };
 
 mod brackets;
@@ -29,21 +30,21 @@ mod publication;
 mod style_tags;
 mod tables;
 
+use super::bidi::IsolateRanges;
+use super::lezer::ConfiguredHighlights;
 use data::WastDataNodes;
 pub use data::{WastDataFacet, WastSublanguage, WastSublanguageMode};
 pub use indent::{WastIndentContext, WastIndentStrategy};
-use isolation::IsolateRanges;
 pub use job::{WastParseJob, WastParseOutput, WastParseStep};
+pub(crate) use node_props::WastNodeTypes;
 pub use node_props::{
     BRACKET_MATCHING_HANDLE, CLOSED_BY, FOLD, GROUP, INDENT, ISOLATE, LANGUAGE_DATA, NodeProp,
     OPENED_BY, SUBLANGUAGES, WastBracketHandle, WastFoldCallback, WastIsolation, WastNodeType,
     WastPropSource,
 };
-pub(crate) use node_props::{WastNodeTypeId, WastNodeTypes};
 pub use parser::parse_raw;
-pub(crate) use parser::{parse_raw_with_node_types, project_error};
+pub(crate) use parser::parse_raw_with_node_types;
 pub(crate) use publication::WastPublication;
-use style_tags::ConfiguredHighlights;
 pub use style_tags::{WastStyleSelectorError, WastStyleTags, style_tags};
 
 /// Line comment marker from upstream language data.
@@ -155,10 +156,37 @@ pub struct WastNode<'a> {
     nodes: &'a [Node],
     node_types: &'a WastNodeTypes,
     id: usize,
-    origin: usize,
+    coordinates: Coordinates<'a>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Coordinates<'a> {
+    Linear(usize),
+    Segmented(MarkdownSourceMap<'a>),
+}
+
+impl Coordinates<'_> {
+    fn source(self, local: usize) -> usize {
+        match self {
+            Self::Linear(origin) => origin + local,
+            Self::Segmented(map) => map.source_offset(local),
+        }
+    }
 }
 
 impl<'a> WastNode<'a> {
+    pub(crate) fn in_markdown(self, map: MarkdownSourceMap<'a>) -> Self {
+        let coordinates = if map.is_contiguous() {
+            Coordinates::Linear(map.bounds().start)
+        } else {
+            Coordinates::Segmented(map)
+        };
+        Self {
+            coordinates,
+            ..self
+        }
+    }
+
     fn data(self) -> &'a Node {
         &self.nodes[self.id]
     }
@@ -177,9 +205,11 @@ impl<'a> WastNode<'a> {
         self.node_type().prop(key)
     }
 
+    /// The node's UTF-8 byte range. In a Markdown callback this is a host
+    /// range and can include gaps. Parent navigation stays in the WAST tree.
     pub fn range(self) -> Range<usize> {
         let range = &self.data().range;
-        self.origin + range.start..self.origin + range.end
+        self.coordinates.source(range.start)..self.coordinates.source(range.end)
     }
 
     pub fn parent(self) -> Option<Self> {
@@ -198,13 +228,13 @@ impl<'a> WastNode<'a> {
         loop {
             let children = &self.data().children;
             let i = children.partition_point(|&id| {
-                let end = self.nodes[id].range.end;
+                let end = self.coordinates.source(self.nodes[id].range.end);
                 end < at || (end == at && side != Some(Assoc::Before))
             });
             let Some(&id) = children.get(i) else {
                 return self;
             };
-            let start = self.nodes[id].range.start;
+            let start = self.coordinates.source(self.nodes[id].range.start);
             if start > at || (start == at && side != Some(Assoc::After)) {
                 return self;
             }
@@ -244,9 +274,36 @@ impl<'a> WastNode<'a> {
         (range.start + 2)..(range.end - 2)
     }
 
+    fn foldable_by(
+        self,
+        line_start: usize,
+        line_end: usize,
+        mut fold_range: impl FnMut(Self) -> Option<Range<usize>>,
+    ) -> Option<Range<usize>> {
+        let node = self.resolve_at(line_end, Some(Assoc::After));
+        let mut found = None;
+        for node in std::iter::successors(Some(node), |node| node.parent()) {
+            let span = node.range();
+            if span.end <= line_end || span.start > line_end {
+                continue;
+            }
+            if found.is_some() && span.start < line_start {
+                break;
+            }
+            if let Some(range) = fold_range(node)
+                && (line_start..=line_end).contains(&range.start)
+                && line_end < range.end
+            {
+                found = Some(range);
+            }
+        }
+        found
+    }
+
     fn unfinished_before(self, position: usize) -> Self {
         let children = &self.data().children;
-        let before = children.partition_point(|&id| self.nodes[id].range.start < position);
+        let before = children
+            .partition_point(|&id| self.coordinates.source(self.nodes[id].range.start) < position);
         let mut scan = before.checked_sub(1).map(|i| Self {
             id: children[i],
             ..self
@@ -349,13 +406,13 @@ impl WastDocument {
         published: Option<SyntaxTree>,
         reuse: ReuseStats,
     ) -> Self {
-        let isolate_ranges = IsolateRanges::new(&nodes, &node_types);
+        let isolate_ranges = isolation::index(&nodes, &node_types);
         let configured_highlights = node_types.has_configured_styles().then(|| {
-            ConfiguredHighlights::new(WastNode {
+            ConfiguredHighlights::build(WastNode {
                 nodes: &nodes,
                 node_types: &node_types,
                 id: 0,
-                origin: 0,
+                coordinates: Coordinates::Linear(0),
             })
         });
         Self {
@@ -386,7 +443,7 @@ impl WastDocument {
             nodes: &self.nodes,
             node_types: &self.node_types,
             id: 0,
-            origin: 0,
+            coordinates: Coordinates::Linear(0),
         }
     }
 
@@ -439,7 +496,9 @@ impl WastDocument {
     /// Find a stock fold that begins on the supplied line and continues past
     /// its end. This stateless query does not call configured callbacks.
     pub fn foldable(&self, line_start: usize, line_end: usize) -> Option<Range<usize>> {
-        self.foldable_by(line_start, line_end, WastNode::fold_range)
+        self.text.slice(line_start..line_end)?;
+        self.root()
+            .foldable_by(line_start, line_end, WastNode::fold_range)
     }
 
     pub(crate) fn foldable_with_state(
@@ -470,58 +529,54 @@ impl WastDocument {
             return None;
         }
         let origin = body.start;
-        let range =
-            self.foldable_by(line_start - origin, line_end.checked_sub(origin)?, |node| {
+        self.text
+            .slice(line_start - origin..line_end.checked_sub(origin)?)?;
+        self.root()
+            .foldable_by(line_start - origin, line_end - origin, |node| {
                 let callback = node.prop(&FOLD)?.as_ref()?;
-                let range = callback(WastNode { origin, ..node }, state)?;
+                let range = callback(
+                    WastNode {
+                        coordinates: Coordinates::Linear(origin),
+                        ..node
+                    },
+                    state,
+                )?;
                 let local = range.start.checked_sub(origin)?..range.end.checked_sub(origin)?;
                 (self.text.is_valid_range(local.clone())
                     && [local.start, local.end]
                         .into_iter()
-                        .all(|at| !super::line_projection::splits_crlf(self.text.as_str(), at)))
+                        .all(|at| !splits_crlf(self.text.as_str(), at)))
                 .then_some(local)
-            })?;
-        Some(origin + range.start..origin + range.end)
+            })
+            .map(|range| origin + range.start..origin + range.end)
     }
 
-    fn foldable_by<'a>(
-        &'a self,
+    /// For a mount from the current Markdown snapshot, use host bounds to
+    /// select candidates. A covering WAST node can span a gap at line_end.
+    pub(crate) fn foldable_in_markdown(
+        &self,
+        state: &EditorState,
+        map: MarkdownSourceMap<'_>,
         line_start: usize,
         line_end: usize,
-        mut fold_range: impl FnMut(WastNode<'a>) -> Option<Range<usize>>,
     ) -> Option<Range<usize>> {
-        self.text.slice(line_start..line_end)?;
-        let node = self.path(line_end, true).last()?;
-        let mut found = None;
-        for node in std::iter::successors(Some(node), |node| node.parent()) {
-            if node.data().range.end <= line_end {
-                continue;
-            }
-            if found.is_some() && node.data().range.start < line_start {
-                break;
-            }
-            if let Some(range) = fold_range(node)
-                && (line_start..=line_end).contains(&range.start)
-                && line_end < range.end
-            {
-                found = Some(range);
-            }
+        let body = map.bounds();
+        if !body.contains(&line_end) {
+            return None;
         }
-        found
-    }
-
-    fn path(&self, position: usize, include_start: bool) -> impl Iterator<Item = WastNode<'_>> {
-        let mut next = Some(self.root());
-        std::iter::from_fn(move || {
-            let node = next?;
-            let children = &node.data().children;
-            let i = children.partition_point(|&id| self.nodes[id].range.end <= position);
-            next = children.get(i).and_then(|&id| {
-                let start = self.nodes[id].range.start;
-                (start < position || (include_start && start == position))
-                    .then_some(WastNode { id, ..node })
-            });
-            Some(node)
-        })
+        if map.is_contiguous() && line_start >= body.start {
+            return self.foldable_in_scope(state, body, line_start, line_end);
+        }
+        self.root()
+            .in_markdown(map)
+            .foldable_by(line_start, line_end, |node| {
+                let range = node.prop(&FOLD)?.as_ref()?(node, state)?;
+                let text = state.text();
+                (text.is_valid_range(range.clone())
+                    && [range.start, range.end]
+                        .into_iter()
+                        .all(|at| map.contains_endpoint(at) && !splits_crlf(text.as_str(), at)))
+                .then_some(range)
+            })
     }
 }

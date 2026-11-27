@@ -7,9 +7,9 @@ use std::{
 };
 
 use gpui_editor_codemirror::{
-    ALLOW_MULTIPLE_SELECTIONS, Assoc, ConfigurationError, EditorSelection, EditorState,
-    SelectionRange, StateField, Transaction,
-    language_data::NativeLanguage,
+    ALLOW_MULTIPLE_SELECTIONS, Assoc, Compartment, ConfigurationError, EditorSelection,
+    EditorState, Extension, SelectionRange, StateField, Transaction,
+    language_data::{NativeLanguage, json_extension},
     setup::{
         SetupEditor, SetupKeyContext, SetupKeyResult, basic_setup, basic_setup_with_language,
         minimal_setup, try_minimal_setup,
@@ -307,6 +307,82 @@ fn native_language_reindents_basic_input_in_the_same_history_step() {
     assert_eq!(minimal.view().state().text().as_str(), "{\n    }");
     assert_eq!(basic.view_mut().undo(), Some(4));
     assert_eq!(basic.view().state().text().as_str(), "{\n    ");
+}
+
+#[test]
+fn setup_tracks_installed_json_for_input_indentation_and_history() {
+    for line in include_str!("fixtures/setup_attached_indent.jsonl").lines() {
+        let row: serde_json::Value = serde_json::from_str(line).unwrap();
+        let source = row["source"].as_str().unwrap();
+        let mode = row["mode"].as_str().unwrap();
+        let event = row["event"].as_str().unwrap();
+        let slot = Compartment::new();
+        let extension = |install| {
+            if install {
+                json_extension()
+            } else {
+                Extension::default()
+            }
+        };
+        let mut state = EditorState::with_extensions(
+            source,
+            slot.of(extension(matches!(mode, "initial" | "detach"))),
+        )
+        .unwrap();
+        let end = source.len();
+        state
+            .update(Transaction::default().with_selection(EditorSelection::single(end, end)))
+            .unwrap();
+        let mut editor = if row["preset"] == "basic" {
+            basic_setup(state, KeyPlatform::Linux).unwrap()
+        } else {
+            minimal_setup(state, KeyPlatform::Linux)
+        };
+        if matches!(mode, "attach" | "detach") {
+            editor
+                .view_mut()
+                .update(
+                    Transaction::default()
+                        .with_effects([slot.reconfigure(extension(mode == "attach"))]),
+                    (),
+                    |_| (None, ()),
+                )
+                .unwrap();
+        }
+        if event == "input.type" {
+            editor.insert_text("}", Duration::ZERO, ()).unwrap();
+        } else {
+            let input = editor
+                .view()
+                .state()
+                .replace_selection("}")
+                .unwrap()
+                .with_user_event(event);
+            editor.view_mut().update(input, (), |_| (None, ())).unwrap();
+        }
+        let check = |editor: &SetupEditor<()>, step: &str, expected: &str| {
+            let view = editor.view();
+            let state = view.state();
+            let context = format!("{} {mode} {event}, {step}", row["preset"]);
+            assert_eq!(state.text().as_str(), expected, "{context}");
+            assert_eq!(
+                serde_json::json!(state.selection().main().head()),
+                row[step]["head"],
+                "{context}"
+            );
+            assert_eq!(
+                serde_json::json!([view.undo_depth(), view.redo_depth()]),
+                row[step]["history"],
+                "{context}"
+            );
+        };
+        let result = row["result"].as_str().unwrap();
+        check(&editor, "applied", result);
+        assert_eq!(editor.view_mut().undo(), Some(()));
+        check(&editor, "undone", source);
+        assert_eq!(editor.view_mut().redo(), Some(()));
+        check(&editor, "redone", result);
+    }
 }
 
 #[test]

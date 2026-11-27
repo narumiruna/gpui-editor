@@ -6,7 +6,7 @@ use super::{
         line_projection::{NormalizedInput, NormalizedOffsets, splits_crlf},
     },
     WastNodeTypes,
-    parser::{PARSER, project_error},
+    parser::PARSER,
 };
 
 #[cfg(test)]
@@ -102,7 +102,7 @@ impl WastParseJob {
         let advance = self
             .session
             .advance(self.offsets.normalized_byte(upto), rounds)
-            .map_err(|error| project_error(error, original_byte))?;
+            .map_err(|error| error.map_offset(original_byte))?;
         let mut output_work = advance.output_work;
         let output = advance.output.map(|(mut tree, complete)| {
             output_work += tree.project_glr_ranges(original_byte);

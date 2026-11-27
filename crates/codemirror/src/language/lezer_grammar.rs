@@ -7,30 +7,40 @@
 //!
 //! Differences from upstream:
 //!
-//! - This module exposes native syntax and language data, not the JavaScript
-//!   `LRLanguage` or `LanguageSupport` APIs. The
-//!   [state attachment](crate::language_data::lezer_extension) tracks syntax
-//!   without compiling grammars, scheduling background parsing, or exposing
-//!   partial editor trees.
+//! - Use [`parse_raw`] for direct parsing. A [language handle](crate::language_data::lezer_language)
+//!   configures the synchronous editor attachment. These are native APIs, not
+//!   the JavaScript `LRLanguage` or `LanguageSupport` APIs. They do not compile
+//!   grammars, schedule background parsing, or expose partial editor trees.
 //! - Strict parsing can resume from a verified prefix, including a prefix
 //!   retained after recovery, and replay supported shifted suffix decisions.
 //!   Each parse rebuilds the native node and highlight views. Recovery parses
 //!   from the start and does not reuse recovered nodes. The tree omits anonymous
-//!   repeat nodes, packed buffers, and general node properties. Bracket and
-//!   indent queries use the pinned delimiter properties.
+//!   repeat nodes and packed buffers. Configured grammar rows are available on
+//!   LR nodes. Bracket and indent queries still use the stock grammar rules.
 //! - Syntax and line queries recognize LF, CRLF, and lone CR. Original text and
 //!   UTF-8 byte offsets do not change.
 //! - Bounded recovery can choose different branches or leave partial output.
 //!   A local parser supplies a tree if LR recovery cannot finish within the
 //!   allowed work and stack limits.
 
-use std::ops::Range;
+use std::{
+    ops::Range,
+    sync::{Arc, OnceLock},
+};
 
-use crate::{ChangeSet, EditError, Text, commands::CommentTokens};
+use crate::{
+    ChangeSet, EditError, RangeSet, Text,
+    commands::CommentTokens,
+    view::{MarkDecoration, Viewport},
+};
 
 use super::{
-    HighlightSpan, IndentOptions, LanguageData, StreamSettings,
-    lezer::{NormalizedEdges, ReuseStats},
+    BidiIsolateOptions, HighlightSpan, IndentOptions, LanguageData, StreamSettings,
+    bidi::IsolateRanges,
+    lezer::{
+        ConfiguredHighlights, ISOLATE, NodeType, NodeTypes, NormalizedEdges, ParseError,
+        ReuseStats, StyleTags, StyledNode, select_tags,
+    },
     line_projection::editor_lines,
 };
 
@@ -41,6 +51,9 @@ mod lexer;
 mod lr;
 mod parser;
 mod tables;
+
+pub use lr::parse_raw;
+pub(crate) use lr::{stock_data_facet, stock_node_types};
 
 /// The upstream language name.
 pub const NAME: &str = "lezer";
@@ -130,17 +143,35 @@ struct Node {
 /// A borrowed syntax node. A zero-width error can mark missing syntax.
 #[derive(Clone, Copy, Debug)]
 pub struct LezerNode<'a> {
-    nodes: &'a [Node],
+    document: &'a LezerDocument,
     id: usize,
 }
 
 impl<'a> LezerNode<'a> {
     fn data(self) -> &'a Node {
-        &self.nodes[self.id]
+        &self.document.nodes[self.id]
     }
 
     pub fn kind(self) -> LezerNodeKind {
         self.data().kind
+    }
+
+    /// Return the configured row for this node. Local fallback nodes other
+    /// than the root have no verified LR term.
+    pub fn node_type(self) -> Option<&'a NodeType> {
+        let term = self
+            .data()
+            .term
+            .or_else(|| (self.id == 0).then_some(tables::TOP_TERM))?;
+        self.document.node_types().get(term)
+    }
+
+    /// Select the first matching rule for a node with a verified grammar row.
+    /// Use the document's spans for inherited tags.
+    pub fn style_tags(self) -> Option<StyleTags<'a>> {
+        let ancestors = std::iter::successors(self.parent(), |node| node.parent())
+            .map(|node| node.kind().name());
+        select_tags(self.node_type()?, ancestors)
     }
 
     pub fn range(self) -> Range<usize> {
@@ -178,6 +209,24 @@ impl<'a> LezerNode<'a> {
     }
 }
 
+impl<'a> StyledNode<'a> for LezerNode<'a> {
+    fn child(self, index: usize) -> Option<Self> {
+        self.children().nth(index)
+    }
+
+    fn range(self) -> Range<usize> {
+        self.range()
+    }
+
+    fn name(self) -> &'a str {
+        self.kind().name()
+    }
+
+    fn node_type(self) -> Option<&'a NodeType> {
+        self.node_type()
+    }
+}
+
 /// One Lezer grammar and its recovered syntax tree.
 #[derive(Debug)]
 pub struct LezerDocument {
@@ -186,6 +235,9 @@ pub struct LezerDocument {
     nodes: Vec<Node>,
     highlights: Vec<HighlightSpan<'static>>,
     published: Option<Box<lr::Cache>>,
+    node_types: Option<NodeTypes>,
+    isolate_ranges: OnceLock<IsolateRanges>,
+    configured_highlights: OnceLock<Option<ConfiguredHighlights>>,
 }
 
 impl LezerDocument {
@@ -204,7 +256,9 @@ impl LezerDocument {
             .published
             .as_deref()
             .map(|cache| NormalizedEdges::new(&cache.tree, self.text.len(), changes));
-        Ok(Self::parse_with_reuse(text, reuse))
+        let mut document = Self::parse_with_reuse(text, reuse);
+        document.node_types = self.node_types.clone();
+        Ok(document)
     }
 
     /// LR checkpoint reuse in the last parse. The resume offset is in the
@@ -222,8 +276,17 @@ impl LezerDocument {
             .map_or(0, |cache| cache.tree.reused_suffix_actions())
     }
 
+    pub(crate) fn parse_strict(text: Text) -> Result<Self, ParseError> {
+        let nodes = lr::parse_strict(text.as_str())?;
+        Ok(Self::from_nodes(text, nodes, None))
+    }
+
     fn parse_with_reuse(text: Text, reuse: Option<NormalizedEdges<'_>>) -> Self {
         let (nodes, published) = lr::parse(text.as_str(), reuse);
+        Self::from_nodes(text, nodes, published)
+    }
+
+    fn from_nodes(text: Text, nodes: Vec<Node>, published: Option<lr::Cache>) -> Self {
         let highlights = highlight::collect(&nodes);
         Self {
             editor_lines: editor_lines(text.as_str()),
@@ -231,6 +294,21 @@ impl LezerDocument {
             nodes,
             highlights,
             published: published.map(Box::new),
+            node_types: None,
+            isolate_ranges: OnceLock::new(),
+            configured_highlights: OnceLock::new(),
+        }
+    }
+
+    pub(crate) fn with_node_types(mut self, node_types: NodeTypes) -> Self {
+        self.node_types = Some(node_types);
+        self
+    }
+
+    pub(crate) fn node_types(&self) -> &NodeTypes {
+        match &self.node_types {
+            Some(types) => types,
+            None => stock_node_types(),
         }
     }
 
@@ -247,7 +325,7 @@ impl LezerDocument {
     /// The root spans the full document, including skipped whitespace.
     pub fn root(&self) -> LezerNode<'_> {
         LezerNode {
-            nodes: &self.nodes,
+            document: self,
             id: 0,
         }
     }
@@ -257,6 +335,30 @@ impl LezerDocument {
         (0..self.nodes.len()).map(|id| LezerNode { id, ..self.root() })
     }
 
+    /// Build bidi isolation marks for nodes with a configured direction. The
+    /// stock grammar defines no isolates. Marks have full node ranges in
+    /// original bytes. Invalid viewport endpoints return an error.
+    pub fn bidi_isolate_marks(
+        &self,
+        viewport: &Viewport,
+        options: BidiIsolateOptions,
+    ) -> Result<Arc<RangeSet<MarkDecoration>>, EditError> {
+        let ranges = self.isolate_ranges.get_or_init(|| {
+            if self
+                .node_types
+                .as_ref()
+                .is_none_or(|types| types.same_set(stock_node_types()))
+            {
+                return IsolateRanges::default();
+            }
+            IsolateRanges::new(self.nodes().filter_map(|node| {
+                let direction = (*node.node_type()?.prop(&ISOLATE)?)?;
+                Some((node.range(), direction))
+            }))
+        });
+        ranges.marks(&self.text, self.syntax_lines(), viewport, options)
+    }
+
     /// Highlight spans clipped to the supplied byte range. Return `None` if
     /// the range is reversed or either endpoint is invalid.
     pub fn highlights(
@@ -264,6 +366,30 @@ impl LezerDocument {
         range: Range<usize>,
     ) -> Option<impl Iterator<Item = HighlightSpan<'_>>> {
         self.text.slice(range.clone())?;
+        let configured = self
+            .configured_highlights
+            .get_or_init(|| {
+                // The local fallback has no LR term IDs for its children.
+                self.root().data().term?;
+                self.node_types
+                    .as_ref()
+                    .filter(|types| types.has_different_styles(stock_node_types()))
+                    .map(|_| ConfiguredHighlights::build(self.root()))
+            })
+            .as_ref();
+        let stock = configured
+            .is_none()
+            .then(|| self.stock_highlights(range.clone()));
+        let configured = configured.map(|spans| spans.clipped(range));
+        Some(
+            stock
+                .into_iter()
+                .flatten()
+                .chain(configured.into_iter().flatten()),
+        )
+    }
+
+    fn stock_highlights(&self, range: Range<usize>) -> impl Iterator<Item = HighlightSpan<'_>> {
         let first = self
             .highlights
             .partition_point(|span| span.range.end <= range.start);
@@ -273,14 +399,12 @@ impl LezerDocument {
             self.highlights
                 .partition_point(|span| span.range.start < range.end)
         };
-        Some(
-            self.highlights[first..end]
-                .iter()
-                .map(move |span| HighlightSpan {
-                    range: span.range.start.max(range.start)..span.range.end.min(range.end),
-                    tags: span.tags,
-                }),
-        )
+        self.highlights[first..end]
+            .iter()
+            .map(move |span| HighlightSpan {
+                range: span.range.start.max(range.start)..span.range.end.min(range.end),
+                tags: span.tags,
+            })
     }
 
     /// Find the outermost fold that starts on this line and continues past it.

@@ -48,6 +48,8 @@ pub(super) fn bind_keys(cx: &mut App) {
             KeyBinding::new("cmd-f", OpenFind, Some(context)),
             KeyBinding::new("cmd-g", FindNext, Some(context)),
             KeyBinding::new("cmd-shift-g", FindPrevious, Some(context)),
+            KeyBinding::new("f3", FindNext, Some(context)),
+            KeyBinding::new("shift-f3", FindPrevious, Some(context)),
         ]);
     }
     cx.bind_keys([
