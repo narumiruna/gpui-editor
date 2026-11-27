@@ -411,14 +411,14 @@ impl Editor {
         if !self.has_multiple_selections() {
             return self.replace_with_effect(range, text, effect, cx);
         }
-        let state = self.view.state();
-        let transaction = state
-            .replace_selection(text)
-            .ok()?
+        let caret = range.start.checked_add(text.len())?;
+        let changes = ChangeSet::single(Change::new(range, text)).ok()?;
+        let transaction = Transaction::new(changes)
+            .with_selection(EditorSelection::single(caret, caret))
             .with_user_event("input")
             .with_scroll_into_view()
             .with_effects([effect]);
-        let old_len = state.text().len();
+        let old_len = self.source().len();
         let mut receipt = None;
         if !self.apply_multi_edit_with_receipt(transaction, Some(&mut receipt), cx) {
             return None;
@@ -995,6 +995,44 @@ mod tests {
         cx.simulate_keystrokes("escape secondary-z cmd-f");
         cx.run_until_parked();
         cx.update(|_, cx| assert_eq!(marks(editor.read(cx)), [2..6, 13..17]));
+    }
+
+    #[gpui::test]
+    fn replace_next_edits_only_the_primary_regex_match(cx: &mut TestAppContext) {
+        let source = "x1 x2 keep";
+        let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source.into(), window, cx));
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.open_find(window, cx);
+                let find = editor.find.as_mut().unwrap();
+                find.options.regexp = true;
+                find.query.update(cx, |field, cx| {
+                    field.replace_text_in_range(None, r"x(\d)", window, cx);
+                });
+                find.replacement.update(cx, |field, cx| {
+                    field.replace_text_in_range(None, "$1", window, cx);
+                });
+                let ranges = vec![
+                    SelectionRange::new(0, 2),
+                    SelectionRange::new(3, 5),
+                    SelectionRange::new(6, 10),
+                ];
+                editor
+                    .view
+                    .set_selection(EditorSelection::new(ranges, 1).unwrap())
+                    .unwrap();
+
+                editor.replace_match(cx);
+                assert_eq!(editor.source(), "x1 2 keep");
+                assert_eq!(
+                    editor.view.state().selection(),
+                    &EditorSelection::single(0, 2)
+                );
+                assert_eq!(editor.view.undo_depth(), 1);
+                editor.replay_history(false, cx);
+                assert_eq!(editor.source(), source);
+            });
+        });
     }
 
     #[gpui::test]
