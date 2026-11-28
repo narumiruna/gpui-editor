@@ -274,6 +274,6 @@ impl NodeTypes {
 
 fn next_id(sequence: &AtomicUsize, exhausted: &str) -> usize {
     sequence
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
         .expect(exhausted)
 }

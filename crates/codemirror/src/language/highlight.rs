@@ -59,7 +59,7 @@ impl Definition {
     fn new(name: String, parents: Vec<Parent>) -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let id = NEXT
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
             .expect("highlight tag identities exhausted");
         Self { id, name, parents }
     }

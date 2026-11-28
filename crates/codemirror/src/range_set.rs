@@ -233,7 +233,7 @@ fn store_ranges<T: RangeValue>(ranges: Vec<Range<T>>) -> Vec<StoredRange<T>> {
         return Vec::new();
     }
     let first = NEXT
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
             id.checked_add(count)
         })
         .expect("range value identities exhausted");

@@ -24,7 +24,7 @@ pub(crate) struct FacetId(Key);
 
 fn next_key() -> Key {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
-    NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |key| {
+    NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |key| {
         key.checked_add(1)
     })
     .expect("extension keys exhausted")

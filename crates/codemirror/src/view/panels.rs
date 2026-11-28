@@ -32,7 +32,7 @@ impl PanelId {
     pub fn new() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         Self(
-            NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
                 .expect("panel IDs exhausted"),
         )
     }
