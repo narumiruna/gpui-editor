@@ -164,7 +164,7 @@ impl WastLanguage {
             Attachment::Wast(config) | Attachment::WastViewport(config) => {
                 Some(Arc::clone(&config.name))
             }
-            Attachment::Native(_) | Attachment::Lr(_) => None,
+            Attachment::Native(_) | Attachment::Lr(_) | Attachment::LrViewport(_) => None,
         }
     }
 

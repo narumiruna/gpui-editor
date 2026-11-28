@@ -53,7 +53,7 @@ pub static PHRASES: LazyLock<Facet<Arc<PhraseMap>, Vec<Arc<PhraseMap>>>> = LazyL
     Facet::new(|maps: &[&Arc<PhraseMap>]| maps.iter().map(|map| Arc::clone(map)).collect())
 });
 
-fn parse_lines(source: &str, separator: &str) -> String {
+pub(crate) fn parse_lines(source: &str, separator: &str) -> String {
     if separator.is_empty() {
         return source.replace("\r\n", "\n").replace('\r', "\n");
     }
@@ -123,7 +123,7 @@ impl EditorState {
         Self::finish_create(text, selection, InitialConfiguration::new(extension)?)
     }
 
-    fn finish_create(
+    pub(crate) fn finish_create(
         text: Text,
         selection: Option<EditorSelection>,
         configuration: InitialConfiguration,
@@ -143,6 +143,7 @@ impl EditorState {
             selection,
             extensions,
             wast_publication: None,
+            lr_publication: None,
         })
     }
 

@@ -90,6 +90,20 @@ pub(super) fn repair(source: &str, error: ParseError) -> Option<(SyntaxTree, Rep
             return None;
         }
         let trailing = repair.input.get(offset..)?;
+        if trailing.starts_with(')') {
+            // Keep a real or synthesized closer if the grammar only needs a
+            // right operand. The inserted number maps back to an empty error.
+            let mut candidate = repair.input.clone();
+            let text = " 0";
+            candidate.insert_str(offset, text);
+            let operand = offset + 1..offset + text.len();
+            if let Ok(tree) = parse_tree(&candidate)
+                && is_binary_operand(&tree, operand)
+            {
+                repair.insert(offset, text);
+                return Some((tree, repair));
+            }
+        }
         if let Some(text) = missing_text(&repair.input[..offset], trailing) {
             // Only keep an insertion if it completes the parse or moves the
             // failure past its new text. This prevents retrying the same gap.
@@ -134,6 +148,20 @@ pub(super) fn repair(source: &str, error: ParseError) -> Option<(SyntaxTree, Rep
         }
     }
     None
+}
+
+fn is_binary_operand(tree: &SyntaxTree, operand: Range<usize>) -> bool {
+    let mut node = tree.root();
+    while let Some(child) = node.children().find(|child| {
+        let range = child.range();
+        range.start <= operand.start && operand.end <= range.end
+    }) {
+        if child.name() == "NumberLiteral" && child.range() == operand {
+            return node.name() == "BinaryExpression";
+        }
+        node = child;
+    }
+    false
 }
 
 fn unexpected(error: ParseError) -> Option<usize> {

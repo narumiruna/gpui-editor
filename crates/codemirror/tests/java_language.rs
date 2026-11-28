@@ -561,7 +561,7 @@ fn byte_boundaries_and_recovery_limits() {
         .is_none()
     );
 
-    // Size, including skipped whitespace, limits the extra recovery work.
+    // Size, including skipped whitespace, limits checkpoint replay but not bounded recovery.
     let mut source = String::from("class A { void f() { x += ; } }");
     source.extend(std::iter::repeat_n(' ', 16 * 1024 - source.len()));
     let doc = JavaDocument::parse(Text::new(&source));
@@ -574,12 +574,13 @@ fn byte_boundaries_and_recovery_limits() {
     assert_eq!(marker.range(), 26..26);
     assert_eq!(marker.parent().unwrap().name(), "AssignmentExpression");
     source.push(' ');
-    let capped = JavaDocument::parse(Text::new(&source));
-    assert_eq!(capped.parse_error(), diagnostic);
-    let error = capped.root().children().next().unwrap();
-    assert_eq!((error.name(), error.range()), ("⚠", 0..source.len()));
-    assert_eq!(capped.highlights(0..source.len()).unwrap().count(), 0);
-    assert_eq!(capped.reuse_stats(), ReuseStats::default());
+    let above_cap = JavaDocument::parse(Text::new(&source));
+    assert_eq!(above_cap.parse_error(), diagnostic);
+    let marker = above_cap.nodes().find(|node| node.term() == 0).unwrap();
+    assert_eq!(marker.range(), 26..26);
+    assert_eq!(marker.parent().unwrap().name(), "AssignmentExpression");
+    assert!(above_cap.highlights(0..source.len()).unwrap().count() > 0);
+    assert_eq!(above_cap.reuse_stats(), ReuseStats::default());
 }
 
 #[test]

@@ -238,7 +238,7 @@ fn check_contextual_origin(fixture: &Value, integrated: bool) {
         json!({
             "doc": state.text().as_str(), "cursor": state.selection().main().head(),
             "version": version, "calls": seen.lock().unwrap().len(),
-            "pending": contextual_queue(&pending, &mark, true),
+            "pending": contextual_queue(&pending, &mark),
         })
     };
     assert_eq!(snapshot(&state, direct.as_ref()), *start);
@@ -276,12 +276,19 @@ fn check_contextual_origin(fixture: &Value, integrated: bool) {
         rebase_updates(&originals, &peer).unwrap(),
         rebase_updates_described(&originals, &peer.each_ref().map(describe)).unwrap(),
     ] {
-        // Authority-side JavaScript rebase drops origins. Native rebase keeps them.
-        assert_eq!(
-            contextual_queue(&rebased, &mark, false),
-            fixture["authority"]
+        assert_eq!(contextual_queue(&rebased, &mark), fixture["authority"]);
+        assert!(
+            rebased
+                .iter()
+                .all(|update| update.origin_context().is_none())
         );
-        assert_same_origins(&rebased, &originals);
+    }
+    let acknowledged = &originals[..1];
+    for remaining in [
+        rebase_updates(&originals, acknowledged).unwrap(),
+        rebase_updates_described(&originals, &[describe(&acknowledged[0])]).unwrap(),
+    ] {
+        assert_same_origins(&remaining, &originals[1..]);
     }
 
     let receive = |state: &mut EditorState, direct: Option<&mut Collab>, updates: &[Update]| {
@@ -312,12 +319,12 @@ fn check_contextual_origin(fixture: &Value, integrated: bool) {
     }
 }
 
-fn contextual_queue(updates: &[Update], mark: &Mark, include_origin: bool) -> Value {
+fn contextual_queue(updates: &[Update], mark: &Mark) -> Value {
     Value::Array(
         updates
             .iter()
             .map(|update| {
-                let origin = update.origin_context().filter(|_| include_origin).map(|context| {
+                let origin = update.origin_context().map(|context| {
             let transaction = context.transaction();
             json!({
                 "start": [context.start_text().as_str(), context.start_selection().main().head()],
@@ -557,6 +564,164 @@ fn wire_composition_preserves_split_boundaries_and_only_accepts_the_correct_echo
     }
 }
 
+#[test]
+fn split_wire_effect_acknowledgement_rejects_incompatible_echo_atomically() {
+    let case = split_wire_case("effect acknowledgement in split-wire prefix");
+    let mark = Mark::new();
+    let local = split_wire_local(&case, &mark);
+    assert_eq!(split_wire_snapshot(&local, &mark), case["initial"]);
+    let version = get_synced_version(&local).unwrap();
+    let pending = sendable_updates(&local).unwrap();
+    let mut authority = Text::new(string(&case["source"]));
+    let prefix: Vec<_> = items(&case["prefix"])
+        .map(|edit| {
+            let update = decode_wire_update(edit, &authority, &mark);
+            update.apply_to(&mut authority).unwrap();
+            update
+        })
+        .collect();
+    assert_eq!(authority.as_str(), string(&case["authority"]));
+    let concrete = rebase_updates(&pending, &prefix).unwrap();
+    let descriptions: Vec<_> = prefix.iter().map(describe).collect();
+    let described = rebase_updates_described(&pending, &descriptions).unwrap();
+    for (kind, updates) in [("concrete", &concrete), ("described", &described)] {
+        let [echo] = updates.as_slice() else {
+            panic!("expected one {kind} echo");
+        };
+        assert_eq!(split_wire_update(echo, &mark), case[kind]["echo"]);
+        let mut confirmed = authority.clone();
+        echo.apply_to(&mut confirmed).unwrap();
+        assert_eq!(confirmed.as_str(), string(&case[kind]["authority"]));
+    }
+
+    let mut received = local.clone();
+    received
+        .update(receive_updates(&received, version, &prefix).unwrap())
+        .unwrap();
+    assert_eq!(split_wire_snapshot(&received, &mark), case["received"]);
+    assert_same_origins(&sendable_updates(&received).unwrap(), &pending[1..]);
+    for (stage, mut state, head) in [
+        ("sameBatch", local, prefix.as_slice()),
+        ("afterPrefix", received, &[][..]),
+    ] {
+        let before = split_wire_snapshot(&state, &mark);
+        let selection = state.selection().clone();
+        let queue = sendable_updates(&state).unwrap();
+        let version = get_synced_version(&state).unwrap();
+        let attempt = |echo: &Update| {
+            let mut batch = head.to_vec();
+            batch.push(echo.clone());
+            receive_updates(&state, version, &batch)
+        };
+        assert_eq!(
+            attempt(&concrete[0]).unwrap_err(),
+            CollabError::MismatchedAcknowledgement,
+            "{stage}"
+        );
+        assert_eq!(split_wire_snapshot(&state, &mark), before, "{stage}");
+        assert_eq!(state.selection(), &selection, "{stage}");
+        let unchanged = sendable_updates(&state).unwrap();
+        assert_eq!(unchanged, queue, "{stage}");
+        assert_same_origins(&unchanged, &queue);
+
+        let receipt = attempt(&described[0]).unwrap();
+        state.update(receipt).unwrap();
+        let final_state = split_wire_snapshot(&state, &mark);
+        assert_eq!(final_state, case["described"][stage], "{stage}");
+        assert_eq!(
+            state.text().as_str(),
+            string(&case["described"]["authority"])
+        );
+        // Upstream clears the queue for both echoes but disagrees with the
+        // authority text when it receives the concrete echo.
+        assert_eq!(case["concrete"][stage], final_state, "{stage}");
+        assert_ne!(
+            state.text().as_str(),
+            string(&case["concrete"]["authority"])
+        );
+        assert_eq!(get_synced_version(&state), Ok(version + head.len() + 1));
+        assert!(sendable_updates(&state).unwrap().is_empty());
+    }
+}
+
+#[test]
+fn inbound_track_del_effect_maps_through_composed_pending_deletes() {
+    let case = split_wire_case("inbound TrackDel through two front deletes");
+    let mark = Mark::with_mapping(|(name, pos), desc| {
+        desc.map_pos(*pos, Assoc::After, MapMode::TrackDel)
+            .map(|pos| (name.clone(), pos))
+    });
+    let mut state = split_wire_local(&case, &mark);
+    assert_eq!(split_wire_snapshot(&state, &mark), case["initial"]);
+    let pending = sendable_updates(&state).unwrap();
+    let source = Text::new(string(&case["source"]));
+    let inbound = decode_wire_update(&case["inbound"], &source, &mark);
+    let stepwise = pending
+        .iter()
+        .fold(inbound.effects().to_vec(), |effects, update| {
+            StateEffect::map_all(&effects, update.change_desc())
+        });
+    assert_eq!(marks(&stepwise, &mark), case["stepwise"]);
+
+    let version = get_synced_version(&state).unwrap();
+    let receipt = receive_updates(&state, version, &[inbound]).unwrap();
+    assert_eq!(
+        json!({
+            "changes": receipt.changes().to_json(state.text().len()).unwrap(),
+            "marks": marks(receipt.effects(), &mark),
+            "remote": is_remote(&receipt), "history": receipt.add_to_history(),
+        }),
+        case["receipt"]
+    );
+    state.update(receipt).unwrap();
+    assert_eq!(split_wire_snapshot(&state, &mark), case["received"]);
+    assert_same_origins(&sendable_updates(&state).unwrap(), &pending);
+}
+
+fn split_wire_case(name: &str) -> Value {
+    include_str!("fixtures/collab_split_wire_oracle.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .find(|case| case["name"] == name)
+        .unwrap()
+}
+
+fn split_wire_local(case: &Value, mark: &Mark) -> EditorState {
+    let config = CollabConfig::new("a", byte(&case["version"]))
+        .with_shared_effects(|transaction| transaction.effects().to_vec());
+    let mut state = EditorState::with_extensions(string(&case["source"]), collab(config)).unwrap();
+    for edit in items(&case["local"]) {
+        let changes = ChangeSet::from_json(&edit["changes"], state.text()).unwrap();
+        state
+            .update(Transaction::new(changes).with_effects(effects(mark, edit)))
+            .unwrap();
+    }
+    state
+}
+
+fn decode_wire_update(edit: &Value, source: &Text, mark: &Mark) -> Update {
+    let changes = ChangeSet::from_json(&edit["changes"], source).unwrap();
+    Update::new(string(&edit["client"]), changes, source.len())
+        .unwrap()
+        .with_effects(effects(mark, edit))
+}
+
+fn split_wire_update(update: &Update, mark: &Mark) -> Value {
+    json!({
+        "client": update.client_id(),
+        "changes": update.changes().to_json(update.change_desc().length()).unwrap(),
+        "marks": marks(update.effects(), mark),
+    })
+}
+
+fn split_wire_snapshot(state: &EditorState, mark: &Mark) -> Value {
+    json!({
+        "doc": state.text().as_str(), "version": get_synced_version(state).unwrap(),
+        "queue": sendable_updates(state).unwrap().iter()
+            .map(|update| split_wire_update(update, mark)).collect::<Vec<_>>(),
+    })
+}
+
 fn describe(update: &Update) -> UpdateDescription<'_> {
     UpdateDescription {
         client_id: update.client_id(),
@@ -668,21 +833,9 @@ fn check_case(case: &Value) {
                     "{context}, {kind}"
                 );
             } else {
-                let mut expected = oracle["rebase"].clone();
-                // Only JS drops the origin in authority-side mapped updates.
-                for (update, local) in expected
-                    .as_array_mut()
-                    .unwrap()
-                    .iter_mut()
-                    .zip(items(&oracle["queue"]))
-                {
-                    if update["origin"].is_null() {
-                        update["origin"] = local["origin"].clone();
-                    }
-                }
                 assert_eq!(
                     queue(&result.unwrap(), &mark),
-                    expected,
+                    oracle["rebase"],
                     "{context}, {kind}"
                 );
             }
@@ -703,12 +856,6 @@ fn check_case(case: &Value) {
             break;
         }
         let received = received.unwrap();
-        let mut expected = oracle["recv"].clone();
-        // JS does not set addToHistory on acknowledgements and empty receipts.
-        if expected["remote"] == false {
-            assert_eq!(expected["history"], true, "{context}: upstream default");
-            expected["history"] = json!(false);
-        }
         assert_eq!(
             json!({
                 "remote": is_remote(&received),
@@ -716,7 +863,7 @@ fn check_case(case: &Value) {
                 "edits": edits(received.changes()),
                 "marks": marks(received.effects(), &mark),
             }),
-            expected,
+            oracle["recv"],
             "{context}: receipt",
         );
         state.update(received).unwrap();

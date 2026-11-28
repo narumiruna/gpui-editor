@@ -1,4 +1,4 @@
-//! Native lint presentation for editable source fences.
+//! Native lint presentation for editable source.
 
 use std::{ops::Range, sync::Arc};
 
@@ -116,12 +116,15 @@ impl Editor {
         let Some(scope) = self.current_diagnostic_scope() else {
             return Vec::new();
         };
+        let source = self.source();
         let mut marks = Vec::new();
         lint::for_each_diagnostic(self.view.state(), |mark| {
-            if scope.range.start <= mark.range.start
-                && mark.range.end <= scope.range.end
-                && self.source().get(mark.range.clone()).is_some()
-            {
+            let valid = if scope.standalone {
+                standalone_diagnostic_range_is_safe(source, &mark.range)
+            } else {
+                source.get(mark.range.clone()).is_some()
+            };
+            if scope.range.start <= mark.range.start && mark.range.end <= scope.range.end && valid {
                 marks.push(mark);
             }
         });
@@ -329,6 +332,7 @@ impl Editor {
         };
         if range.start < scope.range.start
             || range.end > scope.range.end
+            || scope.standalone && !standalone_diagnostic_range_is_safe(self.source(), &range)
             || !self.apply_diagnostic_update(transaction)
         {
             return false;
@@ -349,6 +353,7 @@ impl Editor {
     ) {
         let Some(scope) = self
             .current_diagnostic_scope()
+            .filter(|scope| !scope.standalone)
             .map(|scope| scope.range.clone())
         else {
             return;
@@ -379,6 +384,7 @@ impl Editor {
         &self,
         window: &Window,
         cx: &Context<Self>,
+        themed: bool,
     ) -> Option<AnyElement> {
         let scope = self.current_diagnostic_scope()?;
         if !self.diagnostic_panel_open() {
@@ -386,20 +392,26 @@ impl Editor {
         }
         let theme = Theme::for_editor(window, self.view.state());
         let dark = theme.view.is_some_and(|style| style.dark);
-        let panel_border = gpui_editor_codemirror::theme_one_dark::view_style(self.view.state())
-            .map_or(1., |style| f32::from(style.panels.top_border.width_px));
         let marks = self.source_diagnostic_marks();
         let selected = LintState::get(self.view.state()).and_then(|lint| lint.selected().cloned());
-        let button = |label| {
-            div()
-                .cursor_pointer()
-                .rounded_sm()
-                .px_2()
-                .py_1()
-                .text_xs()
-                .hover(|it| it.bg(theme.selected))
-                .child(label)
-        };
+        let close = div()
+            .debug_selector(|| "source-diagnostics-close".into())
+            .cursor_pointer()
+            .rounded_sm()
+            .px_2()
+            .py_1()
+            .text_xs()
+            .hover(|it| it.bg(theme.selected))
+            .child("Close")
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|editor, _, window, cx| editor.close_source_diagnostics(window, cx)),
+            );
+        #[cfg(test)]
+        let close = super::one_dark_tests::panel_menu::probe(
+            close,
+            super::one_dark_tests::panel_menu::Role::DiagnosticsClose,
+        );
         let panel = div()
             .id("source-diagnostics")
             .debug_selector(|| "source-diagnostics-panel".into())
@@ -417,10 +429,13 @@ impl Editor {
             .flex()
             .flex_col()
             .flex_none()
-            .border_b(px(panel_border))
-            .border_color(theme.border)
-            .bg(theme.panel)
-            .text_color(theme.panel_text())
+            .when(!themed, |panel| {
+                panel
+                    .border_b(px(1.))
+                    .border_color(theme.border)
+                    .bg(theme.panel)
+                    .text_color(theme.panel_text())
+            })
             .child(
                 div()
                     .flex()
@@ -430,12 +445,7 @@ impl Editor {
                     .py_1()
                     .text_sm()
                     .child("Diagnostics")
-                    .child(button("Close").on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|editor, _, window, cx| {
-                            editor.close_source_diagnostics(window, cx)
-                        }),
-                    )),
+                    .child(close),
             )
             .child(
                 div()
@@ -483,7 +493,7 @@ impl Editor {
                                     .child(div().text_xs().text_color(color).child(severity))
                                     .child(message),
                             )
-                            .when(!diagnostic.actions.is_empty(), |row| {
+                            .when(!scope.standalone && !diagnostic.actions.is_empty(), |row| {
                                 row.child(
                                     div().flex().gap_1().px_2().children(
                                         diagnostic.actions.iter().enumerate().map(
@@ -527,10 +537,15 @@ impl Editor {
         viewport: Bounds<Pixels>,
         window: &Window,
     ) -> Option<Overlay> {
+        let pointer = window.mouse_position();
+        // Leave the lint lane to its own delayed tooltip, even if a keyboard
+        // tooltip is active in the document body.
+        if layout.standalone_lint_lane_contains(pointer) {
+            return None;
+        }
         if let Some(hover) = self.keyboard_diagnostic_hover(layout, viewport, window) {
             return Some(hover);
         }
-        let pointer = window.mouse_position();
         if self.selecting || !viewport.contains(&pointer) {
             return None;
         }
@@ -566,6 +581,13 @@ impl Editor {
             tooltip(self.source_lsp_diagnostic_marks().collect())
         })
     }
+}
+
+fn standalone_diagnostic_range_is_safe(source: &str, range: &Range<usize>) -> bool {
+    source.get(range.clone()).is_some()
+        && [range.start, range.end]
+            .into_iter()
+            .all(|at| at == 0 || source.as_bytes().get(at - 1..=at) != Some(b"\r\n"))
 }
 
 fn marker_anchor(layout: &Layout, offset: usize) -> Option<Bounds<Pixels>> {

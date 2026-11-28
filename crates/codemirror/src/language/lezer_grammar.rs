@@ -16,7 +16,7 @@
 //!   Each parse rebuilds the native node and highlight views. Recovery parses
 //!   from the start and does not reuse recovered nodes. The tree omits anonymous
 //!   repeat nodes and packed buffers. Configured grammar rows are available on
-//!   LR nodes. Bracket and indent queries still use the stock grammar rules.
+//!   LR nodes. Bracket and indentation queries use the configured properties.
 //! - Syntax and line queries recognize LF, CRLF, and lone CR. Original text and
 //!   UTF-8 byte offsets do not change.
 //! - Bounded recovery can choose different branches or leave partial output.
@@ -29,29 +29,31 @@ use std::{
 };
 
 use crate::{
-    ChangeSet, EditError, RangeSet, Text,
+    ChangeSet, EditError, EditorState, RangeSet, Text,
     commands::CommentTokens,
     view::{MarkDecoration, Viewport},
 };
 
 use super::{
-    BidiIsolateOptions, HighlightSpan, IndentOptions, LanguageData, StreamSettings,
+    BidiIsolateOptions, HighlightSpan, IndentContext, IndentOptions, LanguageData, StreamSettings,
     bidi::IsolateRanges,
     lezer::{
         ConfiguredHighlights, ISOLATE, NodeType, NodeTypes, NormalizedEdges, ParseError,
         ReuseStats, StyleTags, StyledNode, select_tags,
     },
+    lezer::{indent, service_node::LrSyntaxNode},
     line_projection::editor_lines,
 };
 
 mod brackets;
 mod highlight;
-mod indent;
+mod job;
 mod lexer;
 mod lr;
 mod parser;
 mod tables;
 
+pub use job::{LezerParseJob, LezerParseOutput, LezerParseStep};
 pub use lr::parse_raw;
 pub(crate) use lr::{stock_data_facet, stock_node_types};
 
@@ -150,6 +152,10 @@ pub struct LezerNode<'a> {
 impl<'a> LezerNode<'a> {
     fn data(self) -> &'a Node {
         &self.document.nodes[self.id]
+    }
+
+    pub(super) fn same_tree(self, other: Self) -> bool {
+        std::ptr::eq(self.document, other.document)
     }
 
     pub fn kind(self) -> LezerNodeKind {
@@ -431,7 +437,18 @@ impl LezerDocument {
         settings: StreamSettings,
         options: IndentOptions<'_>,
     ) -> Option<usize> {
-        indent::indentation(self, position, settings, options)
+        self.indentation_with_state(None, position, settings, options)
+    }
+
+    pub(super) fn indentation_with_state(
+        &self,
+        state: Option<&EditorState>,
+        position: usize,
+        settings: StreamSettings,
+        options: IndentOptions<'_>,
+    ) -> Option<usize> {
+        let lines = IndentContext::new(self.syntax_lines(), position, settings, options)?;
+        indent::indentation(LrSyntaxNode::lezer(self.root()), state, &lines, Some(0))
     }
 
     fn path(&self, position: usize, include_start: bool) -> impl Iterator<Item = LezerNode<'_>> {

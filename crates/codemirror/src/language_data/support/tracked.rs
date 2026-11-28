@@ -2,20 +2,34 @@ use std::sync::{Arc, LazyLock};
 
 use crate::{
     ConfigurationError, EditorState, Extension, Facet, StateContext, StateField, StateFieldOptions,
-    Text,
-    language::{StreamSettings, language_data_provider},
+    language::{INDENT_UNIT, StreamSettings, language_data_provider},
+    state_config::TAB_SIZE,
 };
 
-use super::{NativeLanguageSupport, NativeSyntax, SupportedDocument, SyntaxUpdateError};
+use super::{
+    CatalogBundle, NativeLanguage, NativeLanguageSupport, NativeSyntax, SupportedDocument,
+    SyntaxUpdateError, html_install, script_install, xml_install,
+};
 
+mod cpp;
+mod go;
+mod java;
 mod json;
 mod lezer;
 mod lr;
+mod rust;
 mod wast;
+mod yaml;
+pub use cpp::{CppLanguage, cpp_language};
+pub use go::{GoLanguage, go_language};
+pub use java::{JavaLanguage, java_language};
 pub use json::{JsonLanguage, json_language};
 pub use lezer::{LezerLanguage, lezer_language};
+pub(crate) use lr::LrConfig;
+pub use rust::{RustLanguage, rust_language};
 pub(crate) use wast::WastConfig;
 pub use wast::{WastLanguage, wast_language};
+pub use yaml::{YamlLanguage, yaml_language};
 
 #[derive(Clone)]
 enum Attachment {
@@ -23,6 +37,7 @@ enum Attachment {
     Lr(Arc<lr::LrConfig>),
     Wast(Arc<WastConfig>),
     WastViewport(Arc<WastConfig>),
+    LrViewport(Arc<LrConfig>),
 }
 
 impl Attachment {
@@ -35,15 +50,34 @@ impl Attachment {
         }
     }
 
-    fn parse(&self, text: Text) -> Result<Option<SupportedDocument>, ConfigurationError> {
+    fn settings(&self, state: &StateContext<'_>) -> Result<StreamSettings, ConfigurationError> {
+        if !matches!(self, Self::Native(support) if matches!(support.catalog_bundle, Some(CatalogBundle::Stream(_))))
+        {
+            return Ok(StreamSettings::default());
+        }
+        let tab_size = *state.facet(&TAB_SIZE)?;
+        Ok(StreamSettings {
+            tab_size,
+            indent_unit: state.facet(&INDENT_UNIT)?.width(tab_size),
+        })
+    }
+
+    fn parse(
+        &self,
+        state: &StateContext<'_>,
+        settings: StreamSettings,
+    ) -> Result<Option<SupportedDocument>, ConfigurationError> {
+        let text = state.text().clone();
         match self {
             Self::Lr(config) => config
                 .parse(text, StreamSettings::default())
                 .map(Some)
                 .map_err(ConfigurationError::StrictSyntax),
             Self::Wast(config) => wast::parse(text, config).map(Some),
-            Self::WastViewport(_) => Ok(None),
-            Self::Native(support) => Ok(support.parse(text).ok()),
+            Self::WastViewport(_) | Self::LrViewport(_) => Ok(None),
+            Self::Native(support) => {
+                Ok(support.parse_with_code_languages(text, settings, &[]).ok())
+            }
         }
     }
 }
@@ -64,10 +98,10 @@ static ACTIVE_DOCUMENT: LazyLock<StateField<Option<ActiveDocument>>> = LazyLock:
         let Some(attachment) = active_support(state)? else {
             return Ok(None);
         };
-        if let Some(previous) = previous
-            .as_ref()
-            .filter(|old| old.attachment.same_parser(&attachment))
-        {
+        let settings = attachment.settings(state)?;
+        if let Some(previous) = previous.as_ref().filter(|old| {
+            old.attachment.same_parser(&attachment) && old.document.settings == settings
+        }) {
             let changes = update.transaction().changes();
             if changes.is_empty() {
                 return Ok(Some(previous.clone()));
@@ -83,7 +117,7 @@ static ACTIVE_DOCUMENT: LazyLock<StateField<Option<ActiveDocument>>> = LazyLock:
                 Err(_) => Ok(None),
             };
         }
-        parse_document(attachment, state.text().clone())
+        parse_document(attachment, state, settings)
     })
 });
 
@@ -100,21 +134,32 @@ pub(crate) fn active_wast_viewport(state: &StateContext<'_>) -> Option<Arc<WastC
     }
 }
 
-fn parse_active(state: &StateContext<'_>) -> Result<Option<ActiveDocument>, ConfigurationError> {
-    match active_support(state)? {
-        Some(attachment) => parse_document(attachment, state.text().clone()),
-        None => Ok(None),
+pub(crate) fn active_lr_viewport(state: &StateContext<'_>) -> Option<Arc<LrConfig>> {
+    match active_support(state).expect("typed attached parser")? {
+        Attachment::LrViewport(config) => Some(config),
+        _ => None,
     }
+}
+
+fn parse_active(state: &StateContext<'_>) -> Result<Option<ActiveDocument>, ConfigurationError> {
+    let Some(attachment) = active_support(state)? else {
+        return Ok(None);
+    };
+    let settings = attachment.settings(state)?;
+    parse_document(attachment, state, settings)
 }
 
 fn parse_document(
     attachment: Attachment,
-    text: Text,
+    state: &StateContext<'_>,
+    settings: StreamSettings,
 ) -> Result<Option<ActiveDocument>, ConfigurationError> {
-    Ok(attachment.parse(text)?.map(|document| ActiveDocument {
-        attachment,
-        document: Arc::new(document),
-    }))
+    Ok(attachment
+        .parse(state, settings)?
+        .map(|document| ActiveDocument {
+            attachment,
+            document: Arc::new(document),
+        }))
 }
 
 fn install_attachment(attachment: Attachment) -> Extension {
@@ -126,6 +171,43 @@ fn install_attachment(attachment: Attachment) -> Extension {
             if let Some(document) = attached_language_snapshot(state) {
                 return match document.syntax() {
                     NativeSyntax::Wast(syntax) => syntax.configured_data_at(state, position, side),
+                    NativeSyntax::Cpp(_)
+                    | NativeSyntax::Java(_)
+                    | NativeSyntax::Rust(_)
+                    | NativeSyntax::Yaml(_) => document
+                        .root_facet_at(position, side)
+                        .map_or_else(Vec::new, |facet| facet.read(state)),
+                    NativeSyntax::Go(go) if go.configured_node_types().is_some() => document
+                        .root_facet_at(position, side)
+                        .map_or_else(Vec::new, |facet| facet.read(state)),
+                    NativeSyntax::Go(_) if document.language_at(position, side).is_some() => {
+                        go_language().data_facet().read(state)
+                    }
+                    NativeSyntax::Html(_)
+                    | NativeSyntax::Vue(_)
+                    | NativeSyntax::Angular(_)
+                    | NativeSyntax::Jinja(_)
+                    | NativeSyntax::Liquid(_)
+                    | NativeSyntax::Markdown(_)
+                    | NativeSyntax::Php(_) => {
+                        html_install::configured_data(state, &document, position, side)
+                    }
+                    NativeSyntax::Javascript(_) | NativeSyntax::Python(_) => {
+                        script_install::configured_data(state, &document, position, side)
+                    }
+                    NativeSyntax::Sql(_) => match document.language_at(position, side) {
+                        Some(NativeLanguage::Sql(dialect)) => dialect.data_facet().read(state),
+                        _ => Vec::new(),
+                    },
+                    NativeSyntax::Css(_) | NativeSyntax::Less(_) | NativeSyntax::Sass(_) => {
+                        document
+                            .language_at(position, side)
+                            .and_then(NativeLanguage::stylesheet_data_facet)
+                            .map_or_else(Vec::new, |facet| facet.read(state))
+                    }
+                    NativeSyntax::Xml(_) if document.language_at(position, side).is_some() => {
+                        xml_install::configured_data(state)
+                    }
                     syntax => match syntax.lr_root_type() {
                         Some(row) => row
                             .data_facet()
@@ -133,6 +215,9 @@ fn install_attachment(attachment: Attachment) -> Extension {
                         None => document.data_at(position, side),
                     },
                 };
+            }
+            if let Some(config) = active_lr_viewport(&state.context()) {
+                return config.lr_viewport_data(state, position);
             }
             state.wast_viewport_data(position, side)
         }),
@@ -143,7 +228,7 @@ fn install_attachment(attachment: Attachment) -> Extension {
 /// Return `None` without an attachment or if parsing failed. Reading does not parse.
 /// The first installed attachment in precedence order is active. Switching
 /// synchronous languages parses the final text; previously returned snapshots
-/// stay valid. This excludes viewport WAST, even after a complete parse.
+/// stay valid. This excludes viewport jobs, even after a complete parse.
 pub fn attached_language_snapshot(state: &EditorState) -> Option<Arc<SupportedDocument>> {
     state
         .context()

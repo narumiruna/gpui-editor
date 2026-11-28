@@ -7,7 +7,10 @@ use crate::{
     AnnotationType, ChangeDesc, ChangeSet, EditError, EditorSelection, EditorState, StateEffect,
     Transaction,
     collab::collab_state,
-    language::wast::{WastParseOutput, WastPublication},
+    language::{
+        lezer::{LrParseOutput, LrPublication},
+        wast::{WastParseOutput, WastPublication},
+    },
 };
 
 mod branch;
@@ -20,6 +23,11 @@ use config::{Clock, Config};
 pub use effects::inverted_effects;
 
 static ISOLATION: LazyLock<AnnotationType<HistoryIsolation>> = LazyLock::new(AnnotationType::new);
+
+enum ReplaySelection {
+    Saved,
+    Inferred,
+}
 
 fn save_opposite_selection(state: &EditorState) -> Option<EditorSelection> {
     // Collaborative events use the same inferred replay as events restored
@@ -54,7 +62,7 @@ impl Transaction {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 enum Group {
     #[default]
     Closed,
@@ -149,6 +157,18 @@ impl<M: Clone> History<M> {
         &self.state
     }
 
+    // Keep both branches private until all steps of a headless input succeed.
+    pub(crate) fn staging_copy(&self) -> Self {
+        Self {
+            state: self.state.clone(),
+            undo: self.undo.clone(),
+            redo: self.redo.clone(),
+            group: self.group.clone(),
+            clock: self.clock,
+            last_selection_group: self.last_selection_group.clone(),
+        }
+    }
+
     // The bounded initial tree is part of view attachment or the already
     // accepted state change. It is not another field or history update.
     pub(crate) fn seed_wast_publication(&mut self, output: Arc<WastParseOutput>) {
@@ -161,6 +181,18 @@ impl<M: Clone> History<M> {
         output: Arc<WastParseOutput>,
     ) -> Result<ChangeDesc, EditError> {
         self.state.commit_wast_publication(output)
+    }
+
+    pub(crate) fn seed_lr_publication(&mut self, output: Arc<LrParseOutput>) {
+        debug_assert!(self.state.lr_publication.is_none());
+        self.state.lr_publication = Some(LrPublication::new(output));
+    }
+
+    pub(crate) fn commit_lr_publication(
+        &mut self,
+        output: Arc<LrParseOutput>,
+    ) -> Result<ChangeDesc, EditError> {
+        self.state.commit_lr_publication(output)
     }
 
     /// Return the number of edit or reversible-effect groups available to undo.
@@ -263,6 +295,32 @@ impl<M: Clone> History<M> {
         finish: impl FnOnce(&EditorState) -> (Option<EditorSelection>, M),
         report: bool,
     ) -> Result<(M, UpdateReport), EditError> {
+        self.apply_resolved(transaction, before, finish, report, ReplaySelection::Saved)
+    }
+
+    pub(crate) fn update_resolved_input_step(
+        &mut self,
+        transaction: Transaction,
+        metadata: &M,
+    ) -> Result<UpdateReport, EditError> {
+        self.apply_resolved(
+            transaction,
+            metadata.clone(),
+            |_| (None, metadata.clone()),
+            true,
+            ReplaySelection::Inferred,
+        )
+        .map(|(_, report)| report)
+    }
+
+    fn apply_resolved(
+        &mut self,
+        transaction: Transaction,
+        before: M,
+        finish: impl FnOnce(&EditorState) -> (Option<EditorSelection>, M),
+        report: bool,
+        replay: ReplaySelection,
+    ) -> Result<(M, UpdateReport), EditError> {
         let scroll_into_view = report && transaction.scroll_into_view();
         let accepted_effects = UpdateReport::effects(&transaction, report);
         let mut input = Input::new(&transaction);
@@ -283,6 +341,7 @@ impl<M: Clone> History<M> {
         let before_selection = self.state.selection.clone();
         let before_extensions = self.state.extensions.clone();
         let before_wast_publication = self.state.wast_publication.clone();
+        let before_lr_publication = self.state.lr_publication.clone();
         let (edit, effects) = effects::apply(&mut self.state, transaction, record)?;
         let config = self.state.configured_history();
         let config = config.as_ref().as_ref();
@@ -307,7 +366,10 @@ impl<M: Clone> History<M> {
                         .map_or_else(ChangeSet::default, |edit| edit.inverse.clone()),
                     effects,
                     selection: before_selection.clone(),
-                    opposite_selection: save_opposite_selection(&self.state),
+                    opposite_selection: match replay {
+                        ReplaySelection::Saved => save_opposite_selection(&self.state),
+                        ReplaySelection::Inferred => None,
+                    },
                     before,
                     after: after.clone(),
                     selections_after: Vec::new(),
@@ -330,6 +392,7 @@ impl<M: Clone> History<M> {
             self.state.selection = before_selection;
             self.state.extensions = before_extensions;
             self.state.wast_publication = before_wast_publication;
+            self.state.lr_publication = before_lr_publication;
             return Err(error);
         }
         let changes = edit.filter(|_| report).map(|edit| edit.forward);

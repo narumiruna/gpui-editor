@@ -13,7 +13,7 @@ pub(super) fn legacy_pattern(
     let mut result = Rewrite::new(pattern);
     // Valid patterns this short have room for an extra group at any nesting
     // level. Length also bounds the work and output of the range rewrite.
-    let ascii_ranges = pattern.len() <= 256;
+    let ascii_classes = pattern.len() <= 256;
     let mut saved_flags = Vec::new();
     let mut class = false;
     let mut i = 0;
@@ -54,9 +54,9 @@ pub(super) fn legacy_pattern(
                     i = end;
                     continue;
                 }
-                if ascii_ranges
+                if ascii_classes
                     && icase
-                    && let Some((end, atom)) = legacy_ascii_letter_range(pattern, i + 1)
+                    && let Some((end, atom)) = legacy_ascii_class(pattern, i + 1)
                 {
                     result.replace(i, end, atom.encode_utf16());
                     i = end;
@@ -65,13 +65,13 @@ pub(super) fn legacy_pattern(
                 class = true;
             }
             Some(b']') => class = false,
-            Some(b'(') if ascii_ranges && !class => {
+            Some(b'(') if ascii_classes && !class => {
                 saved_flags.push(icase);
                 if let Some(value) = modified_icase(pattern, i + 1) {
                     icase = value;
                 }
             }
-            Some(b')') if ascii_ranges && !class => {
+            Some(b')') if ascii_classes && !class => {
                 if let Some(value) = saved_flags.pop() {
                     icase = value;
                 }
@@ -107,27 +107,86 @@ fn simple_word_class(pattern: &[u16], start: usize) -> Option<(u8, usize)> {
     Some((escape, start + 3))
 }
 
-fn legacy_ascii_letter_range(pattern: &[u16], start: usize) -> Option<(usize, String)> {
+fn legacy_ascii_class(pattern: &[u16], start: usize) -> Option<(usize, String)> {
     let negated = ascii(pattern, start) == Some(b'^');
-    let start = start + usize::from(negated);
-    let first = ascii(pattern, start)?;
-    let last = ascii(pattern, start + 2)?;
-    if ascii(pattern, start + 1) != Some(b'-')
-        || ascii(pattern, start + 3) != Some(b']')
-        || first > last
-        || !(first.is_ascii_lowercase() && last.is_ascii_lowercase()
-            || first.is_ascii_uppercase() && last.is_ascii_uppercase())
-    {
+    let mut at = start + usize::from(negated);
+    let mut members = [false; 128];
+    while ascii(pattern, at)? != b']' {
+        if ascii(pattern, at) == Some(b'\\')
+            && let Some(escape @ (b'd' | b'w')) = ascii(pattern, at + 1)
+        {
+            for (code, present) in members.iter_mut().enumerate() {
+                let code = code as u8;
+                *present |= code.is_ascii_digit()
+                    || escape == b'w' && (code.is_ascii_alphabetic() || code == b'_');
+            }
+            at += 2;
+            // A class escape used as a range endpoint has Annex B rules.
+            if ascii_range_separator(pattern, at) {
+                return None;
+            }
+            continue;
+        }
+        let (first, end) = ascii_class_literal(pattern, at)?;
+        let (last, end) = if ascii_range_separator(pattern, end) {
+            ascii_class_literal(pattern, end + 1)?
+        } else {
+            (first, end)
+        };
+        if first > last {
+            return None;
+        }
+        for value in first..=last {
+            members[usize::from(value.to_ascii_lowercase())] = true;
+            members[usize::from(value.to_ascii_uppercase())] = true;
+        }
+        at = end;
+    }
+    if !members[usize::from(b'A')..=usize::from(b'Z')].contains(&true) {
         return None;
     }
-    // The backend applies Unicode folding to classes. In legacy mode a
-    // non-ASCII code unit must not fold to ASCII. Keep this one class atom.
-    let negation = if negated { "^" } else { "" };
-    let (a, b) = (char::from(first), char::from(last));
-    let (a_lower, b_lower) = (a.to_ascii_lowercase(), b.to_ascii_lowercase());
-    let (a_upper, b_upper) = (a.to_ascii_uppercase(), b.to_ascii_uppercase());
-    let atom = format!("(?-i:[{negation}{a_lower}-{b_lower}{a_upper}-{b_upper}])");
-    Some((start + 4, atom))
+    // Legacy canonicalization cannot fold non-ASCII units to ASCII. Apply
+    // only ASCII case pairs, then disable backend folding for this class.
+    let mut atom = if negated { "(?-i:[^" } else { "(?-i:[" }.to_owned();
+    let mut code = 0;
+    while code < members.len() {
+        if !members[code] {
+            code += 1;
+            continue;
+        }
+        let first = code;
+        while members.get(code + 1) == Some(&true) {
+            code += 1;
+        }
+        atom.push_str(&format!(r"\x{first:02x}"));
+        if code > first {
+            atom.push_str(&format!(r"-\x{code:02x}"));
+        }
+        code += 1;
+    }
+    atom.push_str("])");
+    Some((at + 1, atom))
+}
+
+fn ascii_range_separator(pattern: &[u16], at: usize) -> bool {
+    ascii(pattern, at) == Some(b'-') && ascii(pattern, at + 1) != Some(b']')
+}
+
+fn ascii_class_literal(pattern: &[u16], at: usize) -> Option<(u8, usize)> {
+    let byte = ascii(pattern, at).filter(u8::is_ascii)?;
+    match byte {
+        b']' => None,
+        b'\\' => match ascii(pattern, at + 1)? {
+            escape @ (b'x' | b'u') => {
+                let digits = if escape == b'x' { 2 } else { 4 };
+                let code = u8::try_from(hex(pattern, at + 2, digits)?).ok()?;
+                code.is_ascii().then_some((code, at + 2 + digits))
+            }
+            escaped @ (b'\\' | b'[' | b']' | b'-' | b'^') => Some((escaped, at + 2)),
+            _ => None,
+        },
+        _ => Some((byte, at + 1)),
+    }
 }
 
 pub(super) fn hex(pattern: &[u16], start: usize, digits: usize) -> Option<u16> {
@@ -245,6 +304,7 @@ pub(super) fn unicode_pattern(
     let mut saved_flags = Vec::new();
     let mut classes = Vec::<ClassSet>::new();
     let composite_strings = sets && composite_string_sets::has_string_operand(pattern);
+    let mut folded_budget = composite_string_sets::MAX_FOLDED_OUTPUT_UNITS;
     let mut i = 0;
     while i < pattern.len() {
         match ascii(pattern, i) {
@@ -365,9 +425,14 @@ pub(super) fn unicode_pattern(
             Some(b'[') if sets || classes.is_empty() => {
                 if composite_strings
                     && classes.is_empty()
-                    && !icase
-                    && let Some((end, replacement)) = composite_string_sets::rewrite(pattern, i)
+                    && (!icase
+                        || saved_flags.len() <= composite_string_sets::MAX_FOLDED_SCOPE_DEPTH)
+                    && let Some((end, replacement)) =
+                        composite_string_sets::rewrite(pattern, i, icase.then_some(folded_budget))
                 {
+                    if icase {
+                        folded_budget -= replacement.len();
+                    }
                     result.replace(i, end, replacement);
                     i = end;
                     continue;

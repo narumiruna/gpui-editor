@@ -14,7 +14,7 @@ use crate::{
     Assoc, ChangeDesc, ConfigurationError, EditorState, Extension, Facet, JsonField, MapMode,
     RangeSet, RangeValue, StateEffectType, StateField, StateUpdate, Text,
     language::markdown::markdown_snapshot,
-    language_data::{NativeSyntax, attached_language_snapshot},
+    language_data::{NativeSyntax, attached_language_snapshot, fold_catalog_markdown_html},
 };
 
 mod commands;
@@ -37,6 +37,8 @@ pub(in crate::language) use syntax::fold_on_line;
 
 type FoldService = Arc<dyn Fn(&EditorState, usize, usize) -> Option<Range<usize>> + Send + Sync>;
 static SERVICES: LazyLock<Facet<FoldService, Vec<FoldService>>> = LazyLock::new(Facet::collect);
+static SYNTAX_FALLBACKS: LazyLock<Facet<FoldService, Vec<FoldService>>> =
+    LazyLock::new(Facet::collect);
 
 /// Register a fold service. Higher-precedence services run first, before the
 /// host's syntax rule. Return `None` to defer to the next service or rule.
@@ -44,6 +46,12 @@ pub fn fold_service(
     provider: impl Fn(&EditorState, usize, usize) -> Option<Range<usize>> + Send + Sync + 'static,
 ) -> Extension {
     SERVICES.of(Arc::new(provider))
+}
+
+pub(super) fn syntax_fold_fallback(
+    provider: impl Fn(&EditorState, usize, usize) -> Option<Range<usize>> + Send + Sync + 'static,
+) -> Extension {
+    SYNTAX_FALLBACKS.of(Arc::new(provider))
 }
 
 /// Ask configured services whether a line block is foldable. Use `syntax`
@@ -71,8 +79,9 @@ pub fn foldable(
 }
 
 /// Ask configured services, then attached syntax, whether these line bounds
-/// have a fold. Without an attached parser, a Markdown WAST, JSON, or Lezer
-/// mount can supply a fold. The fold can span gaps if both endpoints belong to
+/// have a fold. An attached whole-document C or C++ parser reads typed fold
+/// rules. Without an attached parser, a Markdown WAST, JSON, Lezer,
+/// or configured Rust mount can supply a fold. The fold can span gaps if both endpoints belong to
 /// the mount. Ignore invalid node callback ranges before selecting a candidate. Bounds
 /// and the returned range use original UTF-8 byte offsets.
 /// Use [`foldable`] to supply an explicit syntax rule instead.
@@ -91,13 +100,30 @@ pub(crate) fn syntax_fallback(
             Some(syntax) => syntax,
             None => {
                 if let Some(snapshot) = attached_language_snapshot(state) {
+                    if let NativeSyntax::Markdown(host) = snapshot.syntax() {
+                        return host
+                            .foldable(start, end)
+                            .or_else(|| fold_catalog_markdown_html(state, &snapshot, start, end));
+                    }
                     attached = snapshot;
                     attached.syntax()
                 } else {
-                    return markdown_snapshot(state)?.markdown_code_fold(state, start, end);
+                    let fallbacks = state
+                        .context()
+                        .facet(&SYNTAX_FALLBACKS)
+                        .expect("typed syntax fold fallbacks");
+                    return fallbacks
+                        .iter()
+                        .find_map(|fold| fold(state, start, end))
+                        .or_else(|| {
+                            markdown_snapshot(state)?.markdown_code_fold(state, start, end)
+                        });
                 }
             }
         };
+        if let NativeSyntax::Cpp(doc) = syntax {
+            return doc.foldable_in_state(state, start..end);
+        }
         if syntax.has_configured_folds() {
             syntax.foldable_in_scope(state, 0..state.text().len(), start..end)
         } else {

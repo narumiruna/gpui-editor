@@ -2,9 +2,10 @@
 //! Lezer grammar. See `docs/licenses/codemirror-lang-sql.txt`.
 //!
 //! The parser uses the published grammar tables and a native dialect tokenizer.
-//! It can reuse a verified strict LR prefix after an edit. For rejected input
-//! it uses local recovery, not Lezer's error search. For example, recovery closes open
-//! groups before a semicolon instead of trying deletion of the semicolon.
+//! It can reuse a verified strict LR prefix after an edit. On bounded input,
+//! Lezer can recover one unexpected semicolon inside closed parentheses.
+//! Other rejected input uses native recovery, which closes open groups before
+//! a semicolon.
 //! Ranges use original UTF-8 bytes. Fold endpoints inside a surrogate pair
 //! move back to the start of that scalar. The module supplies keyword and
 //! schema completion sources, an opt-in native schema registration, and
@@ -166,15 +167,28 @@ impl SqlLanguage {
 
     fn parse_with_fragment(&self, text: Text, fragment: Option<TreeFragment<'_>>) -> SqlDocument {
         let source = text.as_str();
-        let (nodes, error, strict) = match self.parser.parse_incremental(source, fragment) {
-            Ok(tree) => (import_tree(tree.root()), None, Some(Box::new(tree))),
-            Err(error) => match error {
-                ParseError::Ambiguous { .. } => match self.parser.parse_glr(source) {
-                    Ok(tree) => (import_tree(tree.root()), None, None),
-                    Err(error) => (recovery::parse(source, &self.config), Some(error), None),
-                },
-                _ => (recovery::parse(source, &self.config), Some(error), None),
-            },
+        let parsed = self
+            .parser
+            .parse_incremental(source, fragment)
+            .map(|tree| (tree, true))
+            .or_else(|error| match error {
+                ParseError::Ambiguous { .. } => {
+                    self.parser.parse_glr(source).map(|tree| (tree, false))
+                }
+                _ => Err(error),
+            });
+        let (nodes, error, strict) = match parsed {
+            Ok((tree, strict)) => (
+                import_tree(tree.root()),
+                None,
+                strict.then(|| Box::new(tree)),
+            ),
+            Err(error) => (
+                recovery::closed_parens_semicolon(&self.parser, source, error)
+                    .unwrap_or_else(|| recovery::parse(source, &self.config)),
+                Some(error),
+                None,
+            ),
         };
         let highlights = highlight::collect(&nodes);
         let isolate_ranges = bidi::isolate_ranges(&nodes);

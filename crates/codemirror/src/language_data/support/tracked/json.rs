@@ -7,6 +7,7 @@ use crate::{
     Assoc, EditorState, Extension, Text,
     language::{
         LanguageData, StreamSettings,
+        json::JsonParseJob,
         lezer::{NodePropSource, NodeType, ParseError, SyntaxTree},
     },
     language_data::{
@@ -62,6 +63,12 @@ impl JsonLanguage {
         self.0.extension()
     }
 
+    /// Install the opt-in viewport parser for a native editor view. Strict
+    /// configurations have no recovery job and return `None`.
+    pub fn viewport_extension(&self) -> Option<Extension> {
+        self.0.viewport_extension()
+    }
+
     /// The stock metadata identity shared by all JSON configurations.
     pub fn data_facet(&self) -> &'static LrDataFacet {
         self.0.data_facet()
@@ -89,6 +96,12 @@ impl JsonLanguage {
         settings: StreamSettings,
     ) -> Result<SupportedDocument, ParseError> {
         self.0.parse_for_editor(text, settings)
+    }
+
+    /// Start a cold, bounded recovery job with this handle's node rows.
+    /// Returns `None` for a strict configuration.
+    pub fn parse_job(&self, text: Text) -> Option<JsonParseJob> {
+        self.0.json_parse_job(text)
     }
 
     /// Parse original bytes without projecting editor line breaks.

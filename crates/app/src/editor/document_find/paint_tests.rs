@@ -1,4 +1,6 @@
-use gpui::{Background, Hsla, TestAppContext, VisualTestContext, WindowAppearance, rgb};
+use gpui::{
+    Background, Focusable, Hsla, Rgba, TestAppContext, VisualTestContext, WindowAppearance, rgb,
+};
 use gpui_editor_codemirror::{
     ALLOW_MULTIPLE_SELECTIONS, Compartment, Extension,
     search::{SelectionMatchConfig, selection_match_extension},
@@ -9,7 +11,7 @@ use super::{super::layout::Layout, *};
 
 #[gpui::test]
 fn one_dark_panel_inputs_reconfigure_in_the_find_frame(cx: &mut TestAppContext) {
-    use gpui::{EntityInputHandler, Focusable, Modifiers};
+    use gpui::{EntityInputHandler, Modifiers};
 
     use crate::editor::one_dark_tests::{configure, panel_input_colors};
 
@@ -335,13 +337,15 @@ fn configured_selection_matches_follow_the_pinned_view_in_actual_paint(cx: &mut 
 }
 
 #[gpui::test]
-fn installed_one_dark_paints_exact_find_selections_and_outside_outlines(cx: &mut TestAppContext) {
+fn installed_one_dark_paints_find_above_exact_and_partial_selections(cx: &mut TestAppContext) {
+    use serde_json::Value;
+
     const SOURCE: &str = "Find hit, hit, hit, hits.";
     let hits: Vec<_> = SOURCE
         .match_indices("hit")
         .map(|(at, _)| at..at + 3)
         .collect();
-    let partial = hits[3].start..hits[3].end + 1;
+    let partial = hits[3].start + 1..hits[3].end + 1;
     let selection = EditorSelection::new(
         vec![
             SelectionRange::new(hits[0].start, hits[0].start),
@@ -376,33 +380,51 @@ fn installed_one_dark_paints_exact_find_selections_and_outside_outlines(cx: &mut
     cx.run_until_parked();
     cx.simulate_input("hit");
 
+    let browser = include_str!("../one_dark_tests/find_cascade_browser.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap());
+    let [focused, blurred] = <[Value; 2]>::try_from(browser.collect::<Vec<_>>()).unwrap();
+    assert_eq!(focused["focused"], true);
+    assert_eq!(blurred["focused"], false);
+
     let mut body_geometry = None;
-    for (extension, installed) in [
-        (None, false),
-        (Some(one_dark_theme()), true),
-        (Some(one_dark_highlighting()), false),
+    for (extension, browser) in [
+        (None, None),
+        (Some(one_dark_theme()), Some(&focused)),
+        (None, Some(&blurred)),
+        (Some(one_dark_highlighting()), None),
     ] {
-        if let Some(extension) = extension {
-            cx.update(|_, cx| {
-                editor.update(cx, |editor, cx| {
-                    editor
-                        .view
-                        .update(
-                            Transaction::default().with_effects([theme.reconfigure(extension)]),
-                            editor.active.clone(),
-                            |_| (None, None),
-                        )
-                        .unwrap();
-                    cx.notify();
-                });
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                if let Some(extension) = extension {
+                    crate::editor::one_dark_tests::configure(
+                        editor,
+                        theme.reconfigure(extension),
+                        cx,
+                    );
+                }
+                if let Some(browser) = browser {
+                    if browser["focused"] == true {
+                        window.focus(&editor.focus);
+                    } else {
+                        editor.find.as_ref().unwrap().query.read(cx).focus(window);
+                    }
+                }
             });
-        }
+        });
         cx.run_until_parked();
-        cx.update(|_, cx| {
+        cx.update(|window, cx| {
             let editor = editor.read(cx);
+            let query = editor.find.as_ref().unwrap().query.read(cx);
+            let focused = browser.is_some_and(|browser| browser["focused"] == true);
+            assert_eq!(editor.focus.is_focused(window), focused);
+            assert_eq!(query.focus_handle(cx).is_focused(window), !focused);
+            assert_eq!(query.text(), "hit");
             assert_eq!(editor.view.state().selection(), &selection);
+            assert_eq!(editor.source(), SOURCE);
+            assert!(!editor.view.can_undo());
             let layout = editor.layout.as_ref().unwrap();
-            assert_eq!(layout.theme.view.is_some(), installed);
+            assert_eq!(layout.theme.view.is_some(), browser.is_some());
             let (row, item) = layout
                 .rows
                 .iter()
@@ -422,45 +444,60 @@ fn installed_one_dark_paints_exact_find_selections_and_outside_outlines(cx: &mut
             let in_window =
                 |bounds: Bounds<Pixels>| Bounds::new(layout.origin + bounds.origin, bounds.size);
             let no_border = Edges::all(px(0.));
-            let border = Edges::all(px(1.));
             let clear = transparent_black();
-            let selection_color = rgba(if installed { 0x3e4451ff } else { 0x4a86ed50 });
+            let ordinary = |range: &Range<usize>, color: Rgba| {
+                (in_window(hit_bounds(range)), color.into(), no_border, clear)
+            };
             let mut expected = Vec::new();
-            for (index, bounds) in body.into_iter().map(in_window).enumerate() {
-                if installed {
-                    // Only the exact secondary and primary ranges select a Find hit.
-                    let fill_color = rgba(if index < 2 { 0x6199ff2f } else { 0x72a1ff59 });
+            if let Some(browser) = browser {
+                assert_eq!(browser["selectionLayerZ"], "-2");
+                assert_eq!(browser["contentZ"], "auto");
+                assert_eq!(browser["scrollerZ"], "0");
+                assert_eq!(browser["partialOverlap"], true);
+                let color =
+                    |key| rgba(u32::from_str_radix(browser[key].as_str().unwrap(), 16).unwrap());
+                let width = px(browser["outlineWidth"].as_f64().unwrap() as f32);
+                let [secondary, primary] =
+                    browser["exactSelections"].as_array().unwrap().as_slice()
+                else {
+                    panic!("expected one primary and one secondary exact selection");
+                };
+                // The primary selection is submitted first. Both exact selections
+                // keep their ordinary fill below the translucent Find fill.
+                for (index, exact) in [(1, primary), (0, secondary)] {
+                    assert_eq!(exact["aligned"], true);
+                    assert_eq!(exact["background"], browser["selection"]);
+                    expected.push(ordinary(&hits[index], color("selection")));
+                }
+                expected.push(ordinary(&partial, color("selection")));
+                for (index, bounds) in body.into_iter().map(in_window).enumerate() {
+                    let fill_color = color(if browser["selectedHits"][index] == true {
+                        "selectedSearchMatch"
+                    } else {
+                        "searchMatch"
+                    });
                     expected.push((bounds, fill_color.into(), no_border, clear));
                     expected.push((
-                        bounds.dilate(px(1.)),
+                        bounds.dilate(width),
                         clear.into(),
-                        border,
-                        rgb(0x457dff).into(),
+                        Edges::all(width),
+                        color("outline").into(),
                     ));
-                } else {
+                }
+            } else {
+                let selection_color = rgba(0x4a86ed50);
+                for (index, bounds) in body.into_iter().map(in_window).enumerate() {
                     let (fill_color, stroke) = if index == 1 {
                         (selection_color, rgb(0x174fc3))
                     } else {
                         (rgba(0xffce5a66), rgba(0x956000ff))
                     };
-                    expected.push((bounds, fill_color.into(), border, stroke.into()));
+                    expected.push((bounds, fill_color.into(), Edges::all(px(1.)), stroke.into()));
                 }
+                // The light fallback still paints ordinary selections over Find marks.
+                expected.push(ordinary(&hits[0], selection_color));
+                expected.push(ordinary(&partial, selection_color));
             }
-            let ordinary = |range: &Range<usize>| {
-                (
-                    in_window(hit_bounds(range)),
-                    selection_color.into(),
-                    no_border,
-                    clear,
-                )
-            };
-            if !installed {
-                // Preserve the system fallback: ordinary selection still covers secondary hits.
-                expected.push(ordinary(&hits[0]));
-            }
-            expected.push(ordinary(&partial));
-            // The full list includes ordinary selections. Exact installed-theme hits have no
-            // extra selection quad, and each outline's inner edge meets its unchanged fill.
             assert_eq!(
                 layout
                     .painted_find_quads

@@ -129,6 +129,75 @@ fn managed(input: &mut impl BufRead, output: &mut impl Write) {
     );
 }
 
+fn deferred(input: &mut impl BufRead, output: &mut impl Write) {
+    let open = expect(input, "textDocument/didOpen");
+    for field in [
+        r#""uri":"file:///deferred.rs""#,
+        r#""text":"a😀b""#,
+        r#""version":1"#,
+    ] {
+        assert!(open.contains(field), "{open}");
+    }
+    for i in 0..8 {
+        let open = expect(input, "textDocument/didOpen");
+        assert!(
+            open.contains(&format!(r#""uri":"file:///deferred/{i}.rs""#)),
+            "{open}"
+        );
+    }
+    let change = expect(input, "textDocument/didChange");
+    for field in [
+        r#""uri":"file:///deferred.rs""#,
+        r#""contentChanges":[{"text":"a😀β"}]"#,
+        r#""version":2"#,
+    ] {
+        assert!(change.contains(field), "{change}");
+    }
+    let config = expect(input, "workspace/didChangeConfiguration");
+    assert!(
+        config.contains(r#""phase":"before""#) && !config.contains(r#""id":"#),
+        "{config}"
+    );
+    let hover = expect(input, "textDocument/hover");
+    assert_eq!(id(&hover), 3);
+    assert!(
+        hover.contains(r#""uri":"file:///deferred.rs""#) && hover.contains(r#""character":4"#),
+        "{hover}"
+    );
+    let config = expect(input, "workspace/didChangeConfiguration");
+    assert!(
+        config.contains(r#""phase":"after""#) && !config.contains(r#""id":"#),
+        "{config}"
+    );
+    result(
+        output,
+        id(&hover),
+        r#"{"contents":{"kind":"plaintext","value":"fixture"}}"#,
+    );
+}
+
+fn deferred_pending(input: &mut impl BufRead, output: &mut impl Write) {
+    expect(input, "textDocument/didOpen");
+    for pending in 2..66 {
+        assert_eq!(id(&expect(input, "textDocument/hover")), pending);
+    }
+    write_frame(
+        output,
+        r#"{"jsonrpc":"2.0","id":"release","method":"workspace/configuration"}"#,
+    );
+    let config = expect(input, "workspace/didChangeConfiguration");
+    assert!(
+        config.contains(r#""pending":64"#) && !config.contains(r#""id":"#),
+        "{config}"
+    );
+    let reply = read_frame(input);
+    assert!(reply.contains(r#""id":"release""#) && reply.contains(r#""result":[]"#));
+    result(output, 2, "null");
+    let hover = expect(input, "textDocument/hover");
+    assert_eq!(id(&hover), 66);
+    result(output, 66, "null");
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let mode = args.next().unwrap();
@@ -161,6 +230,8 @@ fn main() {
         ] {
             assert!(initialize.contains(field), "{initialize}");
         }
+    }
+    if matches!(mode.as_str(), "managed" | "deferred") {
         write_frame(
             &mut output,
             r#"{"jsonrpc":"2.0","id":"init","method":"workspace/configuration"}"#,
@@ -173,6 +244,9 @@ fn main() {
     }
     let capabilities = match mode.as_str() {
         "editor" | "managed" => r#"{"capabilities":{"hoverProvider":true,"textDocumentSync":2}}"#,
+        "deferred" => {
+            r#"{"capabilities":{"hoverProvider":{},"documentFormattingProvider":false,"textDocumentSync":2}}"#
+        }
         "unsupported-encoding" => r#"{"capabilities":{"positionEncoding":"utf-8"}}"#,
         _ => r#"{"capabilities":{"hoverProvider":true}}"#,
     };
@@ -182,6 +256,8 @@ fn main() {
 
     match mode.as_str() {
         "managed" => managed(&mut input, &mut output),
+        "deferred" => deferred(&mut input, &mut output),
+        "deferred-pending" => deferred_pending(&mut input, &mut output),
         "managed-eof" => {
             expect(&mut input, "textDocument/didOpen");
             expect(&mut input, "textDocument/hover");

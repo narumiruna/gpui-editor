@@ -15,13 +15,14 @@ use gpui_editor_codemirror::{
     view::{ViewException, ViewPlugin, ViewUpdate, log_exception},
 };
 
-use super::Editor;
+use super::{Editor, standalone_diagnostic_range_is_safe};
 
 #[derive(Clone, Eq, PartialEq)]
 pub(super) struct Scope {
     revision: u64,
     configuration: LintConfiguration,
-    config_epoch: u64,
+    scope_epoch: u64,
+    pub(super) standalone: bool,
     pub(super) range: Range<usize>,
     pub(super) stock_json: bool,
 }
@@ -29,8 +30,15 @@ pub(super) struct Scope {
 #[derive(Default)]
 struct Observation {
     attached: bool,
-    config_epoch: u64,
+    scope_epoch: u64,
     session: Option<LintSession>,
+}
+
+impl Observation {
+    fn invalidate_scope(&mut self) {
+        self.scope_epoch += 1;
+        self.session = None;
+    }
 }
 
 struct LintUpdates(Rc<RefCell<Observation>>, BackgroundExecutor);
@@ -40,8 +48,7 @@ impl ViewPlugin for LintUpdates {
         let mut observation = self.0.borrow_mut();
         if LintConfiguration::get(update.start_state) != LintConfiguration::get(update.state) {
             // A compartment can change and then restore its old registrations before render.
-            observation.config_epoch += 1;
-            observation.session = None;
+            observation.invalidate_scope();
         } else if let Some(session) = &mut observation.session {
             session.observe_update(update, self.1.now());
         }
@@ -68,20 +75,41 @@ impl Runner {
 }
 
 impl Editor {
+    pub(in crate::editor) fn invalidate_standalone_diagnostics(&mut self) {
+        let runner = &self.diagnostics.runner;
+        if runner.scope.as_ref().is_some_and(|scope| scope.standalone) {
+            // The path or input gate can return to its original value before render.
+            runner.observation.borrow_mut().invalidate_scope();
+        }
+    }
+
     pub(super) fn live_diagnostic_scope(&self) -> Option<Scope> {
         if !self.input_enabled || self.is_composing() || LintState::get(self.view.state()).is_none()
         {
             return None;
         }
-        let fence = self.source_fence()?;
         let configuration = LintConfiguration::get(self.view.state());
         let configured = configuration.has_sources();
-        let stock_json = !configured && fence.stock_json;
-        (configured || stock_json).then(|| Scope {
+        let standalone = !self.is_markdown();
+        let (range, stock_json) = if standalone {
+            if !configured || self.view.state().read_only() || self.is_reviewing_changes() {
+                return None;
+            }
+            (0..self.view.state().text().len(), false)
+        } else {
+            let fence = self.source_fence()?;
+            let stock_json = !configured && fence.stock_json;
+            if !configured && !stock_json {
+                return None;
+            }
+            (fence.body, stock_json)
+        };
+        Some(Scope {
             revision: self.view.revision(),
-            config_epoch: self.diagnostics.runner.observation.borrow().config_epoch,
+            scope_epoch: self.diagnostics.runner.observation.borrow().scope_epoch,
             configuration,
-            range: fence.body,
+            standalone,
+            range,
             stock_json,
         })
     }
@@ -179,6 +207,7 @@ impl Editor {
             return;
         };
         batch.restrict_to(scope.range.clone());
+        let standalone_text = scope.standalone.then(|| self.view.state().text().clone());
         let runner = &mut self.diagnostics.runner;
         let id = runner.next_job;
         runner.next_job += 1;
@@ -212,6 +241,15 @@ impl Editor {
                     let now = executor.now();
                     let publication = if let Some((i, index, result)) = ready {
                         drop(workers.remove(i));
+                        let result = result.map(|mut diagnostics| {
+                            if let Some(text) = &standalone_text {
+                                let source = text.as_str();
+                                diagnostics.retain(|mark| {
+                                    standalone_diagnostic_range_is_safe(source, &mark.range)
+                                });
+                            }
+                            diagnostics
+                        });
                         batch.complete(index, result, now)
                     } else {
                         Ok(batch.take_due(now))

@@ -1,11 +1,17 @@
-use std::sync::{Arc, LazyLock};
+use std::{
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
 
 use crate::{
     Change, ChangeDesc, ChangeSet, ConfigurationError, EditError, EditorState, StateEffectType,
     StateField, Transaction,
 };
 
-use super::{Chunk, CollapseConfig, DiffConfig, MergeChunks, MergeProjection, Side};
+use super::{
+    Chunk, CollapseConfig, DiffConfig, DiffOverride, MergeChunks, MergeProjection, SessionDiff,
+    Side,
+};
 
 /// Settings for a headless side-by-side merge.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -51,17 +57,61 @@ pub struct MergeView {
     chunks: Arc<[Chunk]>,
     projection: MergeProjection,
     config: MergeViewConfig,
+    diff: SessionDiff,
 }
 
 impl MergeView {
     /// Use two editor states with any desired extensions already installed.
-    pub fn new(
+    pub fn new(a: EditorState, b: EditorState, config: MergeViewConfig) -> Result<Self, EditError> {
+        Self::with_diff(a, b, config, SessionDiff::default())
+    }
+
+    /// Use an advisory time limit for the initial diff and each rebuilt window.
+    /// A zero duration disables the timeout.
+    pub fn new_with_timeout(
+        a: EditorState,
+        b: EditorState,
+        config: MergeViewConfig,
+        timeout: Duration,
+    ) -> Result<Self, EditError> {
+        Self::with_diff(
+            a,
+            b,
+            config,
+            SessionDiff {
+                timeout,
+                ..SessionDiff::default()
+            },
+        )
+    }
+
+    /// Use the checked override for the initial chunks and subsequent edits.
+    /// Invalid ranges return [`ConfigurationError::InvalidFieldData`] wrapped in
+    /// [`EditError::Configuration`].
+    pub fn new_with_override(
+        a: EditorState,
+        b: EditorState,
+        config: MergeViewConfig,
+        diff_override: DiffOverride,
+    ) -> Result<Self, EditError> {
+        Self::with_diff(
+            a,
+            b,
+            config,
+            SessionDiff {
+                diff_override: Some(diff_override),
+                ..SessionDiff::default()
+            },
+        )
+    }
+
+    fn with_diff(
         mut a: EditorState,
         mut b: EditorState,
         config: MergeViewConfig,
+        diff: SessionDiff,
     ) -> Result<Self, EditError> {
-        let chunks: Arc<[_]> =
-            Chunk::build_with_config(a.text(), b.text(), config.diff_config).into();
+        let chunks = Chunk::build_for_session(a.text(), b.text(), config.diff_config, &diff)?;
         sync_chunks(&mut a, &chunks, Side::A)?;
         sync_chunks(&mut b, &chunks, Side::B)?;
         let projection =
@@ -72,6 +122,7 @@ impl MergeView {
             chunks,
             projection,
             config,
+            diff,
         })
     }
 
@@ -95,13 +146,27 @@ impl MergeView {
     }
 
     /// Apply settings. A changed collapse setting rebuilds the hidden ranges.
-    /// A changed diff setting takes effect on the next document edit. Use
-    /// [`Self::reconfigure_collapse`] to replace an equal collapse setting.
+    /// A changed diff setting takes effect on the next document edit when no
+    /// override is active. Use [`Self::reconfigure_collapse`] to replace an equal
+    /// collapse setting.
     pub fn reconfigure(&mut self, config: MergeViewConfig) {
         if self.config.collapse_unchanged != config.collapse_unchanged {
             self.reconfigure_collapse(config.collapse_unchanged);
         }
         self.config = config;
+    }
+
+    /// Replace the override without changing the states, chunks, or projection.
+    /// On the next accepted document edit, use this override for the rebuilt
+    /// windows. `None` restores the configured native diff.
+    pub fn reconfigure_diff_override(&mut self, diff_override: Option<DiffOverride>) {
+        self.diff.diff_override = diff_override;
+    }
+
+    /// Set the advisory timeout for rebuilt windows on later edits. This does
+    /// not rebuild existing chunks, and an installed override ignores it.
+    pub fn reconfigure_diff_timeout(&mut self, timeout: Duration) {
+        self.diff.timeout = timeout;
     }
 
     /// Replace the collapse setting and rebuild the hidden ranges, even when
@@ -148,7 +213,15 @@ impl MergeView {
                 Side::A => (target.text(), peer.text()),
                 Side::B => (peer.text(), target.text()),
             };
-            chunks = Chunk::update(&chunks, a, b, side, &changes, self.config.diff_config).into();
+            chunks = Chunk::update_for_session(
+                &chunks,
+                a,
+                b,
+                side,
+                &changes,
+                self.config.diff_config,
+                &self.diff,
+            )?;
             Some(self.projection.update(a, b, &chunks, side, &changes))
         } else {
             None

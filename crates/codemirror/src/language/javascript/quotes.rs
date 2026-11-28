@@ -28,7 +28,9 @@ impl CloseBracketSyntax for Quotes<'_> {
         if !self.doc.text().is_char_boundary(at) {
             return None;
         }
-        path(self.nodes, at, side).last().map(|node| node.id)
+        path(self.nodes, self.doc.text(), at, side)
+            .last()
+            .map(|node| node.id)
     }
 
     fn range(&self, node: usize) -> Range<usize> {

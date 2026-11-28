@@ -1,0 +1,44 @@
+{"grammar":"rust","source":"fn f() {}","at":5,"columns":[4,0,2]}
+{"grammar":"rust","source":"fn f(  ) {}","at":5,"columns":[4,0,2]}
+{"grammar":"rust","source":"fn f(  ) {}","at":7,"columns":[4,0,2]}
+{"grammar":"rust","source":"fn f() {}","at":8,"columns":[7,0,2]}
+{"grammar":"rust","source":"fn f() { let x = []; }","at":18,"columns":[17,0,2]}
+{"grammar":"rust","source":"fn f() { foo( /*x*/ ); }","at":20,"columns":[12,0,2]}
+{"grammar":"rust","source":"fn f() { foo(  x); }","at":16,"columns":[12,12,15]}
+{"grammar":"rust","source":"fn f() { foo(\r\n  ); }","at":15,"columns":[0,0,2]}
+{"grammar":"rust","source":"fn f(","at":5,"columns":[2,2,2]}
+{"grammar":"rust","source":"fn f() { foo( /*x*/","at":19,"columns":[2,2,2]}
+{"grammar":"rust","source":"// 前 😀\r\nfn café(  ) {}","at":24,"columns":[7,0,2]}
+{"grammar":"cpp","source":"void f() {}","at":7,"columns":[6,0,2]}
+{"grammar":"cpp","source":"void f(  ) {}","at":7,"columns":[6,0,2]}
+{"grammar":"cpp","source":"void f(  ) {}","at":9,"columns":[6,0,2]}
+{"grammar":"cpp","source":"void f() {}","at":10,"columns":[9,0,2]}
+{"grammar":"cpp","source":"int a[] = {};","at":11,"columns":[10,0,2]}
+{"grammar":"cpp","source":"void f() { foo( /*x*/ ); }","at":22,"columns":[14,0,2]}
+{"grammar":"cpp","source":"void f() { foo(  x); }","at":18,"columns":[14,14,17]}
+{"grammar":"cpp","source":"void f() { foo(\r\n  ); }","at":17,"columns":[0,0,2]}
+{"grammar":"cpp","source":"void f(","at":7,"columns":[2,2,2]}
+{"grammar":"cpp","source":"void f() { foo( /*x*/","at":21,"columns":[2,2,2]}
+{"grammar":"cpp","source":"// 前 😀\r\nvoid café(  ) {}","at":26,"columns":[9,0,2]}
+{"grammar":"css","source":"a {}","at":3,"columns":[2,0,2]}
+{"grammar":"css","source":"a {  }","at":3,"columns":[2,0,2]}
+{"grammar":"css","source":"a {  }","at":5,"columns":[2,0,2]}
+{"grammar":"css","source":"a { color: foo(); }","at":15,"columns":[14,0,2]}
+{"grammar":"css","source":"a { grid-template-columns: []; }","at":28,"columns":[27,0,2]}
+{"grammar":"css","source":"a { /*x*/ }","at":3,"columns":[4,2,2]}
+{"grammar":"css","source":"a {  color:red;}","at":15,"columns":[2,2,5]}
+{"grammar":"css","source":"a {\r\n  }","at":5,"columns":[0,0,2]}
+{"grammar":"css","source":"a {","at":3,"columns":[2,2,2]}
+{"grammar":"css","source":"a { /*x*/","at":9,"columns":[2,2,2]}
+{"grammar":"css","source":"/* 前 😀 */\r\n.café {  }","at":26,"columns":[6,0,2]}
+{"grammar":"css","source":"a { ?}","at":5,"columns":[2,0,2]}
+{"grammar":"css","source":"a { )}","at":5,"columns":[2,0,2]}
+{"grammar":"css","source":"a { )\n}","at":6,"columns":[0,0,2]}
+{"grammar":"css","source":"a { )","at":5,"columns":[0,0,0]}
+{"grammar":"css","source":"a { ?","at":5,"columns":[0,0,0]}
+{"grammar":"css","source":"a[] {}","at":2,"columns":[0,0,0]}
+{"grammar":"css","source":"[] {}","at":1,"columns":[0,0,2]}
+{"grammar":"css","source":"a[  ] {}","at":4,"columns":[0,0,0]}
+{"grammar":"css","source":"a[ /*x*/ ] {}","at":9,"columns":[0,0,0]}
+{"grammar":"css","source":"a[title] {}","at":7,"columns":[0,0,0]}
+{"grammar":"css","source":"/*猫😀*/\r\n.猫😀[\r\n /*前😀*/\r\n ] {}","at":39,"columns":[0,0,0]}

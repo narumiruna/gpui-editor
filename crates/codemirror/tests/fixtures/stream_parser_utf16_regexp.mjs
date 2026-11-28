@@ -233,6 +233,32 @@ for (const [source, flags, text, steps] of [
   [R`([z-a])`, 'diy', 'z'],
 ]) add(source, text, flags, steps);
 
+// Legacy ignore-case closes ASCII classes under ASCII case pairs only.
+for (const [source, flags, text, steps] of [
+  [R`^([A-FK-S0-9_]+)$`, 'di', 'fks7_'],
+  [R`^([A-FK-S0-9_]+)$`, 'di', 'K'],
+  [R`^([A-FK-S0-9_]+)$`, 'di', 'ſ'],
+  [R`^([^a-fk-s0-9_]+)$`, 'di', 'Kſı🦀'],
+  [R`^([^a-fk-s0-9_]+)$`, 'di', 'a'],
+  [R`^([\x41-\u0046_\x4B-s]+)$`, 'di', 'aFkp[_'],
+  [R`^([\x41-\u0046_\x4B-s]+)$`, 'di', 'K'],
+  [R`^([--0k-s\-\]]+)$`, 'di', '-./0KS]'],
+  [R`^([--0k-s\-\]]+)$`, 'di', 'ſ'],
+  [R`^([\w\]-]+)$`, 'di', 'a0K_-]'],
+  [R`^([\w\]-]+)$`, 'di', 'K'],
+  [R`^([\dK-S]+)$`, 'di', 'ſ'],
+  [R`^([\dK-S]+)$`, 'diu', 'ſ'],
+  [R`^((?i:[k-s0-9])+)([k-s0-9]+)$`, 'dy', 'KS0k'],
+  [R`^((?-i:[k-s0-9])+)([k-s0-9]+)$`, 'diy', 'ks0K'],
+  [R`^((?-i:[k-s0-9])+)([k-s0-9]+)$`, 'diy', 'ks0K'],
+  [R`(?<=([k-s_]))(!)`, 'diy', 'ſ!', [['setLast',1],['match']]],
+  [R`(?<=([k-s_]))(!)`, 'diy', 'S!', [['setLast',1],['match']]],
+  [R`([z-a0-9])`, 'di', 'z'],
+  [R`^([A-Zé]+)$`, 'di', 'Zé'],
+  [R`^([À-Ö_]+)$`, 'di', 'À_'],
+  [R`^([\x80-\xffK-S]+)$`, 'di', 'éS'],
+]) add(source, text, flags, steps);
+
 function units(str) {return str.split('').map(u => u.charCodeAt(0));}
 for (const {source, flags, text, steps} of cases) {
   const row = {source, flags, text: text.isWellFormed() ? text : units(text)};

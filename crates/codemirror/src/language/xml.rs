@@ -28,6 +28,8 @@ mod tables;
 mod tokens;
 
 pub use close_tags::{auto_close_tags, auto_close_tags_in};
+pub(crate) use close_tags::{close_tags_after, html_policy_end_tag_name};
+pub(crate) use completion::schema_completion_source;
 pub use completion::{
     XmlAttrSpec, XmlAttribute, XmlCompletion, XmlCompletionResult, XmlCompletionValidity,
     XmlElementSpec, XmlSchema, XmlValue, xml_completion_source,

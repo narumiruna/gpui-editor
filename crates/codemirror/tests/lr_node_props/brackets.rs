@@ -2,8 +2,11 @@ use std::{ops::Range, sync::Arc};
 
 use gpui_editor_codemirror::{
     EditorSelection,
-    language::brackets::{
-        BracketConfig, BracketDirection, BracketMatch, BracketMatchingOptions, bracket_matching,
+    language::{
+        brackets::{
+            BracketConfig, BracketDirection, BracketMatch, BracketMatchingOptions, bracket_matching,
+        },
+        lezer::{BRACKET_MATCHING_HANDLE, LrBracketHandle},
     },
     setup::minimal_setup,
     view::keymap::KeyPlatform,
@@ -14,12 +17,21 @@ use super::*;
 fn configured(stock: &MarkdownCodeParser, props: &Value) -> MarkdownCodeParser {
     let closed = props["closedBy"].clone();
     let opened = props["openedBy"].clone();
+    let selectors = props["handles"].clone();
     let names = |value: &Value| serde_json::from_value::<Vec<String>>(value.clone()).ok();
     with_props(
         stock,
         &[
             CLOSED_BY.add(move |row| names(&closed[row.name()])),
             OPENED_BY.add(move |row| names(&opened[row.name()])),
+            BRACKET_MATCHING_HANDLE.add(move |row| {
+                let select: LrBracketHandle = match selectors[row.name()].as_str()? {
+                    "second" => Arc::new(|node| node.children().nth(1)),
+                    "none" => Arc::new(|_| None),
+                    _ => unreachable!(),
+                };
+                Some(Some(select))
+            }),
         ],
     )
 }
@@ -52,7 +64,7 @@ fn encoded(hit: Option<BracketMatch>) -> Value {
 }
 
 #[test]
-fn configured_lr_matches_pinned_roles_and_setup_marks() {
+fn configured_lr_matches_pinned_roles_handles_and_setup_marks() {
     for line in include_str!("../fixtures/lr_bracket_roles.jsonl").lines() {
         let row: Value = serde_json::from_str(line).unwrap();
         let [stock, _] = handles(&row);
@@ -66,29 +78,45 @@ fn configured_lr_matches_pinned_roles_and_setup_marks() {
         };
         let config = options.config();
         let source = row["source"].as_str().unwrap();
+        let extension = if row["mounted"] == true {
+            let name = row["name"].as_str().unwrap().to_owned();
+            markdown_with_parser(
+                MarkdownConfig::default(),
+                MarkdownParserConfig {
+                    code_languages: Some(MarkdownCodeLanguages::Configured {
+                        resolve: Arc::new(move |label| (name == label).then(|| parser.clone())),
+                        fallback: None,
+                    }),
+                    ..Default::default()
+                },
+            )
+        } else {
+            with_lr!(&parser, handle => handle.extension())
+        };
         let base = EditorState::with_extensions(
             source,
-            Extension::group([
-                with_lr!(&parser, handle => handle.extension()),
-                bracket_matching(options.clone()),
-            ]),
+            Extension::group([extension, bracket_matching(options.clone())]),
         )
         .unwrap();
-        let doc = attached_language_snapshot(&base).unwrap();
+        let standalone = attached_language_snapshot(&base);
         for query in row["queries"].as_array().unwrap() {
             use BracketDirection::{Backward, Forward};
             let head = query["head"].as_u64().unwrap() as usize;
             let label = format!("{} {} at {head}", row["name"], row["label"]);
-            assert_eq!(
-                json!([Backward, Forward].map(|dir| encoded(directional(&doc, head, dir, config)))),
-                query["directional"],
-                "{label}: directional",
-            );
-            assert_eq!(
-                encoded(caret(&doc, head, config)),
-                query["caret"],
-                "{label}: caret"
-            );
+            if let Some(doc) = &standalone {
+                assert_eq!(
+                    json!(
+                        [Backward, Forward].map(|dir| encoded(directional(doc, head, dir, config)))
+                    ),
+                    query["directional"],
+                    "{label}: directional",
+                );
+                assert_eq!(
+                    encoded(caret(doc, head, config)),
+                    query["caret"],
+                    "{label}: caret"
+                );
+            }
             let mut state = base.clone();
             state
                 .update(Transaction::default().with_selection(EditorSelection::single(head, head)))
@@ -110,13 +138,15 @@ fn configured_lr_matches_pinned_roles_and_setup_marks() {
                 .collect();
             assert_eq!(json!(marks), query["marks"], "{label}: setup marks");
         }
-        for (head, _) in source.bytes().enumerate().filter(|&(head, byte)| {
-            !source.is_char_boundary(head)
-                || (byte == b'\n' && head > 0 && source.as_bytes()[head - 1] == b'\r')
-        }) {
-            assert_eq!(caret(&doc, head, config), None);
-            for dir in [BracketDirection::Backward, BracketDirection::Forward] {
-                assert_eq!(directional(&doc, head, dir, config), None);
+        if let Some(doc) = &standalone {
+            for (head, _) in source.bytes().enumerate().filter(|&(head, byte)| {
+                !source.is_char_boundary(head)
+                    || (byte == b'\n' && head > 0 && source.as_bytes()[head - 1] == b'\r')
+            }) {
+                assert_eq!(caret(doc, head, config), None);
+                for dir in [BracketDirection::Backward, BracketDirection::Forward] {
+                    assert_eq!(directional(doc, head, dir, config), None);
+                }
             }
         }
     }

@@ -10,8 +10,8 @@ use crate::EditError;
 mod iter;
 mod tree;
 
-pub use iter::TextCursor;
 use iter::{Chunks, Lines};
+pub use iter::{TextCursor, TextLineCursor};
 use tree::Tree;
 
 /// A persistent UTF-8 document. LF and CRLF end logical lines. A lone CR is content.
@@ -265,17 +265,7 @@ impl Text {
         if !(1..=self.line_count()).contains(&number) {
             return None;
         }
-        let start = if number == 1 {
-            0
-        } else {
-            self.0.tree.break_at(number - 2)? + 1
-        };
-        let end = self
-            .0
-            .tree
-            .break_at(number - 1)
-            .map_or(self.len(), |lf| self.ending_start(lf));
-        let range = start..end;
+        let range = self.line_start(number)?..self.line_end(number);
         Some(Line {
             number,
             text: self.borrow(range.clone()),
@@ -295,6 +285,21 @@ impl Text {
             chunk.breaks_before(position)
         };
         self.line(breaks + 1)
+    }
+
+    fn line_start(&self, number: usize) -> Option<usize> {
+        match number {
+            0 => None,
+            1 => Some(0),
+            _ => self.0.tree.break_at(number - 2).map(|lf| lf + 1),
+        }
+    }
+
+    fn line_end(&self, number: usize) -> usize {
+        self.0
+            .tree
+            .break_at(number - 1)
+            .map_or(self.len(), |lf| self.ending_start(lf))
     }
 
     fn ending_start(&self, lf: usize) -> usize {
@@ -338,6 +343,32 @@ impl Text {
     ) -> Option<impl DoubleEndedIterator<Item = &str> + FusedIterator> {
         self.is_valid_range(range.clone())
             .then(|| Chunks::new(self, range))
+    }
+
+    /// Start a forward cursor over line content, including any final empty line.
+    /// This is the signed byte-skip counterpart to CodeMirror's `iterLines()`.
+    /// For a double-ended iterator over complete lines, use [`Self::iter_lines`].
+    pub fn line_cursor(&self) -> TextLineCursor<'_> {
+        TextLineCursor::new(self, None)
+    }
+
+    /// Start a signed byte-skip cursor over a one-based range of lines.
+    /// The end line is excluded and may be `line_count() + 1`. The start
+    /// must be an existing line and the range must be ascending or empty.
+    /// An empty range yields one empty item, as in CodeMirror. Once the
+    /// cursor reaches the end of the range it cannot rewind.
+    pub fn line_cursor_range(&self, range: Range<usize>) -> Option<TextLineCursor<'_>> {
+        let lines = self.line_count();
+        if range.start > range.end || range.end > lines + 1 || range.start > lines {
+            return None;
+        }
+        let start = self.line_start(range.start)?;
+        let end = if range.is_empty() {
+            start
+        } else {
+            self.line_end(range.end - 1)
+        };
+        Some(TextLineCursor::new(self, Some(start..end)))
     }
 
     /// Iterate over line content without endings, including any final empty line.

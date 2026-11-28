@@ -81,7 +81,18 @@ pub(super) fn parse(
         Ok(tree) => return (collect(&tree, range), false),
         Err(error) => error,
     };
-    if input.len() <= 65_536 && matches!(error, ParseError::UnexpectedToken { .. }) {
+    if input.len() <= 65_536
+        && let ParseError::UnexpectedToken { offset, .. } = error
+    {
+        let next = input.as_bytes().get(offset);
+        if kind == AngularRegionKind::Attribute
+            && input.starts_with(['[', '('])
+            && (next == Some(&b'=') || next == Some(&b']') && input.starts_with("[("))
+            && let Ok(tree) = parser.parse_recovering(input)
+            && has_missing_binding_closer(&tree, input, offset)
+        {
+            return (collect(&tree, range), true);
+        }
         let suffixes: &[_] = match kind {
             AngularRegionKind::Content => &["}}"],
             AngularRegionKind::Attribute => &["\"", "'", "}}\"", "}}'"],
@@ -114,6 +125,52 @@ pub(super) fn parse(
         ],
         true,
     )
+}
+
+// Keep only the repair for one missing name closer before a quoted value.
+fn has_missing_binding_closer(tree: &SyntaxTree, input: &str, offset: usize) -> bool {
+    let mut children = tree.root().children();
+    let (Some(name), Some(equals), Some(value)) =
+        (children.next(), children.next(), children.next())
+    else {
+        return false;
+    };
+    if !matches!(
+        (name.name(), value.name()),
+        ("BoundAttributeName", "ExpressionAttributeValue")
+            | ("EventName", "StatementAttributeValue")
+    ) || equals.name() != "Is"
+        || children.next().is_some()
+    {
+        return false;
+    }
+    // If `[(...` reaches `=`, the inner close paren must already exist.
+    let previous = if input.starts_with("[(") && input.as_bytes().get(offset) == Some(&b'=') {
+        ")"
+    } else {
+        "Identifier"
+    };
+    let missing = name
+        .children()
+        .zip(name.children().skip(1))
+        .any(|(prev, node)| {
+            node.is_error()
+                && node.range() == (offset..offset)
+                && prev.name() == previous
+                && input
+                    .get(prev.range().end..offset)
+                    .is_some_and(|gap| super::trim_space(gap).is_empty())
+        });
+    if !missing {
+        return false;
+    }
+    let mut pending = vec![tree.root()];
+    let mut count = 0;
+    while let Some(node) = pending.pop() {
+        count += usize::from(node.is_error());
+        pending.extend(node.children());
+    }
+    count == 1
 }
 
 fn collect(tree: &SyntaxTree, source: Range<usize>) -> Vec<Node> {

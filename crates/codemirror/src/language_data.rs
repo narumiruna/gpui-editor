@@ -35,7 +35,7 @@ use crate::{
         vue::VueDocument,
         wast::WastDocument,
         xml::XmlDocument,
-        yaml::YamlDocument,
+        yaml::{self, YamlDocument},
     },
     legacy_modes::{LegacyMode, asn1, asn1::Asn1},
     stream_parser::TokenizeError,
@@ -46,16 +46,27 @@ mod catalog;
 mod load;
 mod support;
 
+pub use crate::language::java::JavaTop;
 pub use async_load::{LanguageLoadFuture, NativeAsyncLanguageLoad};
 pub use catalog::LANGUAGES;
 pub use load::NativeLanguageLoad;
 pub use support::{
-    CloseBracketData, GoCompletionSource, JsonLanguage, LezerLanguage, LrDataFacet,
-    NativeLanguageSupport, SupportedDocument, SyntaxUpdateError, WastLanguage,
-    attached_language_snapshot, go_extension, go_language_extension, json_language, lezer_language,
-    wast_language,
+    CloseBracketData, CppLanguage, GoCompletionSource, GoLanguage, JavaLanguage, JsonLanguage,
+    LezerLanguage, LrDataFacet, NativeLanguageSupport, RustLanguage, ScriptCompletionSource,
+    SqlCompletionSource, StylesheetCompletionSource, SupportedDocument, SyntaxUpdateError,
+    WastLanguage, XmlCompletionSource, YamlLanguage, attached_language_snapshot, cpp_language,
+    go_extension, go_language, go_language_extension, java_language, json_language, lezer_language,
+    rust_language, wast_language, xml_extension, yaml_language,
 };
-pub(crate) use support::{WastConfig, active_wast_viewport};
+pub(crate) use support::{
+    LrConfig, WastConfig, active_lr_viewport, active_wast_viewport, fold_catalog_markdown_html,
+    indent_catalog_markdown_html, plan_catalog_markdown_markup, plan_catalog_markdown_paste,
+};
+
+/// Attach the stock Java language without installing input handlers or keys.
+pub fn java_extension() -> Extension {
+    java_language().extension()
+}
 
 /// Install JSON metadata and track syntax for state-only indentation and folds,
 /// setup bracket matching, and syntax-aware automatic quote closing.
@@ -80,6 +91,21 @@ pub fn lezer_extension() -> Extension {
 /// a caller-defined separator is not a new syntax line break.
 pub fn wast_extension() -> Extension {
     wast_language().extension()
+}
+
+/// Attach the stock C and C++ language without installing input handlers or keys.
+pub fn cpp_extension() -> Extension {
+    cpp_language().extension()
+}
+
+/// Attach the stock Rust language without installing input handlers or keys.
+pub fn rust_extension() -> Extension {
+    rust_language().extension()
+}
+
+/// Attach the stock YAML language without installing input handlers or keys.
+pub fn yaml_extension() -> Extension {
+    yaml_language().extension()
 }
 
 /// One item in the ordered upstream language catalog.
@@ -179,12 +205,14 @@ impl NativeLanguage {
             | Self::Rust
             | Self::Sass(_) => (Some(cpp::LINE_COMMENT), Some(cpp::BLOCK_COMMENT)),
             Self::Css => (None, Some(css::BLOCK_COMMENT)),
-            Self::Angular | Self::Html | Self::Markdown | Self::Vue | Self::Xml => {
+            Self::Angular | Self::Html | Self::Markdown | Self::Vue => {
                 (None, Some(html::BLOCK_COMMENT))
             }
+            Self::Xml => (None, Some(crate::language::xml::BLOCK_COMMENT)),
             Self::Less => (Some(less::LINE_COMMENT), Some(less::BLOCK_COMMENT)),
             Self::Liquid => (Some(liquid::LINE_COMMENT), None),
-            Self::Python | Self::Yaml => (Some(python::LINE_COMMENT), None),
+            Self::Python => (Some(python::LINE_COMMENT), None),
+            Self::Yaml => (Some(yaml::LINE_COMMENT), None),
             Self::Sql(_) => (Some(sql::LINE_COMMENT), Some(sql::BLOCK_COMMENT)),
             Self::Wast => (Some(wast::LINE_COMMENT), Some(wast::BLOCK_COMMENT)),
             Self::Legacy(mode) => {

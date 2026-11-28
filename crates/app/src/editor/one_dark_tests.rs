@@ -17,7 +17,12 @@ use gpui_editor_codemirror::{
 use super::*;
 
 pub(super) mod panel_menu;
+mod selection_layers;
+mod standalone_active_line;
+mod standalone_brackets;
+mod standalone_syntax;
 mod stock_paint;
+mod top_panels;
 pub(super) use stock_paint::record_fonts;
 
 const CODE: &str = "{\"字\": \"🐱\"}";

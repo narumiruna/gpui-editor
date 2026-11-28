@@ -89,6 +89,11 @@ fn add(
     }
     nodes.push(Node {
         kind,
+        term: match kind {
+            SourceFile => Some(super::tables::TOP_RULE[1]),
+            Error => Some(0),
+            _ => None,
+        },
         range,
         parent,
         children: Vec::new(),

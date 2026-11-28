@@ -59,9 +59,7 @@ impl LegacyPythonConfig {
 /// Build a legacy Python stream parser from `@codemirror/legacy-modes/mode/python`.
 /// This is separate from the modern Python parser and from the concrete legacy
 /// mode lookup. Tokens use UTF-8 byte ranges and columns count Unicode scalars
-/// (with tab expansion). Indentation cannot be negative. This parser shares the
-/// bundled scanner's token history: a declaration name does not carry `def`
-/// forward to an immediately following identifier.
+/// (with tab expansion). Indentation cannot be negative.
 pub fn mk_python(config: LegacyPythonConfig) -> LegacyPython {
     LegacyPython(Arc::new(config))
 }

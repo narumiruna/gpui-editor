@@ -1,6 +1,7 @@
 // Check the Java grammar fixture with Node 22.14+ and the pinned npm archives:
 // node crates/codemirror/tests/fixtures/java_pinned_grammar.mjs <archive-root>
-// Add --emit to print the fixture or --audit to print the larger residual corpus.
+// Add --recovery to check the generic recovery edits instead. Add --emit to
+// print the selected fixture, or --audit to print the larger residual corpus.
 import assert from 'node:assert/strict';
 import {mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -17,8 +18,8 @@ try {
     const {NodeProp} = await load('@lezer/common');
     const {highlightTree, tags} = await load('@lezer/highlight');
     const {EditorState} = await load('@codemirror/state');
-    const {foldable, foldNodeProp, getIndentation, IndentContext, indentNodeProp, indentUnit,
-        syntaxTree} = await load('@codemirror/language');
+    const {bracketMatching, foldable, foldNodeProp, forceParsing, getIndentation, IndentContext,
+        indentNodeProp, indentUnit, syntaxTree} = await load('@codemirror/language');
     install('@lezer/generator');
     const {fileTests} = await import(pathToFileURL(join(dir, 'node_modules/@lezer/generator/dist/test.js')));
 
@@ -62,10 +63,42 @@ try {
     }};
     const settings = [EditorState.tabSize.of(4), indentUnit.of('  ')];
     const audit = process.argv.includes('--audit');
-    function snapshot(id, top, source, allPoints = false) {
+    const recovery = process.argv.includes('--recovery');
+    let rendered;
+    const matching = recovery ? bracketMatching({renderMatch(hit) {
+        assert.equal(rendered, null);
+        rendered = hit;
+        return [];
+    }}) : [];
+    const {ViewPlugin} = recovery ? await load('@codemirror/view') : {};
+    const plugin = recovery && matching.flat(Infinity).find(extension => extension instanceof ViewPlugin);
+    if (recovery) assert(plugin);
+    const complete = state => {
+        const view = {state, dispatch(spec) { this.state = this.state.update(spec).state; }};
+        assert(forceParsing(view, state.doc.length, 5000));
+        return view.state;
+    };
+    function snapshot(id, top, source, allPoints = false, previous, edit) {
         const language = top === 'ClassContent' ? classContent : javaLanguage;
         const raw = language.parser.parse(source);
-        const state = EditorState.create({doc: source, extensions: [language, ...settings]});
+        let state = EditorState.create({doc: source, extensions: [language, ...settings, matching]});
+        if (recovery) {
+            state = complete(state);
+            if (edit) {
+                // These edit inputs are ASCII and use LF, so the byte and editor offsets agree.
+                const [from, to, insert] = edit;
+                const updated = complete(previous.update({changes: {from, to, insert}}).state);
+                assert.equal(updated.doc.toString(), source, id);
+                const nodes = tree => {
+                    const ranges = [];
+                    tree.iterate({enter(node) { ranges.push([node.name, node.from, node.to]); }});
+                    return ranges;
+                };
+                assert.equal(syntaxTree(updated).toString(), syntaxTree(state).toString(), id);
+                assert.deepEqual(nodes(syntaxTree(updated)), nodes(syntaxTree(state)), id);
+                state = updated;
+            }
+        }
         assert.equal(syntaxTree(state).length, state.doc.length, id);
         if (top === 'Program') {
             const supported = EditorState.create({doc: source, extensions: [support.extension, ...settings]});
@@ -95,7 +128,44 @@ try {
             points.push([mapped(pos), getIndentation(state, pos) ?? null, indent(options),
                 indent({...options, simulateDoubleBreak: true})]);
         }
-        return {id, top, source, tree, spans, lines, points};
+        const row = {id, top, source, tree, spans, lines, points};
+        if (!recovery) return row;
+        if (edit) row.edit = edit;
+        const span = ({from, to}) => [mapped(from), mapped(to)];
+        row.hits = [...positions].sort((a, b) => a - b).map(anchor => {
+            rendered = null;
+            plugin.create({state: state.update({selection: {anchor}}).state});
+            return [mapped(anchor), rendered && [span(rendered.start), rendered.end ? span(rendered.end) : null, rendered.matched]];
+        });
+        return [row, state];
+    }
+
+    function recoverySnapshots() {
+        const rows = [];
+        for (const top of ['Program', 'ClassContent']) {
+            const program = top === 'Program';
+            for (const layout of ['inline', 'multiline']) {
+                const multiline = layout === 'multiline';
+                const prefix = multiline
+                    ? program ? 'class A {\n  void m() {\n    ' : 'void m() {\n  '
+                    : program ? 'class A { void m() { ' : 'void m() { ';
+                const suffix = multiline
+                    ? program ? ' x;\n  }\n}' : ' x;\n}'
+                    : program ? ' x; } }' : ' x; }';
+                for (const depth of [11, 12, 13]) {
+                    const id = `${layout} generics ${depth}`;
+                    const start = prefix + 'A<'.repeat(depth) + 'B';
+                    const [broken, state] = snapshot(id, top, start + '>'.repeat(depth) + suffix, true);
+                    const insert = ' >'.repeat(depth);
+                    const [repaired] = snapshot(id, top, start + insert + suffix, true, state,
+                        [start.length, start.length + depth, insert]);
+                    assert(broken.tree.some(([, name]) => name === '⚠'), id);
+                    assert(!repaired.tree.some(([, name]) => name === '⚠'), id);
+                    rows.push(broken, repaired);
+                }
+            }
+        }
+        return rows;
     }
 
     const testDir = join(dir, 'node_modules/@lezer/java/test');
@@ -147,9 +217,13 @@ try {
             }
         }
     }
-    const output = [{properties: propertyRows}, ...rows].map(row => JSON.stringify(row)).join('\n') + '\n';
+    const snapshots = recovery ? recoverySnapshots() : [{properties: propertyRows}, ...rows];
+    const output = snapshots.map(row => JSON.stringify(row)).join('\n') + '\n';
     if (audit || process.argv.includes('--emit')) {
         process.stdout.write(output);
+    } else if (recovery) {
+        assert.equal(output, readFileSync(new URL('java_generic_recovery.jsonl', import.meta.url), 'utf8'));
+        console.log(`${snapshots.length} pinned Java generic recovery snapshots matched`);
     } else {
         assert.equal(output, readFileSync(new URL('java_pinned_grammar.jsonl', import.meta.url), 'utf8'));
         console.log(`${published.length} published Java grammar cases in ${files.length} files, ${rows.length - published.length} editor cases, ${propertyRows.length} node types matched`);

@@ -12,6 +12,18 @@ pub(super) fn fold(code: u32) -> u32 {
     code
 }
 
+/// Iterate over the canonical code point and every source that folds to it.
+pub(super) fn equivalents(code: u32) -> impl Iterator<Item = u32> {
+    let canonical = fold(code);
+    std::iter::once(canonical).chain(FOLDS.iter().filter_map(
+        move |&(start, end, stride, delta)| {
+            let source = canonical.wrapping_sub_signed(delta);
+            (source >= start && source <= end && (source - start).is_multiple_of(stride))
+                .then_some(source)
+        },
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -401,8 +401,7 @@ impl ReviewRows<'_> {
             (&self.review.draft, &self.review.draft_syntax)
         };
         let text = source.slice(range.clone()).expect("valid projected line");
-        let colors = syntax.colors(&range, self.state);
-        let text = ReviewText::new(text, colors);
+        let text = ReviewText::new(text, syntax.styles(&range, self.state));
         #[cfg(test)]
         let text = text.probe(side, number);
         let changed = self

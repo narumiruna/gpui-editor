@@ -1,7 +1,7 @@
 //! Native completion sources from `@codemirror/lang-html` 6.4.12.
 //! See `docs/licenses/codemirror-lang-html.txt`.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::Range};
 
 use crate::autocomplete::session::{CompletionItem, SourceResult};
 
@@ -66,6 +66,36 @@ pub fn html_completion_source(
     complete(doc, position, explicit, TAGS, GLOBAL_ATTRIBUTES)
 }
 
+/// Complete the stock schema after the installed facet has selected HTML.
+pub(crate) fn html_schema_completion_source(
+    doc: &HtmlDocument,
+    position: usize,
+    explicit: bool,
+    name_is_mapped: &dyn Fn(Range<usize>) -> bool,
+) -> Option<SourceResult> {
+    complete_schema(
+        doc,
+        position,
+        explicit,
+        TAGS,
+        GLOBAL_ATTRIBUTES,
+        name_is_mapped,
+    )
+}
+
+impl HtmlDocument {
+    /// Complete a mounted `TagName` with the stock HTML schema. `value` is
+    /// the host value node, which supplies the enclosing element ancestry.
+    pub(crate) fn mounted_tag_name_completion(
+        &self,
+        value: HtmlNode<'_>,
+        from: usize,
+        to: usize,
+    ) -> SourceResult {
+        tag_result(self.text().as_str(), value, true, from, to, TAGS, &|_| true)
+    }
+}
+
 /// Build a completion source with extra tags and global attributes.
 /// Names are case-sensitive. A replacement definition keeps the original key's position.
 pub fn html_completion_source_with(
@@ -105,19 +135,30 @@ fn complete(
     tags: &[HtmlTagSpec<'_>],
     globals: &[HtmlAttributeSpec<'_>],
 ) -> Option<SourceResult> {
-    let source = doc.text().as_str();
-    source.get(..pos)?;
+    let prefix = doc.text().as_str().get(..pos)?;
     let mount = doc
         .mounts()
         .partition_point(|mount| mount.range().end < pos);
     if doc.mounts().get(mount).is_some_and(|mount| {
         let start = mount.range().start;
         // Raw bodies and quoted values are bracketed in Lezer.
-        start < pos || start == pos && source[..pos].ends_with(['>', '\'', '"'])
+        start < pos || start == pos && prefix.ends_with(['>', '\'', '"'])
     }) {
         return None;
     }
+    complete_schema(doc, pos, explicit, tags, globals, &|_| true)
+}
 
+fn complete_schema(
+    doc: &HtmlDocument,
+    pos: usize,
+    explicit: bool,
+    tags: &[HtmlTagSpec<'_>],
+    globals: &[HtmlAttributeSpec<'_>],
+    name_is_mapped: &dyn Fn(Range<usize>) -> bool,
+) -> Option<SourceResult> {
+    let source = doc.text().as_str();
+    source.get(..pos)?;
     let mut node = resolve_left(doc.root(), pos);
     if let Some(tag) = trailing_open_tag(node, source, pos) {
         node = tag;
@@ -145,32 +186,26 @@ fn complete(
 
     let start = node.range().start;
     let tag = |name: &str| tags.iter().find(|spec| spec.name == name);
-    let children = |parent: Option<&str>| {
-        let child_names = parent.and_then(tag).and_then(|tag| tag.children);
-        child_names.map_or_else(
-            || tags.iter().map(|tag| tag.name).collect::<Vec<_>>(),
-            <[_]>::to_vec,
-        )
-    };
     match node.kind() {
         TagName
             if node
                 .parent()
                 .is_some_and(|parent| matches!(parent.kind(), CloseTag | MismatchedCloseTag)) =>
         {
-            Some(close_tag_result(source, node, start, pos))
+            Some(close_tag_result(source, node, start, pos, name_is_mapped))
         }
-        StartCloseTag | IncompleteCloseTag => Some(close_tag_result(source, node, pos, pos)),
-        StartTag | IncompleteTag | TagName => {
-            let parent = parent_element(node, node.kind() != IncompleteTag);
-            let options = children(element_name(source, parent));
-            let mut items: Vec<_> = options.into_iter().map(|name| item(name, "type")).collect();
-            items.extend(closing_items(source, node, pos, "/"));
-            let from = if node.kind() == TagName { start } else { pos };
-            Some(result(from, pos, items, |text| {
-                identifier(text.strip_prefix('/').unwrap_or(text))
-            }))
+        StartCloseTag | IncompleteCloseTag => {
+            Some(close_tag_result(source, node, pos, pos, name_is_mapped))
         }
+        StartTag | IncompleteTag | TagName => Some(tag_result(
+            source,
+            node,
+            node.kind() != IncompleteTag,
+            if node.kind() == TagName { start } else { pos },
+            pos,
+            tags,
+            name_is_mapped,
+        )),
         OpenTag | SelfClosingTag | AttributeName => {
             let spec = element_name(source, parent_element(node, false)).and_then(tag);
             let local = spec.map_or(&[][..], |tag| tag.attributes);
@@ -207,12 +242,12 @@ fn complete(
         }
         _ if explicit && matches!(around.kind(), Element | Text | Document) => {
             let parent = parent_element(node, false);
-            let mut items: Vec<_> = children(element_name(source, parent))
+            let mut items: Vec<_> = allowed_children(tags, element_name(source, parent))
                 .into_iter()
                 .map(|name| item(format!("<{name}"), "type"))
                 .collect();
             items.extend(
-                open_tags(source, node)
+                open_tags(source, node, name_is_mapped)
                     .into_iter()
                     .enumerate()
                     .map(|(i, name)| boosted(item(format!("</{name}>"), "type"), i)),
@@ -224,6 +259,33 @@ fn complete(
         }
         _ => None,
     }
+}
+
+fn allowed_children<'a>(tags: &[HtmlTagSpec<'a>], parent: Option<&str>) -> Vec<&'a str> {
+    let child_names = parent
+        .and_then(|name| tags.iter().find(|tag| tag.name == name))
+        .and_then(|tag| tag.children);
+    child_names.map_or_else(|| tags.iter().map(|tag| tag.name).collect(), <[_]>::to_vec)
+}
+
+fn tag_result(
+    source: &str,
+    node: HtmlNode<'_>,
+    skip_element: bool,
+    from: usize,
+    to: usize,
+    tags: &[HtmlTagSpec<'_>],
+    name_is_mapped: &dyn Fn(Range<usize>) -> bool,
+) -> SourceResult {
+    let parent = parent_element(node, skip_element);
+    let mut items: Vec<_> = allowed_children(tags, element_name(source, parent))
+        .into_iter()
+        .map(|name| item(name, "type"))
+        .collect();
+    items.extend(closing_items(source, node, to, "/", name_is_mapped));
+    result(from, to, items, |text| {
+        identifier(text.strip_prefix('/').unwrap_or(text))
+    })
 }
 
 fn resolve_left(mut node: HtmlNode<'_>, pos: usize) -> HtmlNode<'_> {
@@ -267,13 +329,20 @@ fn element_name<'a>(source: &'a str, element: Option<HtmlNode<'_>>) -> Option<&'
     source.get(element?.children().next()?.child(TagName)?.range())
 }
 
-fn open_tags<'a>(source: &'a str, node: HtmlNode<'_>) -> Vec<&'a str> {
+fn open_tags<'a>(
+    source: &'a str,
+    node: HtmlNode<'_>,
+    name_is_mapped: &dyn Fn(Range<usize>) -> bool,
+) -> Vec<&'a str> {
     let mut names = Vec::new();
     let mut seen = HashSet::new();
     for parent in std::iter::successors(parent_element(node, false), |node| {
         parent_element(node.parent()?, false)
     }) {
-        let Some(name) = element_name(source, Some(parent)) else {
+        let Some(open) = parent.children().next() else {
+            continue;
+        };
+        let Some(range) = open.child(TagName).map(|name| name.range()) else {
             continue;
         };
         if parent
@@ -283,8 +352,9 @@ fn open_tags<'a>(source: &'a str, node: HtmlNode<'_>) -> Vec<&'a str> {
         {
             break;
         }
-        if (node.kind() == EndTag
-            || node.range().start >= parent.children().next().unwrap().range().end)
+        if (node.kind() == EndTag || node.range().start >= open.range().end)
+            && name_is_mapped(range.clone())
+            && let Some(name) = source.get(range)
             && seen.insert(name)
         {
             names.push(name);
@@ -293,12 +363,13 @@ fn open_tags<'a>(source: &'a str, node: HtmlNode<'_>) -> Vec<&'a str> {
     names
 }
 
-fn closing_items(
-    source: &str,
+fn closing_items<'a>(
+    source: &'a str,
     node: HtmlNode<'_>,
     pos: usize,
-    prefix: &str,
-) -> impl Iterator<Item = CompletionItem> {
+    prefix: &'a str,
+    name_is_mapped: &dyn Fn(Range<usize>) -> bool,
+) -> impl Iterator<Item = CompletionItem> + use<'a> {
     // The upstream test only searches the first five UTF-16 units after the cursor.
     let end = if source[pos..]
         .encode_utf16()
@@ -309,7 +380,7 @@ fn closing_items(
     } else {
         ">"
     };
-    open_tags(source, node)
+    open_tags(source, node, name_is_mapped)
         .into_iter()
         .enumerate()
         .map(move |(i, name)| {
@@ -319,11 +390,17 @@ fn closing_items(
         })
 }
 
-fn close_tag_result(source: &str, node: HtmlNode<'_>, from: usize, pos: usize) -> SourceResult {
+fn close_tag_result(
+    source: &str,
+    node: HtmlNode<'_>,
+    from: usize,
+    pos: usize,
+    name_is_mapped: &dyn Fn(Range<usize>) -> bool,
+) -> SourceResult {
     result(
         from,
         pos,
-        closing_items(source, node, pos, "").collect(),
+        closing_items(source, node, pos, "", name_is_mapped).collect(),
         identifier,
     )
 }

@@ -508,7 +508,7 @@ impl State {
         let style = self.lex(stream, config);
         if let Some(style) = style.filter(|&style| style != "comment") {
             self.last = match (style, stream.current()) {
-                ("keyword" | "punctuation", "def") => Some("def"),
+                ("def", _) | ("keyword" | "punctuation", "def") => Some("def"),
                 ("keyword" | "punctuation", "class") => Some("class"),
                 ("keyword" | "punctuation", ".") => Some("."),
                 ("keyword" | "punctuation", "\\") => Some("\\"),

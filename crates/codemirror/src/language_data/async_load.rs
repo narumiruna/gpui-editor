@@ -4,7 +4,7 @@ use std::{
     future::Future,
     pin::Pin,
     sync::{Arc, Mutex},
-    task::{Context, Poll},
+    task::{Context, Poll, Waker},
 };
 
 use futures_util::future::{BoxFuture, FutureExt, Shared};
@@ -30,9 +30,9 @@ struct LoadState<'a, T, E> {
 /// A successful attempt remains cached. Failure permits a new attempt without
 /// changing the result for existing waiters.
 ///
-/// Unlike a JavaScript promise, the loader runs only when a caller polls its
-/// future. The host owns that scheduling. Dropping a waiter does not cancel a
-/// load while its description keeps the attempt.
+/// Like a JavaScript promise factory, the loader is invoked on the first
+/// load request. The host schedules polling of the returned Rust future.
+/// Dropping a waiter does not cancel the attempt while the description exists.
 pub struct NativeAsyncLanguageLoad<'a, T, E> {
     description: &'a LanguageDescription,
     loader: Arc<Factory<'a, T, E>>,
@@ -118,25 +118,67 @@ where
             .clone()
     }
 
-    /// Join the current attempt or create a new one. No asynchronous work runs
-    /// until a caller polls the returned future.
+    /// Join the current attempt or invoke the loader to create a new one.
     pub fn load(&self) -> LanguageLoadFuture<'a, T, E> {
-        let mut state = self.state.lock().expect("language load state not poisoned");
-        let attempt = state.attempt.get_or_insert_with(|| self.start_attempt());
-        LanguageLoadFuture {
-            identity: attempt.identity.clone(),
-            load: attempt.load.clone(),
+        let (future, slot) = {
+            let mut state = self.state.lock().expect("language load state not poisoned");
+            if let Some(attempt) = &state.attempt {
+                return LanguageLoadFuture::from_attempt(attempt);
+            }
+            let slot = Arc::new(Mutex::new(Waiting {
+                future: None,
+                waker: None,
+                panicked: false,
+            }));
+            let attempt = self.start_attempt(slot.clone());
+            let future = LanguageLoadFuture::from_attempt(&attempt);
+            state.attempt = Some(attempt);
+            (future, slot)
+        };
+        let mut reset = ResetFactory {
+            state: &self.state,
+            slot: &slot,
+            identity: &future.identity,
+            armed: true,
+        };
+        let load = (self.loader)(self.description);
+        reset.armed = false;
+        drop(reset);
+        let waiter = {
+            let mut slot = slot
+                .lock()
+                .expect("language load factory state not poisoned");
+            slot.future = Some(load);
+            slot.waker.take()
+        };
+        if let Some(waiter) = waiter {
+            waiter.wake();
         }
+        future
     }
 
-    fn start_attempt(&self) -> Attempt<'a, T, E> {
+    fn start_attempt(&self, slot: Arc<Mutex<Waiting<'a, T, E>>>) -> Attempt<'a, T, E> {
         let identity = Arc::new(());
         let current = identity.clone();
         let state = Arc::downgrade(&self.state);
-        let loader = self.loader.clone();
-        let description = self.description;
         let load = async move {
-            let result = loader(description).await;
+            let future = std::future::poll_fn(|context| {
+                let mut slot = slot
+                    .lock()
+                    .expect("language load factory state not poisoned");
+                if slot.panicked {
+                    drop(slot);
+                    panic!("language load factory panicked");
+                }
+                if let Some(load) = slot.future.take() {
+                    Poll::Ready(load)
+                } else {
+                    slot.waker = Some(context.waker().clone());
+                    Poll::Pending
+                }
+            })
+            .await;
+            let result = future.await;
             if let Some(state) = state.upgrade() {
                 let replaced = {
                     let mut state = state.lock().expect("language load state not poisoned");
@@ -165,6 +207,51 @@ where
     }
 }
 
+// A synchronous factory panic must not prevent the next load request.
+struct ResetFactory<'s, 'a, T, E> {
+    state: &'s Mutex<LoadState<'a, T, E>>,
+    slot: &'s Mutex<Waiting<'a, T, E>>,
+    identity: &'s Arc<()>,
+    armed: bool,
+}
+
+impl<T, E> Drop for ResetFactory<'_, '_, T, E> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        {
+            let mut state = self.state.lock().expect("language load state not poisoned");
+            if state
+                .attempt
+                .as_ref()
+                .is_some_and(|attempt| Arc::ptr_eq(&attempt.identity, self.identity))
+            {
+                state.attempt = None;
+            }
+        }
+        let waiter = {
+            let mut slot = self
+                .slot
+                .lock()
+                .expect("language load factory state not poisoned");
+            slot.panicked = true;
+            slot.waker.take()
+        };
+        if let Some(waiter) = waiter {
+            waiter.wake();
+        }
+    }
+}
+
+// Publish an attempt before calling host loader code, so other callers can
+// join it without executing that code or waiting under the state lock.
+struct Waiting<'a, T, E> {
+    future: Option<BoxFuture<'a, Outcome<T, E>>>,
+    waker: Option<Waker>,
+    panicked: bool,
+}
+
 /// A waiter for one loading attempt. Like other futures, poll it only until it
 /// returns `Ready`. Read the cached outcome through the description after that.
 #[must_use = "poll the future to load the language"]
@@ -173,7 +260,14 @@ pub struct LanguageLoadFuture<'a, T, E> {
     load: SharedLoad<'a, T, E>,
 }
 
-impl<T, E> LanguageLoadFuture<'_, T, E> {
+impl<'a, T, E> LanguageLoadFuture<'a, T, E> {
+    fn from_attempt(attempt: &Attempt<'a, T, E>) -> Self {
+        Self {
+            identity: attempt.identity.clone(),
+            load: attempt.load.clone(),
+        }
+    }
+
     /// Whether these waiters refer to the same attempt, even after completion.
     pub fn same_attempt(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.identity, &other.identity)

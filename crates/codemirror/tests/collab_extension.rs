@@ -319,7 +319,7 @@ fn filters_extenders_and_history_match_the_pinned_transaction_trace() {
     )
     .unwrap();
     let mut history = History::new(state);
-    for mut expected in oracle {
+    for expected in oracle {
         let stage = expected["name"].as_str().unwrap().to_owned();
         let state = history.state();
         let version = get_synced_version(state).unwrap();
@@ -338,12 +338,6 @@ fn filters_extenders_and_history_match_the_pinned_transaction_trace() {
                 None
             }
             "ack" | "empty" => {
-                assert_eq!(expected["hooks"], json!([1, 1, 1, 0]));
-                assert_eq!(expected["history"], true);
-                // Upstream filters can rewrite acknowledgement-only and empty
-                // receipts. Rust bypasses filters so they cannot add unsent edits.
-                expected["hooks"] = json!([0, 0, 1, 0]);
-                expected["history"] = json!(false);
                 let updates = if stage == "ack" {
                     sendable_updates(state).unwrap()
                 } else {
@@ -400,6 +394,42 @@ fn filters_extenders_and_history_match_the_pinned_transaction_trace() {
         assert_eq!(json!(pending), expected["pending"], "{stage}");
         let calls = std::array::from_fn::<_, 4, _>(|i| hooks[i].swap(0, Relaxed));
         assert_eq!(json!(calls), expected["hooks"], "{stage}");
+    }
+}
+
+#[test]
+fn acknowledgement_filters_cannot_introduce_unsent_document_changes() {
+    for inserted in ["a", "z"] {
+        let mut state = EditorState::with_extensions(
+            "abc",
+            Extension::group([
+                collab(CollabConfig::new("a", 0)),
+                transaction_filter(move |state, transaction| {
+                    if transaction.changes().is_empty() {
+                        transaction.merge(
+                            Transaction::new(change(0..1, inserted)),
+                            state.text().len(),
+                            TransactionCoordinates::Sequential,
+                        )
+                    } else {
+                        Ok(transaction)
+                    }
+                }),
+            ]),
+        )
+        .unwrap();
+        state.update(Transaction::new(change(1..2, "X"))).unwrap();
+        let pending = sendable_updates(&state).unwrap();
+        let receipt = receive_updates(&state, 0, &pending).unwrap();
+        assert_eq!(
+            state.update(receipt),
+            Err(EditError::Configuration(
+                ConfigurationError::InvalidFieldData
+            ))
+        );
+        assert_eq!(state.text().as_str(), "aXc");
+        assert_eq!(get_synced_version(&state), Ok(0));
+        assert_eq!(sendable_updates(&state).unwrap(), pending);
     }
 }
 

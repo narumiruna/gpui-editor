@@ -1,8 +1,8 @@
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 
 use gpui::{Bounds, Context, Rgba, Window, fill, point, rgba, size};
 use gpui_editor_codemirror::{
-    Assoc, Text,
+    Assoc, EditorState, Text,
     autocomplete::brackets::{
         CloseBracketConfig, CloseBracketSyntax, close_brackets, close_brackets_enabled,
         delete_bracket_pair_with, insert_bracket_with,
@@ -10,8 +10,8 @@ use gpui_editor_codemirror::{
     language::{
         StreamSettings,
         brackets::{
-            BracketConfig, BracketMatch, bracket_matching_options, bracket_near_in,
-            configured_bracket_matches_in,
+            BracketConfig, BracketMatch, BracketMatchRender, BracketMatchingOptions,
+            bracket_matching_options, bracket_near_in, configured_bracket_matches_in,
         },
         html::{self, HtmlDocument, HtmlEmbeddedDocument, HtmlOptions},
         javascript, jinja,
@@ -23,7 +23,7 @@ use gpui_editor_codemirror::{
     theme_one_dark::ViewStyle,
 };
 
-use super::{Editor, layout::Item};
+use super::{Editor, highlight::native_language, layout::Item};
 use crate::document::SectionKind;
 
 #[cfg(test)]
@@ -420,21 +420,7 @@ impl Editor {
             .iter()
             .filter(|range| range.is_empty() && (scope.start..=scope.end).contains(&range.head()))
             .map(|range| range.head());
-        let Some(
-            language @ (NativeLanguage::Wast
-            | NativeLanguage::LezerGrammar
-            | NativeLanguage::Json
-            | NativeLanguage::Java
-            | NativeLanguage::Rust
-            | NativeLanguage::Go
-            | NativeLanguage::Python
-            | NativeLanguage::Javascript(_)
-            | NativeLanguage::Css
-            | NativeLanguage::Cpp
-            | NativeLanguage::Html
-            | NativeLanguage::Xml),
-        ) = language
-        else {
+        let Some(language) = language.filter(|&language| supports_bracket_syntax(language)) else {
             if options.is_some() {
                 return configured_bracket_matches_in(state, scope, |_, _| true)
                     .unwrap_or_default();
@@ -458,6 +444,7 @@ impl Editor {
                 MarkdownCodeParser::Wast(_)
                     | MarkdownCodeParser::Json(_)
                     | MarkdownCodeParser::Lezer(_)
+                    | MarkdownCodeParser::Rust(_)
             )
             .then(BracketConfig::default)
         });
@@ -500,54 +487,123 @@ impl Editor {
         if hits.is_empty() {
             return Vec::new();
         }
+        let Some((scope, _)) = self.bracket_feedback_scope() else {
+            return Vec::new();
+        };
         let state = self.view.state();
-        if let Some(options) = bracket_matching_options(state).ok().flatten()
-            && let Some(render) = &options.render_match
-        {
-            let Some((scope, _)) = self.bracket_feedback_scope() else {
+        let options = bracket_matching_options(state).ok().flatten();
+        let render = options
+            .as_ref()
+            .and_then(|options| options.render_match.as_ref());
+        bracket_paint_marks(state, scope, hits, render)
+    }
+
+    pub(super) fn standalone_bracket_options(&self) -> Option<Arc<BracketMatchingOptions>> {
+        let state = self.view.state();
+        if !self.input_enabled || self.is_composing() || state.read_only() {
+            return None;
+        }
+        bracket_matching_options(state).ok().flatten()
+    }
+
+    pub(super) fn has_standalone_bracket_syntax(&self) -> bool {
+        self.path
+            .as_deref()
+            .and_then(native_language)
+            .is_some_and(supports_bracket_syntax)
+    }
+
+    pub(super) fn standalone_bracket_marks(&self) -> Vec<BracketPaintMark> {
+        let Some(options) = self.standalone_bracket_options() else {
+            return Vec::new();
+        };
+        let state = self.view.state();
+        let scope = 0..state.text().len();
+        let hits = if self.has_standalone_bracket_syntax() {
+            // Do not use plain matching while the syntax for this snapshot is pending.
+            let Some(document) = self.current_native_document() else {
                 return Vec::new();
             };
-            let marks: Vec<_> = hits.iter().flat_map(|hit| render(hit, state)).collect();
-            if marks.iter().any(|mark| {
-                mark.from < scope.start
-                    || mark.to > scope.end
-                    || mark.from >= mark.to
-                    || state.text().slice(mark.from..mark.to).is_none()
-            }) {
-                return Vec::new();
-            }
-            return marks
-                .into_iter()
-                .filter_map(|mark| {
-                    let mut matching = false;
-                    let mut nonmatching = false;
-                    for class in mark.value.class().split_ascii_whitespace() {
-                        matching |= class == "cm-matchingBracket";
-                        nonmatching |= class == "cm-nonmatchingBracket";
-                    }
-                    (matching || nonmatching).then_some(BracketPaintMark {
-                        range: mark.from..mark.to,
-                        matched: !nonmatching,
-                    })
-                })
-                .collect();
-        }
-        hits.into_iter()
-            .flat_map(|hit| {
-                std::iter::once(hit.start)
-                    .chain(hit.end)
-                    .map(move |range| BracketPaintMark {
-                        range,
-                        matched: hit.matched,
-                    })
-            })
-            .collect()
+            let config = options.config();
+            state
+                .selection()
+                .ranges()
+                .iter()
+                .filter(|range| range.is_empty())
+                .filter_map(|range| grammar_match_at(document, range.head(), Some(config)))
+                .collect()
+        } else {
+            configured_bracket_matches_in(state, scope.clone(), |_, _| true).unwrap_or_default()
+        };
+        bracket_paint_marks(state, scope, hits, options.render_match.as_ref())
     }
 
     #[cfg(test)]
     pub(super) fn source_bracket_match(&self) -> Option<BracketMatch> {
         self.source_bracket_matches().into_iter().next()
     }
+}
+
+fn bracket_paint_marks(
+    state: &EditorState,
+    scope: Range<usize>,
+    hits: Vec<BracketMatch>,
+    render: Option<&BracketMatchRender>,
+) -> Vec<BracketPaintMark> {
+    if let Some(render) = render {
+        let marks: Vec<_> = hits.iter().flat_map(|hit| render(hit, state)).collect();
+        if marks.iter().any(|mark| {
+            mark.from < scope.start
+                || mark.to > scope.end
+                || mark.from >= mark.to
+                || state.text().slice(mark.from..mark.to).is_none()
+        }) {
+            return Vec::new();
+        }
+        return marks
+            .into_iter()
+            .filter_map(|mark| {
+                let mut matching = false;
+                let mut nonmatching = false;
+                for class in mark.value.class().split_ascii_whitespace() {
+                    matching |= class == "cm-matchingBracket";
+                    nonmatching |= class == "cm-nonmatchingBracket";
+                }
+                (matching || nonmatching).then_some(BracketPaintMark {
+                    range: mark.from..mark.to,
+                    matched: !nonmatching,
+                })
+            })
+            .collect();
+    }
+    hits.into_iter()
+        .flat_map(|hit| {
+            std::iter::once(hit.start)
+                .chain(hit.end)
+                .map(move |range| BracketPaintMark {
+                    range,
+                    matched: hit.matched,
+                })
+        })
+        .collect()
+}
+
+fn supports_bracket_syntax(language: NativeLanguage) -> bool {
+    matches!(
+        language,
+        NativeLanguage::Wast
+            | NativeLanguage::LezerGrammar
+            | NativeLanguage::Json
+            | NativeLanguage::Java
+            | NativeLanguage::Rust
+            | NativeLanguage::Go
+            | NativeLanguage::Python
+            | NativeLanguage::Javascript(_)
+            | NativeLanguage::Css
+            | NativeLanguage::Cpp
+            | NativeLanguage::Html
+            | NativeLanguage::Xml
+    )
 }
 
 fn grammar_match_at(
@@ -681,6 +737,12 @@ fn bracket_near_body(
 pub(super) struct BracketPaintMark {
     range: Range<usize>,
     matched: bool,
+}
+
+impl BracketPaintMark {
+    pub(super) fn overlaps(&self, range: &Range<usize>) -> bool {
+        self.range.start < range.end && range.start < self.range.end
+    }
 }
 
 pub(super) fn paint_source_brackets(

@@ -8,7 +8,7 @@ use crate::{
     language::{
         LanguageData, StreamSettings,
         lezer::{NodePropSource, NodeType, ParseError, SyntaxTree},
-        lezer_grammar::NAME,
+        lezer_grammar::{LezerParseJob, NAME},
     },
     language_data::{LrDataFacet, SupportedDocument, support::LrGrammar},
 };
@@ -59,6 +59,18 @@ impl LezerLanguage {
     /// A strict edit parses from the start rather than reusing checkpoints.
     pub fn extension(&self) -> Extension {
         self.0.extension()
+    }
+
+    /// Install the opt-in viewport parser in place of synchronous syntax.
+    /// A strict parse failure stops the viewport job without publishing a tree.
+    pub fn viewport_extension(&self) -> Option<Extension> {
+        self.0.viewport_extension()
+    }
+
+    /// Start a bounded job with this handle's strictness and node rows.
+    /// A strict prefix tree can contain zero-width errors from staged closure.
+    pub fn parse_job(&self, text: Text) -> Option<LezerParseJob> {
+        self.0.lezer_parse_job(text)
     }
 
     /// The stock metadata identity shared by all Lezer grammar configurations.

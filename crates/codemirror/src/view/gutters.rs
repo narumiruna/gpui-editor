@@ -247,6 +247,8 @@ pub fn gutter_covered_margins(
 }
 type LineNumberInputs = Facet<LineNumberConfig, Vec<LineNumberConfig>>;
 static LINE_NUMBER_CONFIG: LazyLock<LineNumberInputs> = LazyLock::new(Facet::collect);
+static EXPLICIT_LINE_NUMBERS: LazyLock<Facet<(), bool>> =
+    LazyLock::new(|| Facet::new(|inputs| !inputs.is_empty()));
 static LINE_NUMBER_GUTTER: LazyLock<Extension> = LazyLock::new(|| {
     ACTIVE_GUTTERS.compute(|state| {
         let configs = state.facet(&LINE_NUMBER_CONFIG)?;
@@ -291,7 +293,46 @@ pub fn gutter_with_widget_marker(config: GutterConfig, marker: GutterWidgetMarke
 /// Add the before-side line number gutter. Multiple calls share one slot.
 /// Their defined formatters must be the same `Arc`, or configuration fails.
 pub fn line_numbers(config: LineNumberConfig) -> Extension {
+    Extension::group([line_number_extension(config), EXPLICIT_LINE_NUMBERS.of(())])
+}
+
+pub(crate) fn preset_line_numbers() -> Extension {
+    line_number_extension(LineNumberConfig::default())
+}
+
+fn line_number_extension(config: LineNumberConfig) -> Extension {
     Extension::group([LINE_NUMBER_CONFIG.of(config), LINE_NUMBER_GUTTER.clone()])
+}
+
+/// Project the explicit native number column using the host's LF/CRLF lines.
+/// An empty interval requests only the spacer. Do not run other gutter callbacks.
+#[doc(hidden)]
+pub fn standalone_line_numbers(
+    state: &EditorState,
+    lines: RangeInclusive<usize>,
+) -> Result<Option<GutterSlot>, EditError> {
+    let context = state.context();
+    if !*context.facet(&EXPLICIT_LINE_NUMBERS)? {
+        return Ok(None);
+    }
+    let gutters = context.facet(&ACTIVE_GUTTERS)?;
+    let Some(numbers) = gutters
+        .iter()
+        .find(|gutter| matches!(gutter, Gutter::Numbers(_)))
+    else {
+        return Ok(None);
+    };
+    let text = state.text();
+    let line_count = text.line_count();
+    if !lines.is_empty() && (*lines.start() == 0 || *lines.end() > line_count) {
+        return Err(EditError::InvalidRange);
+    }
+    let lines: Vec<_> = lines.map(|number| text.line(number).unwrap()).collect();
+    let shared_sets = context.facet(&GUTTER_LINE_CLASS)?;
+    let shared = markers_by_start(&shared_sets, &lines);
+    Ok(Some(project(
+        state, &lines, line_count, &shared, numbers, None,
+    )))
 }
 
 static ACTIVE_LINE_ENABLED: LazyLock<Facet<(), bool>> =

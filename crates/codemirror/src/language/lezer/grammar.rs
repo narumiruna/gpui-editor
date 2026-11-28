@@ -83,6 +83,7 @@ pub struct Parser {
     pub(super) specializers: Box<[Specializer]>,
     pub(super) dynamic_precedence: Box<[Option<i8>]>,
     pub(super) context_tracker: Option<ErasedTracker>,
+    pub(super) prune_recovery_frontier: bool,
 }
 
 impl Parser {
@@ -209,6 +210,7 @@ impl Parser {
             specializers: specializers.into(),
             dynamic_precedence: Box::default(),
             context_tracker: None,
+            prune_recovery_frontier: false,
         })
     }
 
@@ -265,6 +267,12 @@ impl Parser {
         }
         self.dynamic_precedence = scores.into();
         Ok(self)
+    }
+
+    // Use the pinned normal-round score cap in bounded recovery only.
+    pub(in crate::language) fn with_pruned_recovery(mut self) -> Self {
+        self.prune_recovery_frontier = true;
+        self
     }
 
     pub(super) fn is_token_term(&self, term: u16) -> bool {

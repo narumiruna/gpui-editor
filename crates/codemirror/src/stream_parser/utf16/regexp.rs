@@ -26,7 +26,7 @@ mod compat;
 /// Standalone singleton strings follow pinned V8 case folding. Small positive
 /// case-sensitive expressions of literal sets and `\q` also use these rules.
 /// Mixed or nested case-folded, complemented, or property sets can differ.
-/// A simple ASCII letter range in a short legacy pattern folds only within
+/// Supported ASCII-only classes in short legacy patterns fold only within
 /// ASCII. Other legacy classes and Unicode set operations can differ under
 /// ignore-case matching. Unicode matches start at
 /// code point boundaries. Node can match an empty string inside a surrogate

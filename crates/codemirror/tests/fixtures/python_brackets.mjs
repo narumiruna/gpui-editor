@@ -98,9 +98,12 @@ try {
     function replay(name, source, edits = []) {
         let [state, expected] = snapshot(create(source), source);
         console.log(JSON.stringify({name, source, ...expected}));
-        for (const [name, remove, insert] of edits) {
-            const start = source.indexOf(remove);
-            assert(start !== -1 && source.indexOf(remove, start + 1) === -1, remove);
+        for (const [name, target, insert] of edits) {
+            // A number specifies an insertion offset in the source string.
+            const insertion = typeof target === 'number';
+            const remove = insertion ? '' : target;
+            const start = insertion ? target : source.indexOf(remove);
+            if (!insertion) assert(remove && start !== -1 && source.indexOf(remove, start + 1) === -1, remove);
             const before = projectedOffsets(source.slice(0, start)).units;
             const after = before + projectedOffsets(remove).units;
             const {byteAt} = projectedOffsets(source);
@@ -127,7 +130,21 @@ try {
         ['replace call closer with wrong bracket', '[1])', '[1]]'],
         ['repair the wrong bracket', '[1]]', '[1])'],
     ]);
-    replay('native prefix recovery cannot see later grouping', 'first = (1)\r\nbroken = )\r\nlater = [2]\r\n');
+    replay('two calls with different argument shapes', 'f()\n', [
+        ['replace empty call closer', '()', '(]'],
+        ['repair empty call closer', '(]', '()'],
+    ]);
+    replay('array argument followed by another grouping', 'f([1]) + [2]', [
+        ['replace call closer and retain following array', '[1])', '[1]]'],
+        ['restore call closer before following array', '[1]]', '[1])'],
+    ]);
+    replay('grouping below a blank line', '0\n\n[]', [
+        ['type a stray closing parenthesis', 2, ')'],
+        ['remove the stray closing parenthesis', ')', ''],
+    ]);
+    replay('later grouping with CRLF', 'first = (1)\r\nbroken = 0\r\nlater = [2]\r\n', [
+        ['stray closing parenthesis before later grouping with CRLF', '0', ')'],
+    ]);
 
     // The line chunk and logical break reach 10,000 UTF-16 units with 4,999 emoji.
     for (const separator of ['\r\n', '\r']) {

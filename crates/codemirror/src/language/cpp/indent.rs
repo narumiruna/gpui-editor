@@ -110,7 +110,6 @@ fn delimited(
 fn aligned(node: CppNode<'_>, cx: &IndentContext<'_>) -> Option<(usize, usize)> {
     let mut children = node.children();
     let open = children.next()?.range();
-    children.next_back()?;
     let line = cx.text().line_at(open.start)?;
     let line_end = cx
         .simulated_break()

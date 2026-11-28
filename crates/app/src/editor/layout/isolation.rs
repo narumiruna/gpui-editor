@@ -145,9 +145,11 @@ impl Editor {
         let language = parser.language();
         if !matches!(
             language,
-            NativeLanguage::Java
+            NativeLanguage::Cpp
+                | NativeLanguage::Java
                 | NativeLanguage::Json
                 | NativeLanguage::LezerGrammar
+                | NativeLanguage::Rust
                 | NativeLanguage::Wast
                 | NativeLanguage::Sql(_)
         ) {
@@ -179,6 +181,14 @@ impl Editor {
             ..Default::default()
         };
         let (lines, marks) = match syntax {
+            NativeSyntax::Cpp(doc) => (
+                doc.syntax_lines(),
+                doc.bidi_isolate_marks(&viewport, options).ok()?,
+            ),
+            NativeSyntax::Rust(doc) => (
+                doc.syntax_lines(),
+                doc.bidi_isolate_marks(&viewport, options).ok()?,
+            ),
             NativeSyntax::Java(doc) => (
                 doc.syntax_lines(),
                 doc.bidi_isolate_marks(&viewport, options).ok()?,

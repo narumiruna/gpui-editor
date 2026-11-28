@@ -28,19 +28,21 @@ mod parser;
 mod paste_link;
 mod table;
 
-use mounts::EditorOffsets;
+use super::line_projection::EditorOffsets;
 pub(crate) use mounts::MarkdownSourceMap;
 pub use mounts::{
-    MarkdownCodeLanguages, MarkdownCodeParser, MarkdownCodeParserResolver, MarkdownCodeResolver,
-    MarkdownMount, MarkdownParserConfig,
+    MarkdownCodeLanguages, MarkdownCodeLoad, MarkdownCodeParser, MarkdownCodeParserResolver,
+    MarkdownCodeResolver, MarkdownCodeSelection, MarkdownCodeSelectionResolver, MarkdownMount,
+    MarkdownParserConfig,
 };
 
 pub use commands::{MarkdownEdit, MarkdownMarkupCommand, markdown_keymap};
 pub use completion::{markdown_completion_source, markdown_completion_start};
+pub(crate) use install::checked_markdown_refresh;
 pub use install::{
     MarkdownCompletionSource, MarkdownConfig, configured_markdown_parser, markdown,
     markdown_completions, markdown_keymap_for, markdown_snapshot, markdown_with_parser,
-    plan_markdown_markup, plan_markdown_paste,
+    plan_markdown_markup, plan_markdown_paste, plan_markdown_refresh,
 };
 pub use paste_link::paste_url_as_link;
 
@@ -235,11 +237,17 @@ pub struct MarkdownDocument {
     text: Text,
     editor_lines: Option<Text>,
     dialect: MarkdownDialect,
-    root: MarkdownNode,
-    highlights: Vec<(Range<usize>, Vec<HighlightTag>)>,
+    tree: Arc<MarkdownTree>,
+    pending_code: Arc<[mounts::PendingCodeMount]>,
     editor_offsets: OnceLock<Arc<EditorOffsets>>,
     parsed_bytes: usize,
     reused_blocks: usize,
+}
+
+#[derive(Debug)]
+struct MarkdownTree {
+    root: MarkdownNode,
+    highlights: Vec<(Range<usize>, Vec<HighlightTag>)>,
 }
 
 impl MarkdownDocument {
@@ -261,7 +269,7 @@ impl MarkdownDocument {
         let Some(first) = ranges.next() else {
             let mut doc = self.clone();
             doc.parsed_bytes = 0;
-            doc.reused_blocks = self.root.children.len();
+            doc.reused_blocks = self.root().children.len();
             return Ok(doc);
         };
         let changed = first.start..ranges.last().unwrap_or(first).end;
@@ -274,7 +282,7 @@ impl MarkdownDocument {
                 (parse_root(source, self.dialect), text.len(), 0)
             } else {
                 incremental::reparse(
-                    &self.root,
+                    self.root(),
                     self.syntax_lines().as_str(),
                     source,
                     changes,
@@ -305,8 +313,8 @@ impl MarkdownDocument {
             text,
             editor_lines,
             dialect,
-            root,
-            highlights,
+            tree: Arc::new(MarkdownTree { root, highlights }),
+            pending_code: Arc::default(),
             editor_offsets: OnceLock::new(),
             parsed_bytes,
             reused_blocks,
@@ -345,12 +353,12 @@ impl MarkdownDocument {
     }
 
     pub fn root(&self) -> &MarkdownNode {
-        &self.root
+        &self.tree.root
     }
 
     /// All syntax nodes in pre-order, with each parent before its children.
     pub fn nodes(&self) -> impl Iterator<Item = &MarkdownNode> {
-        let mut stack = vec![std::slice::from_ref(&self.root).iter()];
+        let mut stack = vec![std::slice::from_ref(self.root()).iter()];
         std::iter::from_fn(move || {
             loop {
                 if let Some(node) = stack.last_mut()?.next() {
@@ -379,17 +387,15 @@ impl MarkdownDocument {
         range: Range<usize>,
     ) -> Option<impl Iterator<Item = HighlightSpan<'_>>> {
         self.text.slice(range.clone())?;
-        let first = self
-            .highlights
-            .partition_point(|(span, _)| span.end <= range.start);
+        let highlights = &self.tree.highlights;
+        let first = highlights.partition_point(|(span, _)| span.end <= range.start);
         let end = if range.is_empty() {
             first
         } else {
-            self.highlights
-                .partition_point(|(span, _)| span.start < range.end)
+            highlights.partition_point(|(span, _)| span.start < range.end)
         };
         Some(
-            self.highlights[first..end]
+            highlights[first..end]
                 .iter()
                 .map(move |(span, tags)| HighlightSpan {
                     range: span.start.max(range.start)..span.end.min(range.end),
@@ -405,7 +411,7 @@ impl MarkdownDocument {
             .or_else(|| self.block_fold(line_start, line_end))
     }
 
-    fn heading_fold(&self, line_start: usize, line_end: usize) -> Option<Range<usize>> {
+    pub(crate) fn heading_fold(&self, line_start: usize, line_end: usize) -> Option<Range<usize>> {
         let heading_path = self.path(line_end, true).collect::<Vec<_>>();
         for (node, following) in heading_path
             .into_iter()
@@ -513,7 +519,7 @@ impl MarkdownDocument {
         position: usize,
         left: bool,
     ) -> impl Iterator<Item = (&MarkdownNode, &[MarkdownNode])> {
-        let mut next = Some((&self.root, &[][..]));
+        let mut next = Some((self.root(), &[][..]));
         std::iter::from_fn(move || {
             let (node, following) = next?;
             let i = node.children.partition_point(|child| {

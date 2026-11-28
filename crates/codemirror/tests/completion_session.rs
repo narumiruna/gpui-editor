@@ -303,8 +303,15 @@ fn malformed_or_foreign_results_cannot_target_the_current_state() {
 }
 
 fn query_for(document: &str, explicit: bool) -> (CompletionSession, CompletionQuery) {
+    query_at(document, document.len(), explicit)
+}
+
+fn query_at(
+    document: &str,
+    position: usize,
+    explicit: bool,
+) -> (CompletionSession, CompletionQuery) {
     let mut state = EditorState::new(document);
-    let position = document.len();
     state
         .update(Transaction::default().with_selection(EditorSelection::single(position, position)))
         .unwrap();
@@ -348,6 +355,86 @@ fn fixed_list_uses_ascii_words_and_punctuation_prefixes() {
     .unwrap();
     let (_session, query) = query_for("a = @bl", false);
     assert_eq!(symbolic.complete(&query).unwrap().from, 4);
+}
+
+#[test]
+fn fixed_list_replays_empty_label_prefixes_and_picks() {
+    use serde_json::Value;
+
+    for row in include_str!("fixtures/autocomplete_list_prefix.jsonl").lines() {
+        let row: Value = serde_json::from_str(row).unwrap();
+        let items = |value: &Value| {
+            value
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|option| {
+                    let label = option
+                        .as_str()
+                        .or_else(|| option["label"].as_str())
+                        .unwrap();
+                    let mut item = CompletionItem::new(label);
+                    item.display_label = option["displayLabel"].as_str().map(str::to_owned);
+                    item.insert = option["apply"].as_str().map(str::to_owned);
+                    item
+                })
+                .collect::<Vec<_>>()
+        };
+        let byte = |value: &Value| value.as_u64().map(|at| usize::try_from(at).unwrap());
+        let (mut session, query) = query_at(
+            row["source"].as_str().unwrap(),
+            byte(&row["at"]).unwrap(),
+            row["explicit"].as_bool().unwrap(),
+        );
+        let actual = ListSource::new(items(&row["options"]))
+            .unwrap()
+            .complete(&query);
+        let expected = &row["result"];
+        let Some(result) = actual else {
+            assert!(expected.is_null(), "{row}");
+            continue;
+        };
+        assert_eq!(Some(result.from), byte(&expected["from"]), "{row}");
+        assert_eq!(result.to, byte(&expected["to"]), "{row}");
+        assert_eq!(&*result.options, items(&expected["options"]), "{row}");
+        if let Some(pick) = row["pick"].as_str() {
+            let mut state = query.state().clone();
+            assert!(session.finish_query(&query, Some(result), at(100)).unwrap());
+            let id = session
+                .options()
+                .unwrap()
+                .into_iter()
+                .find(|entry| entry.item.label == pick)
+                .unwrap()
+                .id;
+            let tx = session.accept(id, at(200)).unwrap().unwrap();
+            state.update(tx).unwrap();
+            assert_eq!(
+                state.text().as_str(),
+                row["edit"].as_str().unwrap(),
+                "{row}"
+            );
+
+            let mut state = query.state().clone();
+            edit(
+                &mut session,
+                &mut state,
+                query.position..query.position,
+                "t",
+                None,
+                Some("input.type"),
+                201,
+            );
+            assert_eq!(session.status(), CompletionStatus::Active);
+            assert_eq!(session.deadline(), None);
+            let options = session.options().unwrap();
+            assert_eq!(options[0].item.label, pick);
+            assert_eq!(
+                options[0].range,
+                byte(&expected["from"]).unwrap()..query.position + 1
+            );
+        }
+    }
 }
 
 #[test]

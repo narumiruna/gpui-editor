@@ -12,7 +12,7 @@ use gpui_editor_codemirror::{
         bindings::{CommandId as SourceCommand, default_keymap},
     },
     language::{
-        IndentOptions, LanguageData, MarkdownWastIndent, StreamSettings, language_data_provider,
+        IndentOptions, LanguageData, MarkdownCodeIndent, StreamSettings, language_data_provider,
         markdown::{MarkdownCodeParser, markdown_snapshot},
     },
     view::{
@@ -111,6 +111,28 @@ impl Editor {
             return false;
         };
         let scope = fence.body;
+        let host = self.view.state();
+        if !matches!(&parser, MarkdownCodeParser::Native(_))
+            && let Some(snapshot) = markdown_snapshot(host)
+            && let Ok(input) = host.replace_selection(inserted)
+        {
+            let input = input.with_user_event("input.type").with_scroll_into_view();
+            let plan = snapshot.reindent_mounted_input(host, scope.clone(), &parser, input.clone());
+            if !matches!(plan, Ok(None)) {
+                if let Ok(Some(edit)) = plan {
+                    if edit.changes() == input.changes() {
+                        return false;
+                    }
+                    if self.apply_source_transaction(edit, scope, cx) {
+                        return true;
+                    }
+                }
+                // Do not retry a rejected combined input as a literal insert.
+                self.message = Some("Cannot apply this input".into());
+                cx.notify();
+                return true;
+            }
+        }
         let Some(state) = self.state_in_source(&scope) else {
             return false;
         };
@@ -216,14 +238,14 @@ impl Editor {
             return false;
         };
         let host =
-            matches!(&parser, MarkdownCodeParser::Wast(_)).then(|| self.view.state().clone());
+            (!matches!(&parser, MarkdownCodeParser::Native(_))).then(|| self.view.state().clone());
         let snapshot = host.as_ref().and_then(markdown_snapshot);
-        let mounted = match (&parser, &host, &snapshot) {
-            (MarkdownCodeParser::Wast(parser), Some(host), Some(snapshot)) => {
-                MarkdownWastIndent::new(host, snapshot, scope.clone(), parser)
-            }
-            _ => None,
-        };
+        let mounted = host
+            .as_ref()
+            .zip(snapshot.as_ref())
+            .and_then(|(host, snapshot)| {
+                MarkdownCodeIndent::for_parser(host, snapshot, scope.clone(), &parser)
+            });
         let indent = host.as_ref().filter(|_| mounted.is_some()).map_or_else(
             || core::Indentation {
                 tab_size: state.tab_size(),

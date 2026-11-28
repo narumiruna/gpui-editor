@@ -85,6 +85,7 @@ fn check_matches(case: &Value) {
             state: &state,
             changes: &desc,
             effects: &[],
+            input_steps: &[],
             start_viewport: &start_viewport,
             viewport: &viewport,
             selection_set: false,

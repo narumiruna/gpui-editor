@@ -1,7 +1,7 @@
 use std::sync::{Arc, LazyLock};
 
 use crate::{
-    EditorState, Extension, Facet,
+    ConfigurationError, EditorState, Extension, Facet, StateContext, StateField,
     view::{ViewPlugin, ViewPluginType, ViewUpdate, panels::get_panel},
 };
 
@@ -22,22 +22,48 @@ pub trait SearchPanel: 'static {
 
 type Factory = Arc<dyn Fn(&EditorState) -> Box<dyn SearchPanel> + Send + Sync>;
 
-static FACTORY: LazyLock<Facet<Factory, Option<Factory>>> = LazyLock::new(|| {
-    Facet::new(|inputs: &[&Factory]| inputs.first().map(|input| (*input).clone()))
+type FactoryConfig = Result<Option<Factory>, ConfigurationError>;
+static FACTORY: LazyLock<Facet<Factory, FactoryConfig>> = LazyLock::new(|| {
+    Facet::new(|inputs: &[&Factory]| match inputs.split_first() {
+        None => Ok(None),
+        Some((first, rest)) if rest.iter().all(|other| Arc::ptr_eq(first, other)) => {
+            Ok(Some((*first).clone()))
+        }
+        Some(_) => Err(ConfigurationError::InvalidFieldData),
+    })
 });
+static FACTORY_CONFIG: LazyLock<StateField<()>> =
+    LazyLock::new(|| StateField::new(check_factory, |_, update| check_factory(update.state())));
 
-/// Set the factory for the next search panel in a view. The first factory in
-/// extension precedence order wins. This does not install query state; use
+fn check_factory(state: &StateContext<'_>) -> Result<(), ConfigurationError> {
+    has_factory(state).map(|_| ())
+}
+
+/// Set the factory for the next search panel in a view. Reusing the same
+/// extension is allowed; conflicting factories reject the configuration.
+/// This does not install query state. Use
 /// [`super::extension`] to install it before opening a panel.
 ///
 /// The factory receives the accepted open state. An open panel retains its
-/// instance across factory changes. A close and reopen uses the new factory.
-/// Without a factory, the host manages the stock panel as before. Set the
-/// registry slot separately with [`super::search_panel_placement`].
+/// instance and placement across configuration changes. A close and reopen
+/// uses the new factory and placement. Without a factory, the host manages
+/// the stock panel. Set placement with [`super::search_panel_placement`].
 pub fn search_panel_factory<P: SearchPanel>(
     create: impl Fn(&EditorState) -> P + Send + Sync + 'static,
 ) -> Extension {
-    FACTORY.of(Arc::new(move |state| Box::new(create(state))))
+    Extension::group([
+        FACTORY.of(Arc::new(move |state| Box::new(create(state)))),
+        FACTORY_CONFIG.extension(),
+    ])
+}
+
+pub(super) fn has_factory(state: &StateContext<'_>) -> Result<bool, ConfigurationError> {
+    state
+        .facet(&FACTORY)?
+        .as_ref()
+        .as_ref()
+        .map(Option::is_some)
+        .map_err(|error| *error)
 }
 
 // Reuse the binding so that a factory or placement change cannot reset the
@@ -64,8 +90,12 @@ impl SearchPanelLifecycle {
         let factory = state
             .context()
             .facet(&FACTORY)
-            .expect("valid search panel factory");
-        if let Some(create) = factory.as_ref() {
+            .expect("search panel factory facet");
+        if let Some(create) = factory
+            .as_ref()
+            .as_ref()
+            .expect("valid search panel factory")
+        {
             let mut panel = create(state);
             panel.mount();
             self.0 = Some(panel);

@@ -351,10 +351,10 @@ fn incomplete_input_has_stable_ranges_and_keeps_editor_services() {
     let source = "a: [\n  x,\n  y";
     let doc = parse(source);
     assert_eq!(doc.foldable(0, 4), Some(4..source.len()));
-    for at in [5, 10, source.len()] {
+    for (at, indent) in [(5, 2), (10, 2), (source.len(), 4)] {
         assert_eq!(
             doc.indentation(at, StreamSettings::default(), IndentOptions::default()),
-            Some(2)
+            Some(indent)
         );
     }
     assert!(tree(doc.root()).contains(YamlNodeKind::Error.name()));

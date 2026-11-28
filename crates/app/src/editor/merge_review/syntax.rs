@@ -2,22 +2,26 @@ use std::{ops::Range, sync::Arc};
 
 use gpui::{
     App, Bounds, Element, ElementId, GlobalElementId, Hsla, InspectorElementId, IntoElement,
-    LayoutId, Pixels, StyledText, TextAlign, Window, point, px, rgba, size,
+    LayoutId, Pixels, SharedString, StyledText, TextAlign, TextRun, TextStyle, Window, point, px,
+    rgba, size,
 };
 use gpui_editor_codemirror::{
     EditorState, Text,
     language::{
-        HighlightContext, HighlightTag, StreamSettings, highlighting_for_context,
+        HighlightContext, HighlightProperties, HighlightTag, StreamSettings,
+        highlighting_for_context,
         markdown::{
-            MarkdownDocument, MarkdownNodeKind, MarkdownParserConfig, configured_markdown_parser,
+            MarkdownCodeLanguages, MarkdownDocument, MarkdownNodeKind, MarkdownParserConfig,
+            configured_markdown_parser, markdown_snapshot,
         },
     },
+    language_data::SupportedDocument,
     theme_one_dark::highlight_configuration,
 };
 
 use crate::{
     document::{BlockPreview, Markdown, SectionKind},
-    editor::source_fence::fence_parser_in,
+    editor::{layout::apply_highlight, source_fence::fence_parser_in},
 };
 
 struct SyntaxSpan {
@@ -33,39 +37,59 @@ pub(super) struct ReviewSyntax {
 
 struct SyntaxSnapshot {
     parser: Option<Arc<MarkdownParserConfig>>,
+    deferred: Option<Arc<SupportedDocument>>,
     settings: StreamSettings,
     spans: Vec<SyntaxSpan>,
 }
 
-type ColorRun = (Range<usize>, Hsla);
+type SyntaxRun = (Range<usize>, HighlightProperties);
 
 impl ReviewSyntax {
     /// The review owns one cache per immutable side. Theme-only changes do not change syntax.
     pub(super) fn prepare(&mut self, source: &Text, state: &EditorState) {
         let parser = configured_markdown_parser(state);
+        let deferred = parser.as_ref().is_some_and(|parser| {
+            matches!(
+                parser.code_languages,
+                Some(MarkdownCodeLanguages::Deferred { .. })
+            )
+        });
+        let published = if deferred {
+            markdown_snapshot(state)
+        } else {
+            None
+        };
         let settings = StreamSettings {
             tab_size: state.tab_size(),
             ..Default::default()
         };
         if self.snapshot.as_ref().is_some_and(|snapshot| {
             snapshot.settings == settings
-                && match (&snapshot.parser, &parser) {
-                    (Some(before), Some(after)) => Arc::ptr_eq(before, after),
-                    (None, None) => true,
-                    _ => false,
-                }
+                && same_snapshot(snapshot.parser.as_ref(), parser.as_ref())
+                && same_snapshot(snapshot.deferred.as_ref(), published.as_ref())
         }) {
             return;
         }
-        let spans = fence_spans(source, state, parser.as_deref(), settings);
+        let spans = if deferred && published.is_none() {
+            Vec::new()
+        } else {
+            fence_spans(
+                source,
+                state,
+                parser.as_deref(),
+                published.as_deref(),
+                settings,
+            )
+        };
         self.snapshot = Some(SyntaxSnapshot {
             parser,
+            deferred: published,
             settings,
             spans,
         });
     }
 
-    pub(super) fn colors(&self, line: &Range<usize>, state: &EditorState) -> Vec<ColorRun> {
+    pub(super) fn styles(&self, line: &Range<usize>, state: &EditorState) -> Vec<SyntaxRun> {
         let Some(snapshot) = &self.snapshot else {
             return Vec::new();
         };
@@ -76,13 +100,21 @@ impl ReviewSyntax {
             .iter()
             .take_while(|span| span.range.start < line.end)
             .filter_map(|span| {
-                let color =
-                    highlighting_for_context(&layers, &span.tags, span.scope, theme).foreground?;
+                let style = highlighting_for_context(&layers, &span.tags, span.scope, theme);
                 let start = span.range.start.max(line.start) - line.start;
                 let end = span.range.end.min(line.end) - line.start;
-                (start < end).then_some((start..end, rgba(color.rgba32()).into()))
+                (start < end && style != HighlightProperties::default())
+                    .then_some((start..end, style))
             })
             .collect()
+    }
+}
+
+fn same_snapshot<T>(before: Option<&Arc<T>>, after: Option<&Arc<T>>) -> bool {
+    match (before, after) {
+        (Some(before), Some(after)) => Arc::ptr_eq(before, after),
+        (None, None) => true,
+        _ => false,
     }
 }
 
@@ -90,6 +122,7 @@ fn fence_spans(
     source: &Text,
     state: &EditorState,
     parser: Option<&MarkdownParserConfig>,
+    published: Option<&SupportedDocument>,
     settings: StreamSettings,
 ) -> Vec<SyntaxSpan> {
     use MarkdownNodeKind::{CodeInfo, CodeText, FencedCode};
@@ -123,9 +156,18 @@ fn fence_spans(
             .find(|child| child.kind() == CodeInfo)
             .and_then(|child| source.slice(child.range()))
             .unwrap_or("");
-        let Some(parser) = fence_parser_in(state, info) else {
-            continue;
+        let block = &fences[fence];
+        let parser = match published {
+            Some(snapshot) => {
+                // The saved side can use a published parser only for identical source.
+                if source.slice(block.clone()) != snapshot.text().slice(block.clone()) {
+                    continue;
+                }
+                snapshot.published_markdown_code_parser(block).cloned()
+            }
+            None => fence_parser_in(state, info),
         };
+        let Some(parser) = parser else { continue };
         let mut body = String::new();
         let mut segments = Vec::new();
         for range in node
@@ -174,23 +216,33 @@ fn fence_spans(
     spans
 }
 
-/// Use the normal unstyled text layout. GPUI can split font runs at color
-/// boundaries, and macOS shaping can change ligatures or joining at those splits.
-/// The syntax ranges only select a foreground for each already shaped glyph.
+/// Shape styled rows with their requested fonts. The review cell clips them
+/// without wrapping, so a change in glyph advances cannot move either row.
+/// For foreground-only rows, paint colors after shaping to keep ligatures
+/// and joining that could change if GPUI split the font runs at color boundaries.
 pub(super) struct ReviewText {
-    text: StyledText,
-    colors: Vec<ColorRun>,
+    text: SharedString,
+    styles: Vec<SyntaxRun>,
+    styled: bool,
     #[cfg(test)]
     probe: Option<(gpui_editor_codemirror::merge::Side, usize)>,
+    #[cfg(test)]
+    runs: Vec<TextRun>,
 }
 
 impl ReviewText {
-    pub(super) fn new(text: &str, colors: Vec<ColorRun>) -> Self {
+    pub(super) fn new(text: &str, styles: Vec<SyntaxRun>) -> Self {
+        let styled = styles
+            .iter()
+            .any(|(_, style)| style.bold || style.italic || style.text_decoration.is_some());
         Self {
-            text: StyledText::new(text.to_owned()),
-            colors,
+            text: text.to_owned().into(),
+            styles,
+            styled,
             #[cfg(test)]
             probe: None,
+            #[cfg(test)]
+            runs: Vec::new(),
         }
     }
 
@@ -200,12 +252,38 @@ impl ReviewText {
         self
     }
 
+    fn text_runs(&self, base: &TextStyle) -> Vec<TextRun> {
+        if !self.styled {
+            return vec![base.to_run(self.text.len())];
+        }
+        let mut runs = Vec::new();
+        let mut start = 0;
+        for (range, style) in &self.styles {
+            let from = start.max(range.start);
+            if from >= range.end || self.text.get(from..range.end).is_none() {
+                continue;
+            }
+            if start < from {
+                runs.push(base.to_run(from - start));
+            }
+            let mut run = base.to_run(range.end - from);
+            apply_highlight(&mut run, *style);
+            runs.push(run);
+            start = range.end;
+        }
+        if start < self.text.len() {
+            runs.push(base.to_run(self.text.len() - start));
+        }
+        runs
+    }
+
     fn color_at(&self, byte: usize, base: Hsla) -> Hsla {
-        let index = self.colors.partition_point(|(range, _)| range.end <= byte);
-        self.colors
+        let index = self.styles.partition_point(|(range, _)| range.end <= byte);
+        self.styles
             .get(index)
             .filter(|(range, _)| range.contains(&byte))
-            .map_or(base, |(_, color)| *color)
+            .and_then(|(_, style)| style.foreground)
+            .map_or(base, |color| rgba(color.rgba32()).into())
     }
 }
 
@@ -218,7 +296,7 @@ impl IntoElement for ReviewText {
 }
 
 impl Element for ReviewText {
-    type RequestLayoutState = ();
+    type RequestLayoutState = StyledText;
     type PrepaintState = ();
 
     fn id(&self) -> Option<ElementId> {
@@ -236,7 +314,12 @@ impl Element for ReviewText {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        self.text.request_layout(id, inspector, window, cx)
+        let runs = self.text_runs(&window.text_style());
+        #[cfg(test)]
+        self.runs.clone_from(&runs);
+        let mut text = StyledText::new(self.text.clone()).with_runs(runs);
+        let (layout, ()) = text.request_layout(id, inspector, window, cx);
+        (layout, text)
     }
 
     fn prepaint(
@@ -244,11 +327,11 @@ impl Element for ReviewText {
         id: Option<&GlobalElementId>,
         inspector: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
-        state: &mut (),
+        text: &mut StyledText,
         window: &mut Window,
         cx: &mut App,
     ) {
-        self.text.prepaint(id, inspector, bounds, state, window, cx);
+        text.prepaint(id, inspector, bounds, &mut (), window, cx);
     }
 
     fn paint(
@@ -256,22 +339,27 @@ impl Element for ReviewText {
         id: Option<&GlobalElementId>,
         inspector: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
-        state: &mut (),
+        text: &mut StyledText,
         prepaint: &mut (),
         window: &mut Window,
         cx: &mut App,
     ) {
-        let layout = self.text.layout();
+        let layout = text.layout();
         let style = window.text_style();
         #[cfg(test)]
         if let Some((side, number)) = self.probe {
-            super::tests::record_paint(side, number, layout, |byte| {
-                self.color_at(byte, style.color)
-            });
+            let colors = (!self.styled).then_some(|byte| self.color_at(byte, style.color));
+            super::tests::record_paint(
+                side,
+                number,
+                layout,
+                window.content_mask().bounds,
+                &self.runs,
+                colors,
+            );
         }
-        if self.colors.is_empty() {
-            self.text
-                .paint(id, inspector, bounds, state, prepaint, window, cx);
+        if self.styled || self.styles.is_empty() {
+            text.paint(id, inspector, bounds, &mut (), prepaint, window, cx);
             return;
         }
         let Some(shaped) = layout.line_layout_for_index(0) else {

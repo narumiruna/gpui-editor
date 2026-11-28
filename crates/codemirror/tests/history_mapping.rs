@@ -5,6 +5,7 @@ use gpui_editor_codemirror::{
     History, HistoryIsolation, MapMode, SelectionRange, StateEffectType, StateField, Transaction,
     inverted_effects, transaction_filter,
 };
+use serde_json::{Value, json};
 
 fn edit(range: Range<usize>, insert: &str) -> Transaction {
     Transaction::new(ChangeSet::single(Change::new(range, insert)).unwrap())
@@ -86,6 +87,85 @@ fn undo_and_redo_branches_both_map_through_received_replacements() {
     assert_eq!(source(&history), "PaXβcY");
     assert_eq!(history.state().selection().main().head(), 3);
     assert_eq!(history.redo(), None);
+}
+
+#[test]
+fn covering_replacements_map_saved_edit_and_selection_history() {
+    let bytes = |value: &Value| usize::try_from(value.as_u64().unwrap()).unwrap();
+    let selection = |pair: &Value| EditorSelection::single(bytes(&pair[0]), bytes(&pair[1]));
+    for line in include_str!("fixtures/selection_crossing.jsonl").lines() {
+        let case: Value = serde_json::from_str(line).unwrap();
+        if case["op"] != "history" {
+            continue;
+        }
+        let mut history = History::new(EditorState::new(case["source"].as_str().unwrap()));
+        history.set_selection(selection(&case["initial"])).unwrap();
+        for (index, (step, expected)) in case["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(case["snapshots"].as_array().unwrap())
+            .enumerate()
+        {
+            let op = step[0].as_str().unwrap();
+            match op {
+                "local" | "remote" => {
+                    let change = &step[1][0];
+                    let range = bytes(&change[0])..bytes(&change[1]);
+                    let text = change[2].as_str().unwrap();
+                    let tx = if op == "local" {
+                        local(range, text)
+                    } else {
+                        remote(range, text)
+                    };
+                    apply(&mut history, tx);
+                }
+                "select" => apply(
+                    &mut history,
+                    Transaction::default()
+                        .with_selection(selection(&step[1]))
+                        .with_user_event("select.pointer")
+                        .isolate_history(HistoryIsolation::Full),
+                ),
+                "undo" => assert_eq!(history.undo(), Some(())),
+                "redo" => assert_eq!(history.redo(), Some(())),
+                "undoSelection" => assert_eq!(history.undo_selection(()), Some(())),
+                "redoSelection" => assert_eq!(history.redo_selection(()), Some(())),
+                _ => panic!("Unknown history step {op}"),
+            }
+            assert_eq!(
+                source(&history),
+                expected["doc"].as_str().unwrap(),
+                "{line}, step {index}"
+            );
+            assert_eq!(
+                history.undo_depth(),
+                bytes(&expected["undo"]),
+                "{line}, step {index}"
+            );
+            assert_eq!(
+                history.redo_depth(),
+                bytes(&expected["redo"]),
+                "{line}, step {index}"
+            );
+            let pinned = &expected["selection"]["ranges"][0];
+            let expected_selection = if case["name"] == "local-crossed-undo-redo" && index == 3 {
+                // The second upstream undo infers (9, 1) from its reversed
+                // bounds. Native history keeps the original saved selection.
+                selection(&case["initial"])
+            } else {
+                selection(pinned)
+            };
+            let actual = history.state().selection();
+            assert_eq!(actual, &expected_selection, "{line}, step {index}");
+            let assoc = match actual.main().assoc() {
+                Some(Assoc::Before) => -1,
+                Some(Assoc::After) => 1,
+                None => 0,
+            };
+            assert_eq!(json!(assoc), pinned[4], "{line}, step {index}");
+        }
+    }
 }
 
 #[test]

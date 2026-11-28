@@ -37,6 +37,8 @@ mod brackets;
 mod folds;
 #[path = "lr_node_props/highlight_scopes.rs"]
 mod highlight_scopes;
+#[path = "lr_node_props/indent.rs"]
+mod indent;
 #[path = "lr_node_props/style_tags.rs"]
 mod style_tags;
 

@@ -4,7 +4,7 @@ use gpui_editor_codemirror::{
     ALLOW_MULTIPLE_SELECTIONS, Compartment, EditError, EditorSelection, EditorState, Extension,
     Range, RangeSet, SelectionRange, Text, Transaction,
     language::brackets::{BracketMatchingOptions, bracket_matching},
-    language_data::{json_extension, wast_extension},
+    language_data::{cpp_extension, java_extension, json_extension, wast_extension},
     setup::{basic_setup, minimal_setup},
     view::{MarkDecoration, keymap::KeyPlatform},
 };
@@ -26,6 +26,8 @@ fn preset_renders_attached_syntax_matches_from_the_same_carets() {
         let name = &row["name"];
         let source = Text::new(row["source"].as_str().unwrap());
         let language = match row["mode"].as_str().unwrap() {
+            "cpp" => cpp_extension(),
+            "java" => java_extension(),
             "json" => json_extension(),
             "wast" => wast_extension(),
             _ => unreachable!(),

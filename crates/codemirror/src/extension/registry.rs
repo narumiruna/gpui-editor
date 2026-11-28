@@ -345,6 +345,10 @@ impl Values for Resolver<'_> {
     fn get(&self, key: Key) -> Result<Option<Value>, ConfigurationError> {
         Ok(self.resolve(key)?.and_then(|slot| slot.value.state_value()))
     }
+
+    fn is_reconfiguration_preview(&self) -> bool {
+        matches!(self.phase, Evaluation::Reconfigure { .. })
+    }
 }
 
 impl Resolver<'_> {

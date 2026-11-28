@@ -22,7 +22,7 @@ const [yamlURL, languageURL, stateURL] = [
   '@codemirror/lang-yaml', '@codemirror/language', '@codemirror/state',
   '@lezer/yaml', '@lezer/lr', '@lezer/common', '@lezer/highlight', '@codemirror/streamparser', '@codemirror/view',
 ].map(pinned);
-const {yaml} = await import(yamlURL);
+const {yaml, yamlLanguage} = await import(yamlURL);
 const {foldable, forceParsing, getIndentation, indentOnInput} = await import(languageURL);
 const {EditorSelection, EditorState, Transaction} = await import(stateURL);
 
@@ -33,6 +33,12 @@ function printLines() {
     'outer:\r  [😀,\r    true,\r    false\r  ]',
     'start:\r\n  expr: {\r    text: "名😀"\r      ',
     '{\r  word: 字\r}',
+    '# pre 😀\r\n\r  # a\r\n\r# b\nkey: value',
+    '---\r\n# a\n# b 😀\rkey:\r\n  nested: value',
+    '%YAML 1.2\n---\r\n\r  # a\n\r# b 😀\r\nkey: {\n  nested: value',
+    'one: x\r\n...\r\n---\n# a\r  # b 😀\r\nkey:\n  nested: value',
+    '---\n  # only\nkey: value\n# trailing 😀',
+    '---\r\n# a\r# b 😀\r\nkey: ' + 'x'.repeat(1024),
   ]) {
     const view = {state: EditorState.create({doc: source, extensions: yaml()}), dispatch(spec) {
       this.state = this.state.update(spec).state;
@@ -69,6 +75,19 @@ function printInput() {
       finalCaret: projectedOffsets(result).byteAt(transaction.newSelection.main.head)}));
   }
 }
+
+// The stock TreeBuffer wraps a negative start offset in this input. The
+// unbuffered parser exposes the same grammar node with an in-bounds start.
+const bufferedSource = 'a: x\n...\n# pre\n# 📦\nb: y';
+function secondDocument(parser) {
+  const tree = parser.parse(bufferedSource);
+  const document = tree.topNode.getChildren('Document').at(1);
+  assert(document);
+  assert.equal(document.to, bufferedSource.length);
+  return document.from;
+}
+assert.equal(secondDocument(yamlLanguage.parser), 65_544);
+assert.equal(secondDocument(yamlLanguage.parser.configure({bufferLength: 0})), 8);
 
 if (process.argv.includes('--input')) printInput();
 else printLines();

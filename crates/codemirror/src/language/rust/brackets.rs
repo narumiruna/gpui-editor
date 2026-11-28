@@ -1,13 +1,17 @@
 use std::ops::Range;
 
-use super::{RustDocument, RustNode, RustNodeKind};
+use super::{RustDocument, RustNodeKind};
 use crate::{
     Assoc,
     autocomplete::brackets::CloseBracketSyntax,
-    language::brackets::{
-        BracketConfig, BracketDirection, BracketDirection::Forward, BracketMatch, bracket_pairs,
-        directional_bracket_near, editor_bracket_index, match_configured_editor_text,
-        match_editor_siblings, match_editor_text, match_named_siblings, named_delimiter,
+    language::{
+        brackets::{
+            BracketConfig, BracketDirection, BracketDirection::Forward, BracketMatch,
+            bracket_pairs, directional_bracket_near, editor_bracket_index,
+            match_configured_editor_text, match_editor_siblings, match_editor_text,
+        },
+        lezer::{LrSyntaxNode, match_lr_marked},
+        line_projection::splits_crlf,
     },
 };
 
@@ -28,50 +32,57 @@ impl RustDocument {
     }
 
     /// Find a bracket near a UTF-8 caret with explicit matching options.
-    /// Marked delimiters use the grammar. Only plain scans use the UTF-16 limit.
-    /// A plain scan does not pair distinct nodes whose kind represents several terms.
+    /// Marked delimiters use the configured rows. Only plain scans use the UTF-16 limit.
     pub fn bracket_near_with_config(
         &self,
         head: usize,
         config: BracketConfig<'_>,
     ) -> Option<BracketMatch> {
-        let pairs = bracket_pairs(config);
-        directional_bracket_near(
-            self.text.as_str(),
-            head,
-            config.after_cursor,
-            |pos, direction| {
-                let side = if direction == Forward {
-                    Assoc::After
-                } else {
-                    Assoc::Before
-                };
-                let node = self.path(pos, Some(side)).last()?;
-                for token in std::iter::successors(Some(node), |node| node.parent()) {
-                    if !token.data().range.is_empty()
-                        && let Some(expected) = matching_name(token.kind(), direction, pairs)
-                    {
-                        return Some(match_named_siblings(
-                            token.range(),
-                            direction,
-                            expected,
-                            token.parent().into_iter().flat_map(RustNode::children),
-                            |sibling| (sibling.range(), sibling.kind().name()),
-                            |sibling, dir| matching_name(sibling.kind(), dir, pairs).is_some(),
-                        ));
-                    }
-                }
-                let kind = node.kind();
-                let unique = has_unique_term(kind);
-                match_configured_editor_text(self.syntax_lines(), pos, direction, config, |at| {
-                    self.path(at, Some(Assoc::After))
-                        .last()
-                        .is_some_and(|candidate| {
-                            candidate.id == node.id || (unique && candidate.kind() == kind)
-                        })
-                })
-            },
-        )
+        directional_bracket_near(self.text.as_str(), head, config.after_cursor, |pos, dir| {
+            self.match_bracket_at(pos, dir, config)
+        })
+    }
+
+    /// Match from an original UTF-8 byte position in the specified direction.
+    /// `after_cursor` applies only to caret queries. Positions inside CRLF return `None`.
+    pub fn match_bracket_at(
+        &self,
+        pos: usize,
+        direction: BracketDirection,
+        config: BracketConfig<'_>,
+    ) -> Option<BracketMatch> {
+        let source = self.text.as_str();
+        if !self.text.is_char_boundary(pos) || splits_crlf(source, pos) {
+            return None;
+        }
+        let side = if direction == Forward {
+            Assoc::After
+        } else {
+            Assoc::Before
+        };
+        let node = self.path(pos, Some(side)).last()?;
+        if let Some(hit) = match_lr_marked(
+            &self.text,
+            LrSyntaxNode::rust(node),
+            pos,
+            direction,
+            bracket_pairs(config),
+        ) {
+            return Some(hit);
+        }
+        let kind = node.kind();
+        let unique = has_unique_term(kind);
+        match_configured_editor_text(self.syntax_lines(), pos, direction, config, |at| {
+            !splits_crlf(source, at)
+                && !splits_crlf(source, at + 1)
+                && self
+                    .path(at, Some(Assoc::After))
+                    .last()
+                    .is_some_and(|candidate| {
+                        candidate.id == node.id || (unique && candidate.kind() == kind)
+                    })
+        })
+        .filter(|hit| !splits_crlf(source, hit.start.start) && !splits_crlf(source, hit.start.end))
     }
 
     fn match_bracket(&self, at: usize, index: usize) -> Option<BracketMatch> {
@@ -130,29 +141,9 @@ impl CloseBracketSyntax for Quotes<'_> {
     }
 }
 
-fn matching_name(
-    kind: RustNodeKind,
-    direction: BracketDirection,
-    pairs: &str,
-) -> Option<Option<&str>> {
-    use RustNodeKind::*;
-    // Only these terms have delimiter props in @lezer/rust 1.0.3.
-    // Angle brackets and closure pipes only match by configured name.
-    let mate = match (kind, direction) {
-        (OpenParen, Forward) => CloseParen,
-        (OpenBracket, Forward) => CloseBracket,
-        (OpenBrace, Forward) => CloseBrace,
-        (CloseParen, BracketDirection::Backward) => OpenParen,
-        (CloseBracket, BracketDirection::Backward) => OpenBracket,
-        (CloseBrace, BracketDirection::Backward) => OpenBrace,
-        _ => return named_delimiter(kind.name(), direction, pairs),
-    };
-    Some(Some(mate.name()))
-}
-
 fn has_unique_term(kind: RustNodeKind) -> bool {
     use RustNodeKind::*;
-    // Native nodes retain names, not the distinct term IDs behind these names.
+    // Keep the existing plain-scan rule, including for nodes without a term.
     !matches!(
         kind,
         Identifier

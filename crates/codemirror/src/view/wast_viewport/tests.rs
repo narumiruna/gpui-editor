@@ -18,7 +18,14 @@ use crate::{
 };
 
 fn audit(event: &str) -> Value {
-    include_str!("../../../tests/fixtures/wast_viewport_browser.jsonl")
+    fixture_row(
+        include_str!("../../../tests/fixtures/wast_viewport_browser.jsonl"),
+        event,
+    )
+}
+
+fn fixture_row(fixture: &str, event: &str) -> Value {
+    fixture
         .lines()
         .map(|line| serde_json::from_str::<Value>(line).unwrap())
         .find(|row| row["event"] == event)
@@ -640,6 +647,52 @@ fn edit_restores_staged_coverage_with_raw_offsets() {
         number(&row, "pub") + offset_delta
     );
     assert!(view.wast_syntax_tree(through + 1).is_none());
+}
+
+#[test]
+fn edit_publishes_the_mapped_in_flight_wast_prefix() {
+    let row = |event| {
+        fixture_row(
+            include_str!("../../../tests/fixtures/wast_edit_in_flight_browser.jsonl"),
+            event,
+        )
+    };
+    let (mut view, _) = view(&"(func $f)\n".repeat(1_200));
+    let install = row("install");
+    report(&mut view, &install, 0);
+    published(&view, &install);
+    let retained = view.state().clone();
+    let original = retained.wast_syntax_tree(0).unwrap();
+
+    let pending = row("pending");
+    let progress = number(&pending, "inFlight");
+    let requested = number(&pending, "requested");
+    let staged = view.ensure_wast_syntax_tree(requested, 1_174).unwrap();
+    assert_eq!(staged.is_some(), pending["ensured"]);
+    assert_eq!(
+        view.wast_syntax_tree_available(progress),
+        pending["available"]
+    );
+    published(&view, &pending);
+    assert!(Arc::ptr_eq(&original, &view.wast_syntax_tree(0).unwrap()));
+
+    dispatch(&mut view, edit(0..0, ")"));
+    let edited = row("edit");
+    assert_eq!(view.viewport().interval().end, number(&edited, "vp"));
+    assert_eq!(
+        view.wast_syntax_tree_available(progress + 1),
+        edited["available"]
+    );
+    published(&view, &edited);
+    let output = view.wast_syntax_tree(progress + 1).unwrap();
+    assert_eq!(
+        output.tree.root().children().next().unwrap().is_error(),
+        edited["error0"]
+    );
+    assert_eq!(
+        Arc::ptr_eq(&original, &retained.wast_syntax_tree(0).unwrap()),
+        edited["retained"]
+    );
 }
 
 #[test]

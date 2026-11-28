@@ -3,9 +3,8 @@ use std::{collections::HashSet, sync::LazyLock};
 use regex::Regex;
 
 use crate::{
-    Text,
     autocomplete::session::{CompletionItem, SourceResult},
-    language::css::{CssDocument, css_completion_source},
+    language::css::{CssPropertySnapshot, completion::FixedOptions},
 };
 
 use super::{
@@ -14,37 +13,30 @@ use super::{
     Side,
 };
 
-// Reuse CSS's option lists and validity rule. These fixed probes do not parse
-// Less input as CSS. The Less tree alone selects a completion context.
-static PROPERTIES: LazyLock<SourceResult> = LazyLock::new(|| css_options("a { color: red }", 8));
-static VALUES: LazyLock<SourceResult> = LazyLock::new(|| css_options("a { color: red }", 13));
-static PSEUDOS: LazyLock<SourceResult> = LazyLock::new(|| css_options("a:hover {}", 5));
-static TAGS: LazyLock<SourceResult> = LazyLock::new(|| css_options("body {}", 2));
 static VARIABLE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\A-(?:-[A-Za-z0-9_-]*)?\z").unwrap());
-
-fn css_options(source: &str, at: usize) -> SourceResult {
-    css_completion_source(&CssDocument::parse(Text::new(source)), at, false)
-        .expect("fixed CSS completion context")
-}
-
-fn fixed(from: usize, template: &SourceResult) -> SourceResult {
-    let mut result = template.clone();
-    result.from = from;
-    result
-}
 
 fn variable(kind: LessNodeKind) -> bool {
     matches!(kind, VariableName | AtKeyword)
 }
 
 /// Return unfiltered Less completions at a UTF-8 byte position. CSS properties
-/// use the native CSS source's fixed browser snapshot. As upstream, `@` names
-/// are offered as variables; the reused validity rule only accepts dash prefixes.
+/// use the pinned stock list. As upstream, `@` names are offered as variables;
+/// the reused validity rule only accepts dash prefixes.
 pub fn less_completion_source(
     doc: &LessDocument,
     position: usize,
     explicit: bool,
+) -> Option<SourceResult> {
+    less_completion_source_with_properties(doc, position, explicit, CssPropertySnapshot::stock())
+}
+
+/// Run the Less source with these property options in place of the stock names.
+pub fn less_completion_source_with_properties(
+    doc: &LessDocument,
+    position: usize,
+    explicit: bool,
+    properties: &CssPropertySnapshot,
 ) -> Option<SourceResult> {
     doc.text().slice(position..position)?;
     let node = doc.path(position, Side::Left).last()?;
@@ -55,13 +47,13 @@ pub fn less_completion_source(
     if kind == PropertyName
         || (dash || kind == TagName) && doc.path(range.end, Side::Inner).last()?.kind() == Block
     {
-        return Some(fixed(from, &PROPERTIES));
+        return Some(properties.result(from));
     }
     if kind == ValueName {
-        return Some(fixed(from, &VALUES));
+        return Some(FixedOptions::Values.result(from));
     }
     if kind == PseudoClassName {
-        return Some(fixed(from, &PSEUDOS));
+        return Some(FixedOptions::Pseudos.result(from));
     }
     if variable(kind) {
         return Some(variables(doc, from));
@@ -71,7 +63,11 @@ pub fn less_completion_source(
     if kind == TagName {
         let in_block = std::iter::successors(node.parent(), |node| node.parent())
             .any(|node| node.kind() == Block);
-        return Some(fixed(from, if in_block { &PROPERTIES } else { &TAGS }));
+        return Some(if in_block {
+            properties.result(from)
+        } else {
+            FixedOptions::Tags.result(from)
+        });
     }
     if !explicit {
         return None;
@@ -82,10 +78,10 @@ pub fn less_completion_source(
         .rfind(|child| child.range().start < position)
         .is_some_and(|node| node.kind() == Colon);
     match above.kind() {
-        PseudoClassSelector if follows_colon => Some(fixed(position, &PSEUDOS)),
-        Declaration if follows_colon => Some(fixed(position, &VALUES)),
-        ArgList => Some(fixed(position, &VALUES)),
-        Block => Some(fixed(position, &PROPERTIES)),
+        PseudoClassSelector if follows_colon => Some(FixedOptions::Pseudos.result(position)),
+        Declaration if follows_colon => Some(FixedOptions::Values.result(position)),
+        ArgList => Some(FixedOptions::Values.result(position)),
+        Block => Some(properties.result(position)),
         _ => None,
     }
 }

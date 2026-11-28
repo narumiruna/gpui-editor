@@ -5,11 +5,14 @@
 //! draws projections and supplies geometry, language snapshots, and completion
 //! sources. Without geometry, existing shortcuts keep their logical behavior.
 
-use std::time::Duration;
+use std::{
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
 
 use crate::{
-    ALLOW_MULTIPLE_SELECTIONS, Change, ChangeSet, EditError, EditorState, Extension, RangeEdit,
-    SelectionRange, Transaction,
+    ALLOW_MULTIPLE_SELECTIONS, Change, ChangeSet, ConfigurationError, EditError, EditorState,
+    Extension, Facet, Precedence, RangeEdit, SelectionRange, Transaction,
     autocomplete::{
         AutocompleteCommand,
         brackets::{close_brackets, close_brackets_enabled, delete_bracket_pair, insert_bracket},
@@ -26,13 +29,16 @@ use crate::{
         fold::{FoldCommand, code_folding, syntax_fallback},
         line_projection::{command_line_projection, editor_line_extension},
     },
-    language_data::{NativeLanguageSupport, NativeSyntax, attached_language_snapshot},
+    language_data::{
+        NativeLanguageSupport, NativeSyntax, attached_language_snapshot,
+        plan_catalog_markdown_markup,
+    },
     lint::LintCommand,
     search::{SearchActionResult, SearchPanelInput, selection_match_extension},
     transaction_filter,
     view::{
         ViewHighlight,
-        keymap::{KeyEvent, KeyPlatform, KeyResult, KeySequence, Keymap},
+        keymap::{KeyBinding, KeyEvent, KeyPlatform, KeyResult, KeySequence, Keymap},
         selection_layers::{
             CrosshairCursor, crosshair_cursor, draw_selection, drop_cursor, rectangular_selection,
         },
@@ -48,11 +54,20 @@ mod render;
 pub use bindings::{SetupCommand, basic_setup_keymap, minimal_setup_keymap};
 pub use render::SetupDecorations;
 
+type SetupBindings = Vec<KeyBinding<SetupCommand>>;
+static KEYMAPS: LazyLock<Facet<SetupBindings, Vec<SetupBindings>>> = LazyLock::new(Facet::collect);
+
+/// Add bindings to the setup editor in extension precedence order.
+pub fn setup_keymap(bindings: Vec<KeyBinding<SetupCommand>>) -> Extension {
+    KEYMAPS.of(bindings)
+}
+
 /// A portable editor with the preset's native behavior.
 pub struct SetupEditor<M> {
     view: EditorView<M>,
     platform: KeyPlatform,
     keyboard: Keymap<SetupCommand>,
+    keyboard_inputs: Option<Arc<Vec<SetupBindings>>>,
     sequence: KeySequence,
     tab_focus: TabFocusMode,
     crosshair: Option<CrosshairCursor>,
@@ -118,7 +133,7 @@ pub struct SetupKeyResult<M> {
 /// If the caller's configuration rejects adding the preset's view extensions,
 /// retain the original state. Use [`try_minimal_setup`] to report that error.
 pub fn minimal_setup<M: Clone>(mut state: EditorState, platform: KeyPlatform) -> SetupEditor<M> {
-    let _ = install(&mut state, minimal_view_extensions());
+    let _ = install(&mut state, minimal_extensions());
     SetupEditor::new(state, platform, false)
 }
 
@@ -126,8 +141,15 @@ pub fn try_minimal_setup<M: Clone>(
     mut state: EditorState,
     platform: KeyPlatform,
 ) -> Result<SetupEditor<M>, EditError> {
-    install(&mut state, minimal_view_extensions())?;
+    install(&mut state, minimal_extensions())?;
     Ok(SetupEditor::new(state, platform, false))
+}
+
+fn minimal_extensions() -> Extension {
+    Extension::group([
+        minimal_view_extensions(),
+        setup_keymap(minimal_setup_keymap()),
+    ])
 }
 
 fn minimal_view_extensions() -> Extension {
@@ -175,18 +197,23 @@ fn basic<M: Clone>(
             Ok(transaction)
         }
     });
-    let extensions = Extension::group(render::gutter_extensions().into_iter().chain([
-        code_folding(),
-        minimal_view_extensions(),
-        ViewHighlight::ActiveLine.extension(),
-        bracket_matching(Default::default()),
-        selection_match_extension(Default::default()),
-        drop_cursor(),
-        ALLOW_MULTIPLE_SELECTIONS.of(true),
-        indent_on_input,
-        close_brackets(),
-        rectangular_selection(Default::default()),
-    ]));
+    let extensions = Extension::group(
+        render::gutter_extensions().into_iter().chain([
+            code_folding(),
+            minimal_view_extensions(),
+            ViewHighlight::ActiveLine.extension(),
+            bracket_matching(Default::default()),
+            selection_match_extension(Default::default()),
+            drop_cursor(),
+            ALLOW_MULTIPLE_SELECTIONS.of(true),
+            indent_on_input,
+            close_brackets(),
+            rectangular_selection(Default::default()),
+            setup_keymap(bindings::highest_setup_bindings().collect())
+                .with_precedence(Precedence::Highest),
+            setup_keymap(bindings::basic_setup_bindings().collect()),
+        ]),
+    );
     install(&mut state, extensions)?;
     Ok(SetupEditor::new(state, platform, true))
 }
@@ -210,6 +237,7 @@ impl<M: Clone> SetupEditor<M> {
             view: EditorView::new(state),
             platform,
             keyboard: Keymap::new(platform, bindings).expect("preset bindings are valid"),
+            keyboard_inputs: None,
             sequence: KeySequence::default(),
             tab_focus: TabFocusMode::default(),
             crosshair: basic.then(|| crosshair_cursor(Default::default())),
@@ -273,6 +301,27 @@ impl<M: Clone> SetupEditor<M> {
         };
         if context.scope == "editor" && self.tab_focus.bypass_key_bindings(event, now) {
             return Ok(output);
+        }
+        let inputs = self.view.state().context().facet(&KEYMAPS)?;
+        if !self
+            .keyboard_inputs
+            .as_ref()
+            .is_some_and(|previous| Arc::ptr_eq(previous, &inputs))
+        {
+            let bindings = if inputs.is_empty() {
+                // A full reconfiguration can remove the preset's extensions.
+                if self.basic {
+                    basic_setup_keymap()
+                } else {
+                    minimal_setup_keymap()
+                }
+            } else {
+                inputs.iter().flatten().cloned().collect()
+            };
+            self.keyboard = Keymap::new(self.platform, bindings)
+                .map_err(|_| ConfigurationError::InvalidFieldData)?;
+            self.keyboard_inputs = Some(inputs);
+            self.sequence.clear();
         }
         let view = &mut self.view;
         let tab_focus = &mut self.tab_focus;
@@ -414,6 +463,7 @@ fn dispatch<M: Clone>(
             context.geometry.as_ref(),
             &mut visual_selection,
         )?,
+        Markdown(command) => plan_catalog_markdown_markup(state, command)?,
         Search(action) => match action.run(state, context.search_panel_input) {
             SearchActionResult::Unhandled => None,
             SearchActionResult::Update(transaction) => Some(transaction),

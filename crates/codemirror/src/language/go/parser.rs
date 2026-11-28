@@ -2,7 +2,8 @@ use std::{borrow::Cow, sync::LazyLock};
 
 use super::{
     super::lezer::{
-        GrammarSpec, ParseError, Parser, ReuseStats, SerializedTables, Specializer, SyntaxTree,
+        CLOSED_BY, GROUP, GrammarSpec, ISOLATE, Isolation, LANGUAGE_DATA, LanguageFacet, NodeTypes,
+        OPENED_BY, ParseError, Parser, ReuseStats, SerializedTables, Specializer, SyntaxTree,
         TreeFragment,
     },
     GoNodeKind, Node, tables, tokens,
@@ -34,6 +35,70 @@ static PARSER: LazyLock<Parser> = LazyLock::new(|| {
     .expect("valid tables for the pinned Go grammar")
     .with_deterministic_context_tracker(tokens::track_tokens())
 });
+
+pub(crate) fn stock_data_facet() -> &'static LanguageFacet {
+    static FACET: LazyLock<LanguageFacet> =
+        LazyLock::new(|| LanguageFacet::new(Some(super::language_data())));
+    &FACET
+}
+
+pub(crate) fn stock_node_types() -> &'static NodeTypes {
+    static TYPES: LazyLock<NodeTypes> = LazyLock::new(|| {
+        let top = tables::TOP_RULE[1];
+        NodeTypes::new(
+            tables::NODE_NAMES,
+            tables::REPEAT_NODE_COUNT,
+            top,
+            tables::SKIPPED,
+            |term, _, props| {
+                if term == top {
+                    props.insert(&LANGUAGE_DATA, Some(stock_data_facet().clone()));
+                }
+                let group = if tables::EXPRESSIONS.contains(&term) {
+                    Some("Expr")
+                } else if tables::TYPES.contains(&term) {
+                    Some("Type")
+                } else if tables::STATEMENTS.contains(&term) {
+                    Some("Statement")
+                } else {
+                    None
+                };
+                if let Some(group) = group {
+                    props.insert(&GROUP, vec![group.into()]);
+                }
+                match term {
+                    2 | 12 | 20 => props.insert(&ISOLATE, Some(Isolation::Auto)),
+                    13 => props.insert(&OPENED_BY, vec!["(".into()]),
+                    14 => props.insert(&CLOSED_BY, vec![")".into()]),
+                    25 => props.insert(&OPENED_BY, vec!["{".into()]),
+                    26 => props.insert(&CLOSED_BY, vec!["}".into()]),
+                    53 => props.insert(&OPENED_BY, vec!["[".into()]),
+                    54 => props.insert(&CLOSED_BY, vec!["]".into()]),
+                    _ => {}
+                }
+            },
+        )
+    });
+    &TYPES
+}
+
+pub(crate) fn parse_raw(source: &str, strict: bool) -> Result<SyntaxTree, ParseError> {
+    if strict {
+        return PARSER.parse_editor_strict(source);
+    }
+    match parse_tree(source) {
+        Err(ParseError::UnexpectedToken { .. }) => PARSER.parse_recovering(source),
+        result => result,
+    }
+}
+
+pub(super) fn parse_editor_strict(source: &str) -> Result<Vec<Node>, ParseError> {
+    let input = Input::new(source);
+    let tree = PARSER
+        .parse_editor_strict(&input.text)
+        .map_err(|error| error.map_offset(|at| input.original_byte(at)))?;
+    Ok(nodes(&tree, input.text.len(), &input))
+}
 
 #[derive(Debug)]
 pub(super) struct Cache {

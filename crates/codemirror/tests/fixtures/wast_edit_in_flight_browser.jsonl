@@ -1,0 +1,3 @@
+{"event":"install","vp":359,"through":3000,"pub":3001,"inFlight":null,"full":false,"visible":true,"error0":false}
+{"event":"pending","vp":359,"through":3000,"pub":3001,"inFlight":4959,"full":false,"visible":true,"error0":false,"requested":8000,"ensured":false,"available":false}
+{"event":"edit","vp":360,"through":4960,"pub":4961,"inFlight":null,"full":false,"visible":true,"error0":true,"retained":true,"available":true}

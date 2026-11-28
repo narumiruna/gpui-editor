@@ -102,28 +102,45 @@ impl Editor {
         cx.notify();
     }
 
-    pub(super) fn render_goto_line(&self, window: &Window, cx: &Context<Self>) -> Option<Div> {
+    pub(super) fn render_goto_line(
+        &self,
+        window: &Window,
+        cx: &Context<Self>,
+        themed: bool,
+    ) -> Option<Div> {
         let panel = self.goto_line.as_ref()?;
         let theme = Theme::for_editor(window, self.view.state());
-        let panels = gpui_editor_codemirror::theme_one_dark::view_style(self.view.state())
-            .map(|style| style.panels);
+        let close = div()
+            .id("goto-line-close")
+            .debug_selector(|| "goto-line-close".into())
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .hover(|style| style.bg(theme.selected))
+            .on_click(
+                cx.listener(|editor, _, window, cx| editor.finish_goto_line(false, window, cx)),
+            )
+            .child("Close");
+        #[cfg(test)]
+        let close = super::one_dark_tests::panel_menu::probe(
+            close,
+            super::one_dark_tests::panel_menu::Role::GotoClose,
+        );
         Some(
             div()
+                .debug_selector(|| "goto-line-panel".into())
                 .flex()
                 .items_center()
                 .gap_2()
                 .px_3()
                 .py_1()
-                .bg(if panels.is_some() {
-                    theme.panel
-                } else {
-                    theme.toolbar
+                .when(!themed, |panel| {
+                    panel
+                        .bg(theme.toolbar)
+                        .text_color(theme.panel_text())
+                        .border_b(px(1.))
+                        .border_color(theme.border)
                 })
-                .text_color(theme.panel_text())
-                .border_b(px(
-                    panels.map_or(1., |style| f32::from(style.top_border.width_px))
-                ))
-                .border_color(theme.border)
                 .key_context("GotoLine")
                 .on_action(cx.listener(|editor, _: &OpenGotoLine, window, cx| {
                     editor.open_goto_line(window, cx)
@@ -133,18 +150,7 @@ impl Editor {
                 }))
                 .child("Go to line")
                 .child(div().min_w_0().flex_1().child(panel.input.clone()))
-                .child(
-                    div()
-                        .id("goto-line-close")
-                        .px_2()
-                        .py_1()
-                        .rounded_md()
-                        .hover(|style| style.bg(theme.selected))
-                        .on_click(cx.listener(|editor, _, window, cx| {
-                            editor.finish_goto_line(false, window, cx)
-                        }))
-                        .child("Close"),
-                ),
+                .child(close),
         )
     }
 }

@@ -11,7 +11,7 @@ use super::{
     LezerNodeKind, Node, highlight, parser, tables,
 };
 
-static PARSER: LazyLock<Parser> = LazyLock::new(tables::parser);
+pub(super) static PARSER: LazyLock<Parser> = LazyLock::new(tables::parser);
 
 pub(crate) fn stock_data_facet() -> &'static LanguageFacet {
     static FACET: LazyLock<LanguageFacet> =

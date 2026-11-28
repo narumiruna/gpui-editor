@@ -37,6 +37,121 @@ fn malformed_edits_match_pinned_syntax_and_services() {
 }
 
 #[test]
+fn generic_recovery_frontier_matches_pinned_edits() {
+    let mut previous: Option<JavaDocument> = None;
+    let mut cases = 0;
+    for fixture in records(include_str!(
+        "../../../tests/fixtures/java_generic_recovery.jsonl"
+    )) {
+        let edit = fixture["edit"].as_array();
+        let label = format!(
+            "{} {} repaired: {}",
+            fixture["top"],
+            fixture["id"],
+            edit.is_some()
+        );
+        let fresh = parse_fixture(&fixture);
+        assert_snapshot(&fresh, &fixture, &label);
+        assert_bracket_probes(&fresh, &fixture, &label);
+
+        let syntax = match fresh.mode {
+            parser::Mode::Program => parser(),
+            parser::Mode::ClassContent => class_content_parser(),
+        };
+        let source = fresh.text().as_str();
+        if let Some(edit) = edit {
+            let changes = ChangeSet::single(Change::new(
+                byte(&edit[0])..byte(&edit[1]),
+                edit[2].as_str().unwrap(),
+            ))
+            .unwrap();
+            let repaired = previous.take().unwrap().reparse(&changes).unwrap();
+            assert_snapshot(&repaired, &fixture, &label);
+            assert_bracket_probes(&repaired, &fixture, &label);
+            let strict = syntax.parse_glr(source).unwrap();
+            assert_eq!(
+                tree_snapshot(&parser::collect(&strict, None)),
+                fixture["tree"],
+                "{label} strict GLR"
+            );
+        } else {
+            assert_eq!(fresh.reuse_stats(), ReuseStats::default(), "{label}");
+            assert!(
+                matches!(
+                    syntax.parse_glr(source),
+                    Err(ParseError::UnexpectedToken { .. })
+                ),
+                "{label}"
+            );
+            let recovered = syntax.parse_recovering(source).unwrap();
+            assert_eq!(
+                tree_snapshot(&parser::collect(&recovered, None)),
+                fixture["tree"],
+                "{label} direct recovery"
+            );
+            previous = Some(fresh);
+        }
+        cases += 1;
+    }
+    assert_eq!(cases, 24);
+}
+
+fn assert_bracket_probes(doc: &JavaDocument, fixture: &Value, label: &str) {
+    for probe in fixture["hits"].as_array().unwrap() {
+        let pos = byte(&probe[0]);
+        let actual = doc.bracket_near(pos).map_or(Value::Null, |hit| {
+            json!([
+                [hit.start.start, hit.start.end],
+                hit.end.map(|end| [end.start, end.end]),
+                hit.matched
+            ])
+        });
+        assert_eq!(actual, probe[1], "{label} bracket at byte {pos}");
+    }
+}
+
+#[test]
+fn bounded_recovery_above_the_checkpoint_cap_matches_the_pin() {
+    let mut previous: Option<JavaDocument> = None;
+    for mut fixture in records(include_str!(
+        "../../../tests/fixtures/java_large_recovery.jsonl"
+    )) {
+        let source = format!(
+            "/*é😀{}*/\r\n{}",
+            "x".repeat(byte(&fixture["pad"])),
+            fixture["tail"].as_str().unwrap()
+        );
+        fixture["source"] = json!(source);
+        let name = fixture["id"].as_str().unwrap();
+        let fresh = parse_fixture(&fixture);
+        assert_snapshot(&fresh, &fixture, name);
+        if let Some(edit) = fixture["edit"].as_array() {
+            let before = previous.take().unwrap();
+            let changes = ChangeSet::single(Change::new(
+                byte(&edit[0])..byte(&edit[1]),
+                edit[2].as_str().unwrap(),
+            ))
+            .unwrap();
+            let repaired = before.reparse(&changes).unwrap();
+            assert_snapshot(&repaired, &fixture, &format!("{name}: repaired"));
+            if before.text().len() > 16 * 1024 {
+                assert_eq!(repaired.reuse_stats(), ReuseStats::default(), "{name}");
+            }
+        } else {
+            assert!(
+                matches!(
+                    fresh.parse_error(),
+                    Some(ParseError::UnexpectedToken { .. })
+                ),
+                "{name}"
+            );
+            assert_eq!(fresh.reuse_stats(), ReuseStats::default(), "{name}");
+            previous = Some(fresh);
+        }
+    }
+}
+
+#[test]
 fn published_grammar_and_editor_cases_match_pinned_snapshots() {
     let fixture = include_str!("../../../tests/fixtures/java_pinned_grammar.jsonl");
     let mut rows = records(fixture);

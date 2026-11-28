@@ -10,13 +10,13 @@ use super::{
 };
 use crate::language::{
     line_projection::splits_crlf,
-    markdown::{MarkdownMount, markdown_snapshot},
+    markdown::{MarkdownCodeParser, MarkdownMount, markdown_snapshot},
 };
 
-/// Indentation for a current, contiguous WAST mount. Commands use body-local
-/// byte offsets. Services and node strategies see the parent state and host
-/// byte offsets. This query does not grant permission to edit the body.
-pub struct MarkdownWastIndent<'a> {
+/// Indentation for a current, contiguous configured Markdown code mount.
+/// Commands use body-local byte offsets. Services and node strategies see the
+/// parent state and host byte offsets. This query does not grant edit access.
+pub struct MarkdownCodeIndent<'a> {
     state: &'a EditorState,
     mount: &'a MarkdownMount,
     body: Range<usize>,
@@ -24,17 +24,37 @@ pub struct MarkdownWastIndent<'a> {
     services: Arc<Vec<Provider>>,
 }
 
-impl<'a> MarkdownWastIndent<'a> {
-    /// Check the installed snapshot, exact body bounds, and parser identity.
-    /// A quoted mount with gaps, a stale snapshot, or a different parser does
-    /// not qualify, even if its text or grammar name is the same.
+/// Indentation for a contiguous WAST mount.
+pub type MarkdownWastIndent<'a> = MarkdownCodeIndent<'a>;
+
+impl<'a> MarkdownCodeIndent<'a> {
+    /// Create the query for a configured WAST parser.
     pub fn new(
         state: &'a EditorState,
         snapshot: &'a SupportedDocument,
         body: Range<usize>,
         parser: &WastLanguage,
     ) -> Option<Self> {
-        if !std::ptr::eq(markdown_snapshot(state)?.as_ref(), snapshot) {
+        Self::for_parser(
+            state,
+            snapshot,
+            body,
+            &MarkdownCodeParser::Wast(parser.clone()),
+        )
+    }
+
+    /// Check the installed snapshot, exact body bounds, and parser identity.
+    /// A quoted mount with gaps, a stale snapshot, or a different parser does
+    /// not qualify, even if its text or grammar name is the same.
+    pub fn for_parser(
+        state: &'a EditorState,
+        snapshot: &'a SupportedDocument,
+        body: Range<usize>,
+        parser: &MarkdownCodeParser,
+    ) -> Option<Self> {
+        if matches!(parser, MarkdownCodeParser::Native(_))
+            || !std::ptr::eq(markdown_snapshot(state)?.as_ref(), snapshot)
+        {
             return None;
         }
         let NativeSyntax::Markdown(doc) = snapshot.syntax() else {
@@ -42,7 +62,7 @@ impl<'a> MarkdownWastIndent<'a> {
         };
         Some(Self {
             state,
-            mount: snapshot.markdown_wast_body(&body, parser)?,
+            mount: snapshot.markdown_code_body(&body, parser)?,
             body,
             lines: doc.projected_lines().unwrap_or_else(|| state.text()),
             services: state.context().facet(&SERVICES).ok()?,
@@ -56,7 +76,7 @@ impl<'a> MarkdownWastIndent<'a> {
 
     /// Translate the query, simulated break, and line overrides from body
     /// offsets. An installed service can supply or suppress indentation even
-    /// at a body endpoint where WAST has no active strategy.
+    /// at a body endpoint where the code mount has no active strategy.
     pub fn at(
         &self,
         position: usize,
@@ -85,11 +105,7 @@ impl<'a> MarkdownWastIndent<'a> {
             if position == self.body.start || position == self.body.end {
                 return None;
             }
-            self.mount.wast()?.indentation_in_markdown(
-                self.mount.source_map(),
-                self.state,
-                &context,
-            )
+            self.mount.code_indentation(self.state, &context)
         })
     }
 }

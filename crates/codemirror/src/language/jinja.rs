@@ -12,7 +12,7 @@ use crate::{ChangeSet, EditError, Text};
 
 use super::{
     HighlightSpan, IndentOptions, LanguageData, StreamSettings,
-    html::HtmlOptions,
+    html::{HtmlNesting, HtmlOptions},
     lezer::{ReuseStats, SyntaxTree},
 };
 
@@ -32,6 +32,7 @@ pub use completion::{
 };
 pub use overlay::JinjaHtml;
 use parser::Node;
+pub(crate) use percent_brace::plan_percent_brace_input;
 pub use percent_brace::{close_percent_brace, close_percent_brace_in};
 
 pub const NAME: &str = "jinja";
@@ -131,11 +132,29 @@ impl JinjaDocument {
     }
 
     pub fn parse_with_options(text: Text, options: JinjaOptions) -> Self {
-        Self::parse_with_prefix(text, options, None)
+        Self::parse_with_nesting(text, options, HtmlNesting::default())
     }
 
-    /// Apply UTF-8 byte edits and rebuild the HTML projection with the original options.
+    /// Parse with custom body and attribute routes in the native outer HTML.
+    /// Routes receive projected text without Jinja gaps. They do not replace
+    /// the HTML parser and do not apply if `options.html` is `None`.
+    pub fn parse_with_nesting(text: Text, options: JinjaOptions, nesting: HtmlNesting<'_>) -> Self {
+        Self::parse_with_prefix(text, options, nesting, None)
+    }
+
+    /// Apply UTF-8 byte edits and rebuild the HTML projection with the original
+    /// dialect and stock routes. Use [`Self::reparse_with_nesting`] to pass custom routes again.
     pub fn reparse(&self, changes: &ChangeSet) -> Result<Self, EditError> {
+        self.reparse_with_nesting(changes, HtmlNesting::default())
+    }
+
+    /// Apply UTF-8 byte edits and rebuild the HTML projection with the supplied
+    /// routes. The document does not retain the route callbacks.
+    pub fn reparse_with_nesting(
+        &self,
+        changes: &ChangeSet,
+        nesting: HtmlNesting<'_>,
+    ) -> Result<Self, EditError> {
         let mut text = self.text.clone();
         changes.apply_to(&mut text)?;
         let end = changes
@@ -143,7 +162,7 @@ impl JinjaDocument {
             .next()
             .map_or(text.len(), |(range, _)| range.start);
         let prefix = self.strict.as_deref().map(|tree| (tree, end));
-        Ok(Self::parse_with_prefix(text, self.options, prefix))
+        Ok(Self::parse_with_prefix(text, self.options, nesting, prefix))
     }
 
     /// Report strict LR prefix reuse in logical bytes (CRLF counts as one byte).
@@ -157,6 +176,7 @@ impl JinjaDocument {
     fn parse_with_prefix(
         text: Text,
         options: JinjaOptions,
+        nesting: HtmlNesting<'_>,
         prefix: Option<(&SyntaxTree, usize)>,
     ) -> Self {
         let (nodes, recovered, strict) = parser::parse(text.as_str(), prefix);
@@ -167,7 +187,7 @@ impl JinjaDocument {
         let highlights = highlight::collect(root);
         let html = options
             .html
-            .and_then(|options| JinjaHtml::parse(&text, &nodes, options));
+            .and_then(|options| JinjaHtml::parse_with_nesting(&text, &nodes, options, nesting));
         Self {
             text,
             nodes,

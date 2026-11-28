@@ -16,9 +16,15 @@ try {
     const {NodeProp} = await load('@lezer/common');
     const {jsonLanguage: json} = await load('@codemirror/lang-json');
     const {lezerLanguage: lezer} = await load('@codemirror/lang-lezer');
+    const {rustLanguage: rust} = await load('@codemirror/lang-rust');
+    const {cppLanguage: cpp} = await load('@codemirror/lang-cpp');
     for (const [stock, source, props] of [
         [json, '{\r\n"名😀": ["אב", "abc"]\r}', {Object: 'rtl', PropertyName: 'ltr', String: null, Array: 'auto'}],
         [lezer, '// 😀\r\n@top Main {\r "אב" "abc"\r\n}', {Body: 'rtl', Literal: 'ltr', RuleName: 'auto'}],
+        [rust, '#!/bin/rust\r\n// 😀\rfn main() { /* comment */ let s = "אב"; let t = "abc"; let u = r#"raw"#; }',
+            {Block: 'rtl', String: null, RawString: 'ltr', BlockComment: null}],
+        [cpp, '#include <system>\r\n// 😀\rint main() { /* comment */ auto s = "אב"; auto t = "abc"; auto u = R"(raw)"; }',
+            {CompoundStatement: 'rtl', String: null, RawString: 'ltr', BlockComment: null}],
     ]) {
         const configured = stock.configure({props: [NodeProp.isolate.add(type => props[type.name])]});
         const slot = new Compartment();

@@ -23,7 +23,7 @@ mod parser;
 mod recovery;
 mod tables;
 
-pub use completion::less_completion_source;
+pub use completion::{less_completion_source, less_completion_source_with_properties};
 
 pub const NAME: &str = "less";
 pub const BLOCK_COMMENT: (&str, &str) = ("/*", "*/");

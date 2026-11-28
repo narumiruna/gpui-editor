@@ -1,0 +1,6 @@
+{"name":"initial","selected":"choiceA","pane":{"text":"<a href=\"https://example.invalid\">字</a>\n**literal**","literal":true,"arrow":false,"describedBy":true,"right":true,"background":"f5f5f5","foreground":"000000","border":[1,1,1,1]}}
+{"name":"themed","selected":"choiceA","pane":{"text":"<a href=\"https://example.invalid\">字</a>\n**literal**","literal":true,"arrow":false,"describedBy":true,"right":true,"background":"353a42","foreground":"ffffff","border":[0,0,0,0]}}
+{"name":"no-info","selected":"choiceB","pane":null}
+{"name":"next-info","selected":"choiceC","pane":{"text":"Other choice","literal":true,"arrow":false,"describedBy":true,"right":true,"background":"353a42","foreground":"ffffff","border":[0,0,0,0]}}
+{"name":"theme-removed","selected":"choiceC","pane":{"text":"Other choice","literal":true,"arrow":false,"describedBy":true,"right":true,"background":"f5f5f5","foreground":"000000","border":[1,1,1,1]}}
+{"name":"closed","selected":null,"pane":null}

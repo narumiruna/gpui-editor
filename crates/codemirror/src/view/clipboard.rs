@@ -282,7 +282,8 @@ fn copy_lines(
 }
 
 /// Plan a paste of host-supplied plain text. Read-only states return `None`
-/// before running input filters. Dispatch the transaction against this state
+/// before running input filters. Installed stock Markdown can handle a URL
+/// before the clipboard filters. Dispatch the transaction against this state
 /// to run its normal transaction filters and history rules.
 ///
 /// Distribute lines when their count matches the selection count. For a
@@ -297,6 +298,9 @@ pub fn plan_clipboard_paste(
 ) -> Result<Option<Transaction>, EditError> {
     if state.read_only() {
         return Ok(None);
+    }
+    if let Some(paste) = crate::language_data::plan_catalog_markdown_paste(state, input) {
+        return Ok(Some(paste));
     }
     let input = filter_clipboard_input(state, input.to_owned())?;
     let text = state.to_text(&input);

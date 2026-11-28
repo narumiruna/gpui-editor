@@ -9,14 +9,14 @@ use gpui_editor_codemirror::{
     EditorState, Text,
     language::{
         Color, HighlightLayer, HighlightProperties, HighlightStyle, HighlightTag, StreamSettings,
-        highlighting_for_context,
+        highlighting_for_context, markdown::MarkdownCodeParser,
     },
     theme_one_dark::{highlight_configuration, highlight_style},
 };
 
 use crate::{
     document::{Alignment, BlockPreview},
-    editor::source_fence::fence_parser_in,
+    editor::source_fence::pane_code_parser,
     theme::Theme,
 };
 
@@ -43,13 +43,15 @@ struct Grid {
 impl BlockLayout {
     pub(super) fn new(
         preview: &BlockPreview,
+        source: &Range<usize>,
         state: &EditorState,
         theme: Theme,
         window: &Window,
     ) -> Self {
         match preview {
             BlockPreview::Code { body, language } => {
-                Self::code(body, language.as_deref(), state, theme, window)
+                let parser = pane_code_parser(state, source, language.as_deref().unwrap_or(""));
+                Self::code(body, parser, state, theme, window)
             }
             BlockPreview::Table { alignments, rows } => {
                 Self::table(alignments, rows, theme, window)
@@ -59,7 +61,7 @@ impl BlockLayout {
 
     fn code(
         body: &str,
-        language: Option<&str>,
+        parser: Option<MarkdownCodeParser>,
         state: &EditorState,
         theme: Theme,
         window: &Window,
@@ -67,7 +69,7 @@ impl BlockLayout {
         let style = window.text_style();
         let mut font = style.font();
         font.family = CODE_FONT_FAMILY.into();
-        let document = fence_parser_in(state, language.unwrap_or("")).and_then(|parser| {
+        let document = parser.and_then(|parser| {
             parser
                 .parse(Text::new(body), StreamSettings::default())
                 .ok()
@@ -86,8 +88,7 @@ impl BlockLayout {
         let highlights = document
             .as_ref()
             .and_then(|doc| {
-                // Keep the preview's existing spans, without expanded Markdown mounts.
-                let spans = doc.syntax().highlights(0..body.len())?;
+                let spans = doc.highlights(0..body.len())?;
                 Some(code_highlights(doc, spans, |tags, scope| {
                     let layers = if let Some(layers) = &mut layers_with_legacy {
                         let properties = legacy_preview_highlight(tags, system_dark);
@@ -350,6 +351,8 @@ fn shape(text: String, font: &Font, size: Pixels, foreground: Rgba, window: &Win
 }
 
 #[cfg(test)]
+mod mounted_preview_tests;
+#[cfg(test)]
 mod preview_highlight_tests;
 
 #[cfg(test)]
@@ -369,7 +372,7 @@ mod tests {
             let language = fence_language("json").unwrap();
             let json = language.support().parse(Text::new(body)).unwrap();
             let line = json.text().line(2).unwrap();
-            let spans = json.syntax().highlights(0..body.len()).unwrap();
+            let spans = json.highlights(0..body.len()).unwrap();
             let highlights = code_highlights(&json, spans, |tags, _| highlight_style(tags));
             let foreground = rgb(0xabb2bf);
             let (displayed, runs) = highlighted_runs(
@@ -479,7 +482,7 @@ mod tests {
                     .support()
                     .parse(Text::new(body))
                     .unwrap();
-                let spans = doc.syntax().highlights(0..body.len()).unwrap();
+                let spans = doc.highlights(0..body.len()).unwrap();
                 let highlights = code_highlights(&doc, spans, |tags, _| highlight_style(tags));
                 let line = doc.text().line(2).unwrap();
                 let (displayed, runs) =
@@ -494,7 +497,7 @@ mod tests {
                 let state = EditorState::new("");
                 let code = BlockLayout::code(
                     body,
-                    Some(name),
+                    fence_language(name).map(MarkdownCodeParser::Native),
                     &state,
                     Theme::for_editor(window, &state),
                     window,

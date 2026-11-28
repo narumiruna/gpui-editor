@@ -347,6 +347,7 @@ impl Trace {
                 state: &self.state,
                 changes: &changes,
                 effects: &effects,
+                input_steps: &[],
                 start_viewport: &Viewport::complete(start_state.text()),
                 viewport: &Viewport::complete(self.state.text()),
                 selection_set,

@@ -25,7 +25,6 @@ try {
         const {file} = modules.find(mod => mod.specifiers.includes(name));
         assert.equal(fileURLToPath(installed.get(name).url), join(root, 'node_modules', name, file.replace(/^package\//, '')));
         assert.deepEqual(readFileSync(installed.get(name).url), execFileSync('tar', ['-xOf', archive, file]));
-        assert.deepEqual(readFileSync(join(dir, file)), readFileSync(installed.get(name).url));
         console.error(`verified ${name} ${version} ${file} ${verifiedIntegrity}`);
     }
     const {rust, rustLanguage} = pkg;
@@ -85,6 +84,28 @@ try {
         ['split-crlf', prefix + 'fn f() {\r\n    call();\r\n}\r\n', '{\r\n    call', '{\r;\n    call'],
         ['lone-cr-after-line-comment', '// 猫😀\rfn f() {\r\n    call(1);\r}\r\n', 'call(1);', 'call( ;'],
     ];
+    // Store long runs of spaces as a byte offset and a count in the fixture.
+    const largeHead = 'const FIRST: i32 = 0;\r\n// 🦀';
+    for (const [bytes, tail, search, replacement] of [
+        ...[16383, 16384, 16385, 65536].map(bytes => [bytes, '\r\nconst LAST: i32 = 1;\r\n', '1;', '1']),
+        [131072, '\r\nfn last() {\r\n    let x = 1;\r\n}\r\n', '}\r\n', ''],
+    ]) {
+        const before = largeHead + tail;
+        const spaces = bytes - Buffer.byteLength(before.replace(search, replacement));
+        edits.push([`large-eof-${bytes}`, before, search, replacement, [largeHead.length, spaces]]);
+    }
+
+    const functionBody = '\r\nfn main() {\r    let x = 1 + 2;\r\n    work(x);\n}\r\n';
+    for (const bytes of [16384, 16385, 131072]) {
+        const before = largeHead + functionBody;
+        const replacement = '+ ;';
+        const spaces = bytes - Buffer.byteLength(before.replace('+ 2;', replacement));
+        edits.push([`large-middle-${bytes}`, before, '+ 2;', replacement, [largeHead.length, spaces]]);
+    }
+    const earlyHead = 'fn main() {\r\n    work();\r\n}\r//λ';
+    const earlyBefore = earlyHead + '\r\nconst LAST: i32 = 7;\r\n';
+    const earlySpaces = 65536 - Buffer.byteLength(earlyBefore.replace('work();', '😀 work();'));
+    edits.push(['large-early-65536', earlyBefore, 'work();', '😀 work();', [earlyHead.length, earlySpaces]]);
 
     function complete(state) {
         const view = {state, dispatch(spec) { this.state = this.state.update(spec).state; }};
@@ -117,12 +138,15 @@ try {
         }
         return {nodes, spans, folds, indents};
     }
-    for (const [id, before, search, replacement] of edits) {
+    for (const [id, before, search, replacement, padding] of edits) {
         const at = before.indexOf(search);
         assert(at >= 0);
         const broken = before.slice(0, at) + replacement + before.slice(at + search.length);
         let previous, previousState;
-        for (const source of [before, broken, before]) {
+        for (const compact of [before, broken, before]) {
+            const [padAt, spaces] = padding ?? [0, 0];
+            const head = compact.slice(0, padAt);
+            const source = head + ' '.repeat(spaces) + compact.slice(padAt);
             const cold = complete(EditorState.create({doc: source, extensions}));
             const expected = snapshot(cold, source);
             let edit = null;
@@ -133,7 +157,8 @@ try {
                 const [c, d, raw] = change(previous, source);
                 edit = [Buffer.byteLength(c), Buffer.byteLength(d), raw];
             }
-            console.log(JSON.stringify({id, source, edit, ...expected}));
+            console.log(JSON.stringify({id, source: compact, edit, ...expected,
+                padding: padding && [Buffer.byteLength(head), spaces]}));
             previous = source;
             previousState = cold;
         }

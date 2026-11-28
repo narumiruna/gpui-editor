@@ -593,10 +593,17 @@ impl Editor {
         Some(marks)
     }
 
-    pub(super) fn render_find(&self, window: &Window, cx: &Context<Self>) -> Option<Div> {
+    pub(super) fn render_find(
+        &self,
+        window: &Window,
+        cx: &Context<Self>,
+        themed: bool,
+    ) -> Option<Div> {
         let find = self.find.as_ref().filter(|find| find.visible)?;
         let theme = Theme::for_editor(window, self.view.state());
         let enabled = self.input_enabled;
+        let button =
+            |id, label, selected, enabled| button(id, label, selected, enabled, theme, themed);
         let options = [
             ("document-find-case", "Match case", FindOption::Case),
             ("document-find-word", "Whole word", FindOption::Word),
@@ -614,12 +621,15 @@ impl Editor {
                 .gap_1()
                 .px_3()
                 .py_2()
-                .bg(theme.panel)
-                .border_b(px(theme
-                    .view
-                    .map_or(1., |style| f32::from(style.panels.top_border.width_px))))
-                .border_color(theme.border)
-                .text_color(theme.panel_text())
+                .when(!themed, |panel| {
+                    panel
+                        .bg(theme.panel)
+                        .border_b(px(theme
+                            .view
+                            .map_or(1., |style| f32::from(style.panels.top_border.width_px))))
+                        .border_color(theme.border)
+                        .text_color(theme.panel_text())
+                })
                 .text_sm()
                 .on_action(
                     cx.listener(|editor, _: &OpenFind, window, cx| editor.open_find(window, cx)),
@@ -639,18 +649,17 @@ impl Editor {
                         .child("Find")
                         .child(div().flex_1().min_w_0().child(find.query.clone()))
                         .child(
-                            button("document-find-previous", "Previous", false, enabled, theme)
-                                .on_click(
-                                    cx.listener(|editor, _, _, cx| editor.find_match(true, cx)),
-                                ),
+                            button("document-find-previous", "Previous", false, enabled).on_click(
+                                cx.listener(|editor, _, _, cx| editor.find_match(true, cx)),
+                            ),
                         )
                         .child(
-                            button("document-find-next", "Next", false, enabled, theme).on_click(
+                            button("document-find-next", "Next", false, enabled).on_click(
                                 cx.listener(|editor, _, _, cx| editor.find_match(false, cx)),
                             ),
                         )
                         .child(
-                            button("document-find-close", "Close", false, true, theme).on_click(
+                            button("document-find-close", "Close", false, true).on_click(
                                 cx.listener(|editor, _, window, cx| editor.close_find(window, cx)),
                             ),
                         ),
@@ -664,7 +673,6 @@ impl Editor {
                                 "Select all matches",
                                 false,
                                 enabled,
-                                theme,
                             )
                             .on_click(cx.listener(
                                 |editor, _, window, cx| editor.select_find_matches(window, cx),
@@ -672,7 +680,7 @@ impl Editor {
                         )
                         .children(options.map(|(id, label, option)| {
                             let mut values = find.options;
-                            button(id, label, *option.value(&mut values), enabled, theme).on_click(
+                            button(id, label, *option.value(&mut values), enabled).on_click(
                                 cx.listener(move |editor, _, window, cx| {
                                     editor.toggle_find_option(option, window, cx)
                                 }),
@@ -684,7 +692,6 @@ impl Editor {
                                 "Replace…",
                                 find.show_replacement,
                                 enabled,
-                                theme,
                             )
                             .on_click(cx.listener(
                                 |editor, _, window, cx| {
@@ -710,22 +717,16 @@ impl Editor {
                             .child("Replace")
                             .child(div().flex_1().min_w_0().child(find.replacement.clone()))
                             .child(
-                                button("document-find-replace", "Replace", false, enabled, theme)
+                                button("document-find-replace", "Replace", false, enabled)
                                     .on_click(
                                         cx.listener(|editor, _, _, cx| editor.replace_match(cx)),
                                     ),
                             )
                             .child(
-                                button(
-                                    "document-find-replace-all",
-                                    "Replace All",
-                                    false,
-                                    enabled,
-                                    theme,
-                                )
-                                .on_click(
-                                    cx.listener(|editor, _, _, cx| editor.replace_all_matches(cx)),
-                                ),
+                                button("document-find-replace-all", "Replace All", false, enabled)
+                                    .on_click(cx.listener(|editor, _, _, cx| {
+                                        editor.replace_all_matches(cx)
+                                    })),
                             ),
                     )
                 })
@@ -751,8 +752,42 @@ struct FindMarks {
     marks: Arc<RangeSet<MarkDecoration>>,
 }
 
-/// Paint Find marks and the selections not already painted by those marks.
-pub(super) fn paint_find_and_selection(
+fn visible_secondary<'a>(item: &Item, secondary: &'a [Range<usize>]) -> &'a [Range<usize>] {
+    let coverage = item.selection_source();
+    let first = secondary.partition_point(|range| range.end <= coverage.start);
+    let covered = secondary[first..].partition_point(|range| range.start < coverage.end);
+    &secondary[first..first + covered]
+}
+
+pub(super) fn paint_ordinary_selection(
+    (primary, secondary): (Option<&Range<usize>>, &[Range<usize>]),
+    item: &Item,
+    row: Bounds<Pixels>,
+    theme: Theme,
+    window: &mut Window,
+    #[cfg(test)] submitted: &mut Vec<PaintQuad>,
+) {
+    for selected in primary
+        .into_iter()
+        .chain(visible_secondary(item, secondary))
+    {
+        for x in item.x_spans(selected.clone()) {
+            let quad = fill(
+                Bounds::new(
+                    row.origin + point(x.start, px(0.)),
+                    size(x.end - x.start, row.size.height),
+                ),
+                theme.selection,
+            );
+            #[cfg(test)]
+            submitted.push(quad.clone());
+            window.paint_quad(quad);
+        }
+    }
+}
+
+/// Paint Find marks above themed selections. The fallback still paints its selections last.
+pub(super) fn paint_find_and_fallback_selection(
     marks: Option<&RangeSet<MarkDecoration>>,
     (primary, secondary): (&Range<usize>, &[Range<usize>]),
     item: &Item,
@@ -769,28 +804,25 @@ pub(super) fn paint_find_and_selection(
         submitted.push(recorded);
     };
 
-    let coverage = item.selection_source();
-    let first = secondary.partition_point(|range| range.end <= coverage.start);
-    let covered = secondary[first..].partition_point(|range| range.start < coverage.end);
-    let visible_secondary = &secondary[first..first + covered];
-    let mut painted_primary = false;
-    let mut painted_secondary = Vec::new();
+    let mut primary_replaced = false;
     if let Some(marks) = marks
         && !matches!(item.paint, ItemPaint::Fold(_))
     {
+        let visible_secondary = if theme.view.is_some() {
+            visible_secondary(item, secondary)
+        } else {
+            &[]
+        };
         marks.between(item.source.start, item.source.end, |matched| {
             let range = matched.from..matched.to;
             let is_primary = *primary == range;
-            // The installed theme uses exact matches against all selection ranges.
-            let secondary_index = theme.view.and_then(|_| {
-                visible_secondary
+            // The themed Find fill uses exact matches against all selection ranges.
+            let selected = is_primary
+                || visible_secondary
                     .binary_search_by_key(&(matched.from, matched.to), |range| {
                         (range.start, range.end)
                     })
-                    .ok()
-            });
-            let selected = is_primary || secondary_index.is_some();
-            let mut painted = false;
+                    .is_ok();
             for x in item.x_spans(range).filter(|x| x.start < x.end) {
                 let bounds = Bounds::new(
                     row.origin + point(x.start, px(0.)),
@@ -827,31 +859,23 @@ pub(super) fn paint_find_and_selection(
                         stroke,
                         Default::default(),
                     ));
+                    primary_replaced |= is_primary;
                 }
-                painted = true;
-            }
-            if painted {
-                painted_primary |= is_primary;
-                painted_secondary.extend(secondary_index);
             }
             true
         });
     }
-    for selected in (!painted_primary).then_some(primary).into_iter().chain(
-        visible_secondary
-            .iter()
-            .enumerate()
-            .filter_map(|(index, range)| (!painted_secondary.contains(&index)).then_some(range)),
-    ) {
-        for x in item.x_spans(selected.clone()) {
-            paint(fill(
-                Bounds::new(
-                    row.origin + point(x.start, px(0.)),
-                    size(x.end - x.start, row.size.height),
-                ),
-                theme.selection,
-            ));
-        }
+    // Only the fallback replaces the primary selection fill with the Find mark.
+    if theme.view.is_none() {
+        paint_ordinary_selection(
+            ((!primary_replaced).then_some(primary), secondary),
+            item,
+            row,
+            theme,
+            window,
+            #[cfg(test)]
+            submitted,
+        );
     }
 }
 
@@ -909,15 +933,18 @@ fn button(
     selected: bool,
     enabled: bool,
     theme: Theme,
+    themed: bool,
 ) -> Stateful<Div> {
-    div()
+    let button = div()
         .id(id)
         .debug_selector(move || id.into())
         .flex_none()
         .px_2()
         .py_1()
         .rounded_md()
-        .text_color(if enabled { theme.text } else { theme.muted })
+        .when(!enabled || !themed, |button| {
+            button.text_color(if enabled { theme.text } else { theme.muted })
+        })
         .bg(if selected {
             theme.selected
         } else {
@@ -928,7 +955,13 @@ fn button(
                 .cursor(CursorStyle::PointingHand)
                 .hover(|style| style.bg(theme.selected))
         })
-        .child(label)
+        .child(label);
+    #[cfg(test)]
+    let button = super::one_dark_tests::panel_menu::probe(
+        button,
+        super::one_dark_tests::panel_menu::Role::FindControl(id),
+    );
+    button
 }
 
 #[cfg(test)]

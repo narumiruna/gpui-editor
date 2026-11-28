@@ -6,7 +6,7 @@ const NATIVE_LIMIT: usize = 100;
 const PRUNE_MARGIN: usize = 20;
 const MAX_PREVIOUS_SELECTIONS: usize = 200;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Branch<M> {
     pub entries: VecDeque<Entry<M>>,
     /// Selection changes before the oldest edit, or in a branch with no edits.
@@ -80,7 +80,7 @@ impl<M> Branch<M> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct Entry<M> {
     /// Replay this edit to go from the current document to the other side of the event.
     pub changes: ChangeSet,

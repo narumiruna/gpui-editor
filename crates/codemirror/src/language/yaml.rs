@@ -2,23 +2,27 @@
 //! `@lezer/yaml` 1.0.4. See `docs/licenses/codemirror-lang-yaml.txt`.
 //!
 //! The parser uses the pinned LR tables and native contextual tokenizers.
-//! Trees use UTF-8 byte offsets in the original text. Strict LR parses can
-//! reuse validated prefix checkpoints. GLR and recovery parse from scratch.
-//! The pinned path is limited to 1 MiB and 128 tree levels, subject to the
-//! shared parser's work limits. Recovery and fallback trees can differ from
-//! upstream.
+//! Trees use UTF-8 byte offsets in the original text. Permissive editor
+//! parses can reuse a validated prefix after a deterministic LR parse. GLR
+//! and recovery parse from scratch. The pinned path is limited to 1 MiB and
+//! editor tree conversion to 128 levels, subject to shared parser work limits.
+//! Raw, recovered, and fallback trees can differ from upstream.
 
 use std::{
     ops::Range,
     sync::{LazyLock, OnceLock},
 };
 
-use crate::{Assoc, ChangeSet, EditError, Text};
+use crate::{Assoc, ChangeSet, EditError, Text, commands::CommentTokens};
 
 use super::{
-    HighlightSpan, HighlightTag, IndentContext, IndentOptions, StreamSettings, TagModifier,
-    lezer::ReuseStats, line_projection::editor_lines,
+    HighlightSpan, HighlightTag, IndentContext, IndentOptions, LanguageData, StreamSettings,
+    TagModifier,
+    lezer::{ParseError, ReuseStats},
+    line_projection::editor_lines,
 };
+
+pub(crate) use lr::{parse_raw, stock_data_facet, stock_node_types, stock_root_type};
 
 pub mod frontmatter_language;
 mod lexer;
@@ -33,6 +37,18 @@ pub const LINE_COMMENT: &str = "#";
 /// Whether the line prefix triggers upstream reindentation on input.
 pub fn indent_on_input(line_prefix: &str) -> bool {
     matches!(trim_space(line_prefix), "]" | "}")
+}
+
+fn language_data() -> LanguageData {
+    LanguageData::default()
+        .with(
+            "commentTokens",
+            CommentTokens {
+                line: Some(LINE_COMMENT),
+                block: None,
+            },
+        )
+        .with("indentOnInput", indent_on_input as fn(&str) -> bool)
 }
 
 /// Visible YAML syntax, including punctuation and recovered errors.
@@ -166,23 +182,35 @@ pub struct YamlNode {
     kind: YamlNodeKind,
     range: Range<usize>,
     children: Vec<Self>,
+    child_order: ChildOrder,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChildOrder {
+    Disjoint,
+    Overlapping,
+    BufferedOverlap,
 }
 
 impl YamlNode {
     fn new(kind: YamlNodeKind, range: Range<usize>, children: Vec<Self>) -> Self {
+        let disjoint_children = children
+            .windows(2)
+            .all(|pair| pair[0].range.end <= pair[1].range.start);
         Self {
             kind,
             range,
             children,
+            child_order: if disjoint_children {
+                ChildOrder::Disjoint
+            } else {
+                ChildOrder::Overlapping
+            },
         }
     }
 
     fn leaf(kind: YamlNodeKind, range: Range<usize>) -> Self {
-        Self {
-            kind,
-            range,
-            children: Vec::new(),
-        }
+        Self::new(kind, range, Vec::new())
     }
 
     fn ending(kind: YamlNodeKind, start: usize, children: Vec<Self>) -> Self {
@@ -260,6 +288,11 @@ impl YamlDocument {
         Self::parse_range(text, 0..end, None)
     }
 
+    pub(crate) fn parse_editor_strict(text: Text) -> Result<Self, ParseError> {
+        let parsed = lr::parse_strict(text.as_str())?;
+        Ok(Self::from_parsed(text, 0, parsed))
+    }
+
     /// Apply byte edits and reuse a validated LR checkpoint when possible.
     /// For an embedded document, map its region without redetecting delimiters.
     pub fn reparse(&self, changes: &ChangeSet) -> Result<Self, EditError> {
@@ -301,9 +334,13 @@ impl YamlDocument {
         prefix: Option<(&lr::Cache, Option<usize>)>,
     ) -> Self {
         let parsed = lr::parse(&text.as_str()[range.clone()], prefix);
+        Self::from_parsed(text, range.start, parsed)
+    }
+
+    fn from_parsed(text: Text, offset: usize, parsed: lr::Parsed) -> Self {
         let mut root = parsed.root;
         let mut highlights = Vec::new();
-        root.collect_highlights(range.start, false, &mut highlights);
+        root.collect_highlights(offset, false, &mut highlights);
         Self {
             text,
             editor_lines: OnceLock::new(),
@@ -356,7 +393,7 @@ impl YamlDocument {
     pub fn foldable(&self, line_start: usize, line_end: usize) -> Option<Range<usize>> {
         self.text.slice(line_start..line_end)?;
         let lines = self.syntax_lines();
-        let path = self.path(line_end, |node| {
+        let path = self.path(line_end, Assoc::After, |node| {
             node.range.start <= line_end && line_end < node.range.end
         });
         let mut found = None;
@@ -385,20 +422,13 @@ impl YamlDocument {
         if !(self.root.range.start..=self.root.range.end).contains(&position) {
             return None;
         }
-        let path = self.path(position, |node| {
+        if let Some(node) = self.flow_at(position) {
+            return self.flow_indent(&cx, node);
+        }
+        // The Stream rule resolves to the left, even when there is no flow rule.
+        let path = self.path(position, Assoc::Before, |node| {
             node.range.start < position && position <= node.range.end
         });
-        for node in path.iter().rev() {
-            if matches!(node.kind, FlowMapping | FlowSequence)
-                && (position < node.range.end
-                    || node
-                        .children
-                        .last()
-                        .is_some_and(|child| child.kind == Error))
-            {
-                return self.flow_indent(&cx, node);
-            }
-        }
         for node in path.into_iter().rev() {
             let start = node.range.start;
             match node.kind {
@@ -425,6 +455,48 @@ impl YamlDocument {
             }
         }
         None
+    }
+
+    fn flow_at(&self, position: usize) -> Option<&YamlNode> {
+        let is_flow = |node: &YamlNode| matches!(node.kind, FlowMapping | FlowSequence);
+        let path = self.path(position, Assoc::Before, |node| {
+            node.range.start < position && position < node.range.end
+        });
+        let parent = path.last().copied().unwrap_or(&self.root);
+        let mut scan = if parent.child_order == ChildOrder::Disjoint {
+            let before = parent
+                .children
+                .partition_point(|child| child.range.start < position);
+            parent.children[..before].last()
+        } else {
+            parent
+                .children
+                .iter()
+                .rfind(|child| child.range.start < position)
+        };
+        let mut flow = None;
+        let mut unfinished = None;
+        // Lezer enters nodes ending in a zero-width error, then checks the
+        // preceding child for a deeper unfinished node. A nonempty error
+        // consumes text and does not reopen a node at its end.
+        while let Some(node) = scan {
+            let Some((last, siblings)) = node.children.split_last() else {
+                break;
+            };
+            if last.range.end != node.range.end {
+                break;
+            }
+            if is_flow(node) {
+                flow = Some(node);
+            }
+            if last.kind == Error && last.range.is_empty() {
+                unfinished = flow;
+                scan = siblings.last();
+            } else {
+                scan = Some(last);
+            }
+        }
+        unfinished.or_else(|| path.into_iter().rfind(|node| is_flow(node)))
     }
 
     fn flow_indent(&self, cx: &IndentContext<'_>, node: &YamlNode) -> Option<usize> {
@@ -470,7 +542,7 @@ impl YamlDocument {
     fn base_indent(&self, cx: &IndentContext<'_>, node_start: usize) -> Option<usize> {
         let mut line = cx.text().line_at(node_start)?.range.start;
         while let Some(previous) = self
-            .path(line, |node| {
+            .path(line, Assoc::Before, |node| {
                 node.range.start < line && line < node.range.end
             })
             .into_iter()
@@ -481,18 +553,30 @@ impl YamlDocument {
         cx.line_indent(line, Assoc::After)
     }
 
-    fn path(&self, position: usize, contains: impl Fn(&YamlNode) -> bool) -> Vec<&YamlNode> {
+    fn path(
+        &self,
+        position: usize,
+        assoc: Assoc,
+        contains: impl Fn(&YamlNode) -> bool,
+    ) -> Vec<&YamlNode> {
         let mut result = Vec::new();
         let mut parent = &self.root;
         loop {
-            let start = parent
-                .children
-                .partition_point(|child| child.range.end < position);
-            let Some(child) = parent.children[start..]
-                .iter()
-                .take_while(|child| child.range.start <= position)
-                .find(|child| contains(child))
-            else {
+            let next = if parent.child_order == ChildOrder::Disjoint {
+                let start = parent
+                    .children
+                    .partition_point(|child| child.range.end < position);
+                parent.children[start..]
+                    .iter()
+                    .take_while(|child| child.range.start <= position)
+                    .find(|child| contains(child))
+            } else if assoc == Assoc::Before && parent.child_order == ChildOrder::BufferedOverlap {
+                // Left and neutral resolution search buffered children in reverse.
+                parent.children.iter().rfind(|child| contains(child))
+            } else {
+                parent.children.iter().find(|child| contains(child))
+            };
+            let Some(child) = next else {
                 return result;
             };
             result.push(child);

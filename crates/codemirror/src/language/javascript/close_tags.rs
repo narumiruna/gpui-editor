@@ -4,8 +4,8 @@
 use std::ops::Range;
 
 use crate::{
-    Assoc, Change, ChangeSet, EditError, EditorState, RangeEdit, SelectionRange, Transaction,
-    TransactionCoordinates,
+    Assoc, Change, ChangeSet, EditError, EditorSelection, EditorState, RangeEdit, SelectionRange,
+    Transaction, TransactionCoordinates,
 };
 
 use super::{JavascriptDocument, JavascriptNode, JavascriptOptions};
@@ -68,22 +68,9 @@ pub fn auto_close_tags_in(
             .clone(),
         ..EditorState::new("")
     };
-    let complete = post.change_by_range(|selection| {
-        let head = selection.head();
-        let mut edit = RangeEdit {
-            changes: ChangeSet::default(),
-            selection,
-            effects: Vec::new(),
-        };
-        if let Some((insert, caret)) = close_at(&doc, typed, head - offset) {
-            edit.changes = ChangeSet::single(Change::new(head..head, insert))?;
-            edit.selection = SelectionRange::new(offset + caret, offset + caret);
-        }
-        Ok(edit)
-    })?;
-    if complete.changes().is_empty() {
+    let Some(complete) = close_tags_after(&post, &doc, offset, typed, false)? else {
         return Ok(None);
-    }
+    };
     Ok(Some(
         base.merge(
             complete
@@ -93,6 +80,39 @@ pub fn auto_close_tags_in(
             TransactionCoordinates::Sequential,
         )?,
     ))
+}
+
+pub(crate) fn close_tags_after(
+    state: &EditorState,
+    document: &JavascriptDocument,
+    offset: usize,
+    typed: &str,
+    keep_association: bool,
+) -> Result<Option<Transaction>, EditError> {
+    let transaction = state.change_by_range(|selection| {
+        let head = selection.head();
+        let mut edit = RangeEdit {
+            changes: ChangeSet::default(),
+            selection,
+            effects: Vec::new(),
+        };
+        let close = head
+            .checked_sub(offset)
+            .and_then(|local| close_at(document, typed, local));
+        if let Some((insert, caret)) = close {
+            edit.changes = ChangeSet::single(Change::new(head..head, insert))?;
+            if keep_association {
+                if typed == "/" {
+                    edit.selection =
+                        EditorSelection::cursor(offset + caret, Some(Assoc::Before), None, None);
+                }
+            } else {
+                edit.selection = SelectionRange::new(offset + caret, offset + caret);
+            }
+        }
+        Ok(edit)
+    })?;
+    Ok((!transaction.changes().is_empty()).then_some(transaction))
 }
 
 fn close_at(doc: &JavascriptDocument, typed: &str, head: usize) -> Option<(String, usize)> {

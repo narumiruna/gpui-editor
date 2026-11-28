@@ -225,6 +225,109 @@ fn signature_trigger_flow(input: &mut impl BufRead, output: &mut impl Write) {
     result(output, retrigger, "null");
 }
 
+const DEBOUNCE_SIGNATURE: &str = r#"{"activeParameter":0,"activeSignature":0,"signatures":[{"label":"f(x, y)","parameters":[{"label":"x"},{"label":"y"}]},{"label":"f(a, b)","parameters":[{"label":"a"},{"label":"b"}]}]}"#;
+
+fn signature_in_fence(
+    input: &mut impl BufRead,
+    character: u32,
+    kind: u32,
+    trigger: Option<&str>,
+    active: Option<&str>,
+) -> i32 {
+    let frame = expect(input, "textDocument/signatureHelp");
+    for field in [
+        format!(r#""uri":"{URI}""#),
+        format!(r#""position":{{"line":5,"character":{character}}}"#),
+        format!(r#""triggerKind":{kind}"#),
+        format!(r#""isRetrigger":{}"#, active.is_some()),
+    ] {
+        assert!(frame.contains(&field), "{frame}");
+    }
+    assert_eq!(
+        frame.contains(r#""triggerCharacter":"#),
+        trigger.is_some(),
+        "{frame}"
+    );
+    if let Some(trigger) = trigger {
+        assert!(
+            frame.contains(&format!(r#""triggerCharacter":"{trigger}""#)),
+            "{frame}"
+        );
+    }
+    assert_eq!(
+        frame.contains(r#""activeSignatureHelp":"#),
+        active.is_some(),
+        "{frame}"
+    );
+    if let Some(active) = active {
+        assert!(
+            frame.contains(&format!(r#""activeSignatureHelp":{active}"#)),
+            "{frame}"
+        );
+    }
+    id(&frame)
+}
+
+fn signature_debounce_flow(input: &mut impl BufRead, output: &mut impl Write) {
+    result(
+        output,
+        signature_in_fence(input, 1, 1, None, None),
+        DEBOUNCE_SIGNATURE,
+    );
+    change(input, &SOURCE.replacen("let x", "0let x", 1), 1);
+    change(input, &SOURCE.replacen("let x", "10lezt x", 1), 2);
+    let refreshed =
+        DEBOUNCE_SIGNATURE.replacen(r#""activeParameter":0"#, r#""activeParameter":1"#, 1);
+    result(
+        output,
+        signature_in_fence(input, 5, 3, None, Some(DEBOUNCE_SIGNATURE)),
+        &refreshed,
+    );
+    result(
+        output,
+        signature_in_fence(input, 5, 3, None, Some(&refreshed)),
+        r#"{"signatures":[{"label":"stale"}]}"#,
+    );
+    result(
+        output,
+        signature_in_fence(input, 5, 3, None, Some(&refreshed)),
+        "null",
+    );
+}
+
+fn signature_cancel_flow(input: &mut impl BufRead, output: &mut impl Write) {
+    result(
+        output,
+        signature_in_fence(input, 1, 1, None, None),
+        DEBOUNCE_SIGNATURE,
+    );
+    let typed = SOURCE.replacen("let x", "le,t x", 1);
+    change(input, &typed, 1);
+    result(
+        output,
+        signature_in_fence(input, 3, 2, Some(","), Some(DEBOUNCE_SIGNATURE)),
+        DEBOUNCE_SIGNATURE,
+    );
+    result(
+        output,
+        signature_in_fence(input, 4, 1, None, Some(DEBOUNCE_SIGNATURE)),
+        DEBOUNCE_SIGNATURE,
+    );
+    for _ in 0..9 {
+        result(
+            output,
+            signature_in_fence(input, 1, 1, None, None),
+            DEBOUNCE_SIGNATURE,
+        );
+    }
+    change(input, &typed.replacen("le,t", "le文,t", 1), 2);
+    result(
+        output,
+        signature_in_fence(input, 1, 1, None, None),
+        DEBOUNCE_SIGNATURE,
+    );
+}
+
 fn main() {
     let mut args = std::env::args_os().skip(1);
     let mode = args.next().unwrap().into_string().unwrap();
@@ -278,7 +381,7 @@ fn main() {
         "references" | "references-code" | "references-disconnect" | "references-pointer" => {
             r#"{"capabilities":{"referencesProvider":{},"textDocumentSync":2}}"#
         }
-        "signature-request" | "signature-trigger" => {
+        "signature-request" | "signature-trigger" | "signature-debounce" | "signature-cancel" => {
             r#"{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["("],"retriggerCharacters":[","]},"textDocumentSync":2}}"#
         }
         _ => r#"{"capabilities":{"hoverProvider":true,"textDocumentSync":2}}"#,
@@ -299,6 +402,8 @@ fn main() {
         "references" => references_flow(&mut input, &mut output),
         "signature-request" => signature_request_flow(&mut input, &mut output),
         "signature-trigger" => signature_trigger_flow(&mut input, &mut output),
+        "signature-debounce" => signature_debounce_flow(&mut input, &mut output),
+        "signature-cancel" => signature_cancel_flow(&mut input, &mut output),
         "references-pointer" => {
             let request = references(&mut input, 0, 3);
             let name = location(URI, 0, 3, 5);

@@ -1,56 +1,31 @@
 // Completion rules from @codemirror/lang-css 6.3.1 as configured by lang-sass.
 // See docs/licenses/codemirror-lang-sass.txt and docs/licenses/codemirror-lang-css.txt.
-use std::{collections::HashSet, sync::LazyLock};
+use std::collections::HashSet;
 
 use crate::{
-    Text,
     autocomplete::session::{CompletionItem, SourceResult},
+    language::css::{CssPropertySnapshot, completion::FixedOptions},
 };
 
-use super::super::css::{CssDocument, define_css_completion_source};
 use super::{SassDocument, SassNode};
 
-#[derive(Clone, Copy)]
-enum Options {
-    Properties,
-    Values,
-    Pseudos,
-    Tags,
-    AtRules,
-}
-
-impl Options {
-    fn result(self, from: usize) -> SourceResult {
-        // CSS's public helper takes a CSS document, not a generic syntax tree.
-        // Get its fixed option sets from small CSS contexts. All queries of
-        // the actual source (including variables) use the Sass tree.
-        static RESULTS: LazyLock<[SourceResult; 5]> = LazyLock::new(|| {
-            let css = define_css_completion_source(|_| false);
-            [
-                ("a { color: red; }", 9),
-                ("a { color: red; }", 14),
-                ("a:hover {}", 7),
-                ("div {}", 3),
-                ("@unknown;", 8),
-            ]
-            .map(|(text, at)| {
-                css(&CssDocument::parse(Text::new(text)), at, false)
-                    .expect("published CSS completion for fixed context")
-            })
-        });
-        let mut result = RESULTS[self as usize].clone();
-        result.from = from;
-        result
-    }
-}
-
 /// Return unfiltered options selected by the Sass syntax at a UTF-8 position.
-/// Property names come from the native CSS browser snapshot.
-/// Malformed input can give different results from upstream Lezer recovery.
+/// CSS properties use the pinned stock list. Malformed input can give
+/// different results from upstream Lezer recovery.
 pub fn sass_completion_source(
     doc: &SassDocument,
     position: usize,
     explicit: bool,
+) -> Option<SourceResult> {
+    sass_completion_source_with_properties(doc, position, explicit, CssPropertySnapshot::stock())
+}
+
+/// Run the Sass source with these property options in place of the stock names.
+pub fn sass_completion_source_with_properties(
+    doc: &SassDocument,
+    position: usize,
+    explicit: bool,
+    properties: &CssPropertySnapshot,
 ) -> Option<SourceResult> {
     doc.text().slice(position..position)?;
     let node = doc.path(position, -1).last()?;
@@ -61,13 +36,13 @@ pub fn sass_completion_source(
     if name == "PropertyName"
         || (is_dash || name == "TagName") && doc.path(range.end, 0).last()?.name() == "Block"
     {
-        return Some(Options::Properties.result(from));
+        return Some(properties.result(from));
     }
     if name == "ValueName" {
-        return Some(Options::Values.result(from));
+        return Some(FixedOptions::Values.result(from));
     }
     if name == "PseudoClassName" {
-        return Some(Options::Pseudos.result(from));
+        return Some(FixedOptions::Pseudos.result(from));
     }
     if is_variable(node) || (explicit || is_dash) && is_var_arg(doc, node) {
         return Some(variables(
@@ -82,17 +57,14 @@ pub fn sass_completion_source(
     if name == "TagName" {
         let in_block = std::iter::successors(node.parent(), |parent| parent.parent())
             .any(|parent| parent.name() == "Block");
-        return Some(
-            if in_block {
-                Options::Properties
-            } else {
-                Options::Tags
-            }
-            .result(from),
-        );
+        return Some(if in_block {
+            properties.result(from)
+        } else {
+            FixedOptions::Tags.result(from)
+        });
     }
     if name == "AtKeyword" {
-        return Some(Options::AtRules.result(from));
+        return Some(FixedOptions::AtRules.result(from));
     }
     if !explicit {
         return None;
@@ -102,16 +74,13 @@ pub fn sass_completion_source(
         .children()
         .rfind(|child| child.range().start < position)
         .is_some_and(|child| child.name() == ":");
-    Some(
-        match above.name() {
-            "PseudoClassSelector" if after_colon => Options::Pseudos,
-            "Declaration" if after_colon => Options::Values,
-            "ArgList" => Options::Values,
-            "Block" => Options::Properties,
-            _ => return None,
-        }
-        .result(position),
-    )
+    match above.name() {
+        "PseudoClassSelector" if after_colon => Some(FixedOptions::Pseudos.result(position)),
+        "Declaration" if after_colon => Some(FixedOptions::Values.result(position)),
+        "ArgList" => Some(FixedOptions::Values.result(position)),
+        "Block" => Some(properties.result(position)),
+        _ => None,
+    }
 }
 
 fn is_variable(node: SassNode<'_>) -> bool {

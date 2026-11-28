@@ -85,6 +85,60 @@ fn check_byte_ranges(doc: &JavascriptDocument) {
 }
 
 #[test]
+fn comment_folds_use_pinned_logical_endpoints_and_reject_split_scalars() {
+    use gpui_editor_codemirror::{Change, ChangeSet};
+    use serde_json::Value;
+
+    let byte = |value: &Value| value.as_u64().and_then(|at| usize::try_from(at).ok());
+    let byte_range = |wire: &Value| Some(byte(&wire[0])?..byte(&wire[1])?);
+    let check = |name: &str, doc: &JavascriptDocument, expected: &Value| {
+        let comments: Vec<_> = doc
+            .nodes()
+            .filter(|node| node.kind().name() == "BlockComment")
+            .map(|node| node.fold_range())
+            .collect();
+        let nodes = expected["nodes"].as_array().unwrap();
+        let lines = expected["lines"].as_array().unwrap();
+        assert_eq!(
+            comments,
+            nodes.iter().map(byte_range).collect::<Vec<_>>(),
+            "{name}: comment fold properties"
+        );
+        assert_eq!(doc.text().line_count(), lines.len(), "{name}");
+        for (n, row) in lines.iter().enumerate() {
+            let line = doc.text().line(n + 1).unwrap();
+            assert_eq!(Some(line.range.start), byte(&row[0]), "{name}");
+            assert_eq!(
+                doc.foldable(line.range.start, line.range.end),
+                byte_range(&row[1]),
+                "{name}: line {}",
+                n + 1
+            );
+        }
+    };
+
+    for row in include_str!("fixtures/javascript_comment_folds.jsonl").lines() {
+        let expected: Value = serde_json::from_str(row).unwrap();
+        let source = expected["source"].as_str().unwrap();
+        let doc = parse(source);
+        check(expected["name"].as_str().unwrap(), &doc, &expected);
+        if let Some(edit) = expected.get("edit") {
+            let close = source.len() - 2;
+            let edited = doc
+                .reparse(&ChangeSet::single(Change::new(close..source.len(), "")).unwrap())
+                .unwrap();
+            assert_eq!(edited.text().as_str(), &source[..close]);
+            check("deleted closer", &edited, edit);
+            let repaired = edited
+                .reparse(&ChangeSet::single(Change::new(close..close, "*/")).unwrap())
+                .unwrap();
+            assert_eq!(repaired.text().as_str(), source);
+            check("restored closer", &repaired, &expected["repair"]);
+        }
+    }
+}
+
+#[test]
 fn uses_asi_regexp_and_postfix_context_with_original_byte_offsets() {
     let doc = parse(concat!(
         "function f() {\n",

@@ -49,6 +49,11 @@ const cases = [
     [true, "<root mode='o|' />", true, null],
     [true, '<unlisted mode="f|"/>', true, '<unlisted mode="fallback"/>'],
     [true, "<root>😀</ro|>", true, "<root>😀</root>"],
+    [true, "<root mode=|()/>", true],
+    [true, "<root mode=|( )/>", true],
+    [true, "<root mode=( |)/>", true],
+    [true, "<root mode=()/>|", true],
+    [true, "<root mode=( )/>|", true],
 ];
 
 function query([enabled, marked, explicit, inserted]) {

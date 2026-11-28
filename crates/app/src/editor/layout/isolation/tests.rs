@@ -179,8 +179,18 @@ fn live_wast_uses_native_pixels_hits_selection_and_undo_boundaries(cx: &mut Test
 }
 
 #[gpui::test]
-fn java_json_and_sql_fences_apply_opt_in_live_isolation(cx: &mut TestAppContext) {
+fn stock_grammar_fences_apply_opt_in_live_isolation(cx: &mut TestAppContext) {
     for (language, code, expected) in [
+        (
+            "cpp",
+            r###"int main(){ auto s="אב"; auto t=R"(字)"; } // جد"###,
+            &["\"אב\"", "// جد"][..],
+        ),
+        (
+            "rust",
+            r###"fn main(){ let s="אב"; let t=r#"字"#; } // جد"###,
+            &["\"אב\"", "r#\"字\"#", "// جد"][..],
+        ),
         (
             "java",
             r#"class C{ String s="אב"; } // جد"#,
@@ -250,7 +260,7 @@ fn configured_lr_isolation_repaints_the_same_editable_body(cx: &mut TestAppConte
                 markdown_with_parser,
             },
         },
-        language_data::{json_language, lezer_language},
+        language_data::{json_language, lezer_language, rust_language},
         view::bidi::Direction,
     };
 
@@ -263,7 +273,20 @@ fn configured_lr_isolation_repaints_the_same_editable_body(cx: &mut TestAppConte
     })]);
     let lezer_next = lezer
         .with_node_props(&[ISOLATE.add(|row| row.is("Literal").then_some(Some(Isolation::Ltr)))]);
+    let rust = rust_language();
+    let rust_next = rust.with_node_props(&[ISOLATE.add(|row| match row.name() {
+        "LineComment" => Some(None),
+        "String" => Some(Some(Isolation::Ltr)),
+        _ => None,
+    })]);
     for (body, stock, configured, stock_marks, configured_marks) in [
+        (
+            r#"fn main(){ let s="אב"; } // جد"#,
+            MarkdownCodeParser::Rust(rust.clone()),
+            MarkdownCodeParser::Rust(rust_next),
+            &[("\"אב\"", None), ("// جد", None)][..],
+            &[("\"אב\"", Some(Direction::Ltr))][..],
+        ),
         (
             r#"{"😀": "אב"}"#,
             MarkdownCodeParser::Json(json.clone()),

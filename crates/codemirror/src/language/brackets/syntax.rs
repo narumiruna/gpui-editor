@@ -115,18 +115,40 @@ pub(in crate::language) fn match_named_siblings<'a, N: Copy>(
     start: Range<usize>,
     direction: BracketDirection,
     expected: impl Into<BracketMates<'a>>,
-    mut siblings: impl DoubleEndedIterator<Item = N>,
+    siblings: impl DoubleEndedIterator<Item = N>,
     describe: impl Fn(N) -> (Range<usize>, &'static str),
     is_delimiter: impl Fn(N, BracketDirection) -> bool,
 ) -> BracketMatch {
+    let found = named_sibling(
+        &start,
+        direction,
+        expected.into(),
+        siblings,
+        &describe,
+        is_delimiter,
+    );
+    let end = found
+        .map(|(node, _)| describe(node).0)
+        .filter(|range| !range.is_empty());
+    BracketMatch {
+        start,
+        end,
+        matched: found.is_some_and(|(_, matched)| matched),
+    }
+}
+
+/// Find a marked node using the delimiter's full range, not its paint handle.
+/// Return the first mate or terminal mismatch.
+pub(in crate::language) fn named_sibling<N: Copy>(
+    start: &Range<usize>,
+    direction: BracketDirection,
+    expected: BracketMates<'_>,
+    mut siblings: impl DoubleEndedIterator<Item = N>,
+    describe: impl Fn(N) -> (Range<usize>, &'static str),
+    is_delimiter: impl Fn(N, BracketDirection) -> bool,
+) -> Option<(N, bool)> {
     let forward = direction == Forward;
     let opposite = if forward { Backward } else { Forward };
-    let expected = expected.into();
-    let mut hit = BracketMatch {
-        start,
-        end: None,
-        matched: false,
-    };
     let mut depth = 0;
     while let Some(sibling) = if forward {
         siblings.next()
@@ -134,25 +156,22 @@ pub(in crate::language) fn match_named_siblings<'a, N: Copy>(
         siblings.next_back()
     } {
         let (range, name) = describe(sibling);
-        if (forward && (range.start < hit.start.end || range.end <= hit.start.end))
-            || (!forward && (range.end > hit.start.start || range.start >= hit.start.start))
+        if (forward && (range.start < start.end || range.end <= start.end))
+            || (!forward && (range.end > start.start || range.start >= start.start))
         {
             continue;
         }
         if depth == 0 && expected.contains(name) && !range.is_empty() {
-            hit.end = Some(range);
-            hit.matched = true;
-            break;
+            return Some((sibling, true));
         }
         if is_delimiter(sibling, direction) {
             depth += 1;
         } else if is_delimiter(sibling, opposite) {
             if depth == 0 {
-                hit.end = (!range.is_empty()).then_some(range);
-                break;
+                return Some((sibling, false));
             }
             depth -= 1;
         }
     }
-    hit
+    None
 }

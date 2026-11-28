@@ -152,11 +152,20 @@ struct Frame {
 #[derive(Clone)]
 struct Stack {
     frames: Vec<Frame>,
+    trial_frames: Option<TrialFrames>,
     roots: Roots,
     pos: usize,
     // Skipped tokens move `pos` but must not extend the next ordinary reduction.
     reduce_pos: usize,
     context: Option<Context>,
+}
+
+// Until a JSON force trial ends, the original prefix below `start` is
+// untouched. The journal holds the original suffix in reverse order.
+#[derive(Clone)]
+struct TrialFrames {
+    start: usize,
+    saved: Vec<Frame>,
 }
 
 /// A read-only view of the active parse stack.
@@ -260,7 +269,7 @@ impl Parser {
         Ok(tree.finish(self, roots, end, None))
     }
 
-    fn run_lr<const CHECK_WAST_DEPTH: bool>(
+    fn run_lr<const CHECK_EDITOR_DEPTH: bool>(
         &self,
         source: &str,
         mut stack: Stack,
@@ -280,7 +289,7 @@ impl Parser {
             work.spend(start, 1)?;
             idle.spend(start, 1)?;
             let state = self.tables.state(stack.state()).expect("validated state");
-            let at_depth_limit = CHECK_WAST_DEPTH && stack.frames.len() >= glr::MAX_STACK_DEPTH;
+            let at_depth_limit = CHECK_EDITOR_DEPTH && stack.frames.len() >= glr::MAX_STACK_DEPTH;
             if let Some(action) = state.default_reduce {
                 if at_depth_limit {
                     stack.check_depth(action)?;
@@ -400,6 +409,7 @@ impl Stack {
                 start: 0,
                 output_base: Roots::default(),
             }],
+            trial_frames: None,
             roots: Roots::default(),
             pos: 0,
             reduce_pos: 0,
@@ -536,10 +546,27 @@ impl Stack {
         let Frame {
             start, output_base, ..
         } = self.frames[base];
-        if !stay {
-            let target = parser
-                .reduction_goto(self.frames[from].state, term, self.pos, work, tokens)?
-                .ok_or(invalid)?;
+        let target = if stay {
+            None
+        } else {
+            Some(
+                parser
+                    .reduction_goto(self.frames[from].state, term, self.pos, work, tokens)?
+                    .ok_or(invalid)?,
+            )
+        };
+        // A stay reduction leaves the base frame unchanged.
+        let changed = base + usize::from(stay);
+        if let Some(journal) = &mut self.trial_frames
+            && changed < journal.start
+        {
+            let frames = &self.frames[changed..journal.start];
+            // Pay for saving and restoring before changing any original frame.
+            work.spend(self.pos, 2 * frames.len())?;
+            journal.saved.extend(frames.iter().rev().copied());
+            journal.start = changed;
+        }
+        if let Some(target) = target {
             self.frames[base].state = target;
         }
         self.frames.truncate(base + 1);

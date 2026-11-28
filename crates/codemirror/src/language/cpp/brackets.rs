@@ -3,19 +3,21 @@ use std::ops::Range;
 use crate::{
     Assoc,
     autocomplete::brackets::CloseBracketSyntax,
-    language::brackets::{
-        BracketConfig, BracketDirection, BracketDirection::Forward, BracketMatch, bracket_pairs,
-        directional_bracket_near, match_configured_editor_text, match_named_siblings,
-        named_delimiter,
+    language::{
+        brackets::{
+            BracketConfig, BracketDirection::Forward, BracketMatch, bracket_pairs,
+            directional_bracket_near, match_configured_editor_text,
+        },
+        lezer::{LrSyntaxNode, match_lr_marked},
     },
 };
 
-use super::{CppDocument, CppNode, CppNodeKind};
+use super::CppDocument;
 
 impl CppDocument {
     /// Match C or C++ delimiters near a UTF-8 caret. Marked delimiters use
-    /// syntax siblings; plain scans compare exact grammar types and meter
-    /// the distance in logical UTF-16 chunks.
+    /// configured roles and handles on syntax siblings. Plain scans compare
+    /// exact grammar terms and measure distance in logical UTF-16 chunks.
     pub fn bracket_near_with_config(
         &self,
         head: usize,
@@ -30,19 +32,9 @@ impl CppDocument {
                 Assoc::Before
             };
             let node = self.path(pos, Some(side)).last()?;
-            for token in std::iter::successors(Some(node), |node| node.parent()) {
-                if !token.data().range.is_empty()
-                    && let Some(expected) = matching_name(token.kind(), dir, pairs)
-                {
-                    return Some(match_named_siblings(
-                        token.range(),
-                        dir,
-                        expected,
-                        token.parent().into_iter().flat_map(CppNode::children),
-                        |sibling| (sibling.range(), sibling.kind().name()),
-                        |sibling, dir| matching_name(sibling.kind(), dir, pairs).is_some(),
-                    ));
-                }
+            if let Some(hit) = match_lr_marked(&self.text, LrSyntaxNode::cpp(node), pos, dir, pairs)
+            {
+                return Some(hit);
             }
             let term = node.data().term;
             match_configured_editor_text(lines, pos, dir, config, |at| {
@@ -57,24 +49,6 @@ impl CppDocument {
     pub fn quote_syntax_in(&self, origin: usize) -> impl CloseBracketSyntax + '_ {
         Quotes { doc: self, origin }
     }
-}
-
-fn matching_name(
-    kind: CppNodeKind,
-    direction: BracketDirection,
-    pairs: &str,
-) -> Option<Option<&str>> {
-    use CppNodeKind::*;
-    let mate = match (kind, direction == Forward) {
-        (OpenParen, true) => CloseParen,
-        (CloseParen, false) => OpenParen,
-        (OpenBrace, true) => CloseBrace,
-        (CloseBrace, false) => OpenBrace,
-        (OpenBracket, true) => CloseBracket,
-        (CloseBracket, false) => OpenBracket,
-        _ => return named_delimiter(kind.name(), direction, pairs),
-    };
-    Some(Some(mate.name()))
 }
 
 struct Quotes<'a> {

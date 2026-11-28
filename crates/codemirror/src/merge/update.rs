@@ -1,25 +1,26 @@
 use std::ops::Range;
 
-use super::{Chunk, DiffConfig, Side, build, near, offset};
+use super::{Chunk, Side, near, offset};
 use crate::{ChangeDesc, Text};
 
 const MARGIN: usize = 1_000;
 
-pub(super) fn update(
+// None requests a full rebuild. A build error must reach the caller instead.
+pub(super) fn update<E>(
     chunks: &[Chunk],
     a: &Text,
     b: &Text,
     side: Side,
     changes: &ChangeDesc,
-    config: DiffConfig,
-) -> Option<Vec<Chunk>> {
+    build: impl Fn(&str, &str) -> Result<Vec<Chunk>, E>,
+) -> Option<Result<Vec<Chunk>, E>> {
     let (edited, other) = sides(side, a.as_str(), b.as_str());
     let (old_len, new_len) = (changes.length(), changes.new_length());
     if new_len != edited.len() {
         return None;
     }
     if changes.is_empty() {
-        return Some(chunks.to_vec());
+        return Some(Ok(chunks.to_vec()));
     }
     // Give each edit its own context, rounded out to paired line boundaries.
     // Join overlapping windows, but retain chunks between distant edits.
@@ -72,7 +73,11 @@ pub(super) fn update(
             edited.get(window.edited.clone())?,
             other.get(window.other)?,
         );
-        for mut chunk in build(a, b, config) {
+        let rebuilt = match build(a, b) {
+            Ok(chunks) => chunks,
+            Err(error) => return Some(Err(error)),
+        };
+        for mut chunk in rebuilt {
             chunk.a = offset(&chunk.a, off_a);
             chunk.b = offset(&chunk.b, off_b);
             push(&mut result, chunk)?;
@@ -80,7 +85,7 @@ pub(super) fn update(
         (index, old_base, new_base) = (window.chunks.end, window.old_to, window.edited.end);
     }
     reuse(&mut result, chunks.get(index..)?, side, old_base, new_base)?;
-    Some(result)
+    Some(Ok(result))
 }
 
 struct Window {

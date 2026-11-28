@@ -87,18 +87,33 @@ fn close_bracket_config(state: &EditorState) -> CloseBracketConfig<'static> {
 pub fn insert_bracket(state: &EditorState, bracket: &str) -> CommandResult {
     let mut config = close_bracket_config(state);
     let attached = attached_language_snapshot(state);
+    let cpp;
     let go;
+    let java;
     let lezer;
+    let rust;
     let wast;
     config.syntax = match attached.as_deref().map(|doc| doc.syntax()) {
+        Some(NativeSyntax::Cpp(syntax)) => {
+            cpp = syntax.quote_syntax_in(0);
+            Some(&cpp)
+        }
         Some(NativeSyntax::Go(syntax)) => {
             go = syntax.quote_syntax_in(0);
             Some(&go)
+        }
+        Some(NativeSyntax::Java(syntax)) => {
+            java = syntax.quote_syntax_in(0);
+            Some(&java)
         }
         Some(NativeSyntax::Json(syntax)) => Some(syntax),
         Some(NativeSyntax::LezerGrammar(syntax)) => {
             lezer = syntax.quote_syntax_in(0);
             Some(&lezer)
+        }
+        Some(NativeSyntax::Rust(syntax)) => {
+            rust = syntax.quote_syntax_in(0);
+            Some(&rust)
         }
         Some(NativeSyntax::Wast(syntax)) => {
             wast = syntax.quote_syntax_in(0);

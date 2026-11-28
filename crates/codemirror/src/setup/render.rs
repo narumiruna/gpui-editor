@@ -21,7 +21,7 @@ use crate::{
         gutters::{
             GutterConfig, GutterMarker, GutterSlot, gutter_installed, gutter_slots,
             gutter_slots_with_line_marker, gutter_with_identity, highlight_active_line_gutter,
-            line_numbers,
+            preset_line_numbers,
         },
         special_char_decorations,
     },
@@ -53,7 +53,7 @@ fn fold_marker(
 
 pub(super) fn gutter_extensions() -> [Extension; 3] {
     [
-        line_numbers(Default::default()),
+        preset_line_numbers(),
         highlight_active_line_gutter(),
         FOLD_GUTTER_EXTENSION.clone(),
     ]

@@ -6,10 +6,11 @@
 //! pass's checkpoints for later edits. On invalid input up to 16 KiB, if bounded
 //! recovery fails, the fallback can add up to eight closing tokens at EOF or
 //! keep a prefix that parses. Recovery can differ from upstream Lezer.
-//! Positions and ranges are UTF-8 bytes in the original text. Syntax and
-//! highlights use raw input. On documents with lone CR, indentation, folds,
-//! bracket matches, and bidi marks use the editor's normalized parse, mapped
-//! back to raw bytes.
+//! Positions and ranges are UTF-8 bytes in the original text. Legacy
+//! [`JavaDocument`] constructors use raw input for syntax and highlights.
+//! On documents with lone CR, their editor services use projected lines.
+//! The synchronous [`JavaLanguage`](crate::language_data::JavaLanguage)
+//! attachment parses normalized editor lines and maps the tree back to bytes.
 
 use std::{
     ops::Range,
@@ -18,13 +19,14 @@ use std::{
 
 use crate::{
     Assoc, ChangeSet, EditError, RangeSet, Text,
+    commands::CommentTokens,
     view::{MarkDecoration, Viewport},
 };
 
 use super::{
-    BidiIsolateOptions, HighlightSpan, IndentOptions, StreamSettings,
+    BidiIsolateOptions, HighlightSpan, IndentOptions, LanguageData, StreamSettings,
     bidi::isolate_marks,
-    lezer::{ParseError, ReuseStats, SyntaxTree},
+    lezer::{NodeType, NodeTypes, ParseError, ReuseStats, SyntaxTree},
     line_projection::{NormalizedInput, editor_lines},
 };
 
@@ -37,11 +39,24 @@ mod tables;
 #[cfg(test)]
 mod tests;
 
-pub use parser::{class_content_parser, parser};
+pub use parser::{Mode as JavaTop, class_content_parser, parser};
+pub(crate) use parser::{parse_raw, stock_data_facet, stock_node_types};
 
 pub const NAME: &str = "java";
 pub const LINE_COMMENT: &str = "//";
 pub const BLOCK_COMMENT: (&str, &str) = ("/*", "*/");
+
+pub(crate) fn language_data() -> LanguageData {
+    LanguageData::default()
+        .with(
+            "commentTokens",
+            CommentTokens {
+                line: Some(LINE_COMMENT),
+                block: Some(BLOCK_COMMENT),
+            },
+        )
+        .with("indentOnInput", indent_on_input as fn(&str) -> bool)
+}
 
 /// Whether the text from the line start to the cursor triggers reindentation.
 pub fn indent_on_input(line_prefix: &str) -> bool {
@@ -100,15 +115,7 @@ impl<'a> JavaNode<'a> {
 
     /// The pinned grammar group, if this type is in one.
     pub fn group(self) -> Option<&'static str> {
-        if tables::STATEMENTS.contains(&self.term()) {
-            Some("Statement")
-        } else if tables::EXPRESSIONS.contains(&self.term()) {
-            Some("Expression")
-        } else if tables::TYPES.contains(&self.term()) {
-            Some("Type")
-        } else {
-            None
-        }
+        group(self.term())
     }
 
     /// Whether the grammar marks the type as skipped.
@@ -118,20 +125,12 @@ impl<'a> JavaNode<'a> {
 
     /// The type of a closing delimiter from the grammar's `closedBy` property.
     pub fn closed_by(self) -> Option<&'static str> {
-        match self.term() {
-            11 => Some(")"),
-            53 => Some("}"),
-            _ => None,
-        }
+        closed_by(self.term())
     }
 
     /// The type of an opening delimiter from the grammar's `openedBy` property.
     pub fn opened_by(self) -> Option<&'static str> {
-        match self.term() {
-            10 => Some("("),
-            52 => Some("{"),
-            _ => None,
-        }
+        opened_by(self.term())
     }
 
     /// Whether the grammar isolates the node using automatic bidi direction.
@@ -157,6 +156,34 @@ impl<'a> JavaNode<'a> {
                 )
             }
         }
+    }
+}
+
+fn group(term: u16) -> Option<&'static str> {
+    if tables::STATEMENTS.contains(&term) {
+        Some("Statement")
+    } else if tables::EXPRESSIONS.contains(&term) {
+        Some("Expression")
+    } else if tables::TYPES.contains(&term) {
+        Some("Type")
+    } else {
+        None
+    }
+}
+
+fn closed_by(term: u16) -> Option<&'static str> {
+    match term {
+        11 => Some(")"),
+        53 => Some("}"),
+        _ => None,
+    }
+}
+
+fn opened_by(term: u16) -> Option<&'static str> {
+    match term {
+        10 => Some("("),
+        52 => Some("{"),
+        _ => None,
     }
 }
 
@@ -189,25 +216,28 @@ fn fold_rule(name: &str) -> Option<FoldRule> {
 #[derive(Debug)]
 pub struct JavaDocument {
     text: Text,
-    mode: parser::Mode,
+    mode: JavaTop,
     editor_lines: Option<Text>,
     editor_nodes: Option<Vec<Node>>,
     isolate_ranges: OnceLock<Vec<Range<usize>>>,
     nodes: Vec<Node>,
+    node_types: NodeTypes,
     highlights: Vec<HighlightSpan<'static>>,
     parse_error: Option<ParseError>,
     incremental: Option<Box<SyntaxTree>>,
+    // Attached documents keep normalized checkpoints and report raw offsets.
+    editor_reuse: Option<ReuseStats>,
 }
 
 impl JavaDocument {
     pub fn parse(text: Text) -> Self {
-        Self::parse_with_prefix(text, parser::Mode::Program, None)
+        Self::parse_with_prefix(text, JavaTop::Program, None)
     }
 
     /// Parse Java members without an enclosing class. The same editor
     /// services apply, and edits keep the `ClassContent` top rule.
     pub fn parse_class_content(text: Text) -> Self {
-        Self::parse_with_prefix(text, parser::Mode::ClassContent, None)
+        Self::parse_with_prefix(text, JavaTop::ClassContent, None)
     }
 
     /// Apply byte edits and parse the result. Reuse a validated LR checkpoint
@@ -221,6 +251,14 @@ impl JavaDocument {
             .next()
             .map_or(text.len(), |(range, _)| range.start);
         let prefix = self.incremental.as_deref().map(|tree| (tree, end));
+        if self.editor_reuse.is_some() {
+            return Ok(Self::parse_editor_permissive(
+                text,
+                self.mode,
+                self.node_types.clone(),
+                prefix,
+            ));
+        }
         Ok(Self::parse_with_prefix(text, self.mode, prefix))
     }
 
@@ -228,39 +266,102 @@ impl JavaDocument {
     /// Native nodes and highlights are rebuilt. Recovered documents report
     /// no reuse, even if they keep a strict checkpoint for a later edit.
     pub fn reuse_stats(&self) -> ReuseStats {
-        self.incremental
-            .as_deref()
-            .map_or_else(ReuseStats::default, SyntaxTree::reuse_stats)
+        self.editor_reuse.unwrap_or_else(|| {
+            self.incremental
+                .as_deref()
+                .map_or_else(ReuseStats::default, SyntaxTree::reuse_stats)
+        })
     }
 
-    fn parse_with_prefix(
-        text: Text,
-        mode: parser::Mode,
-        prefix: Option<(&SyntaxTree, usize)>,
-    ) -> Self {
-        let (nodes, parse_error, incremental) = parser::document_nodes(mode, text.as_str(), prefix);
-        let editor_lines = editor_lines(text.as_str());
-        let editor_nodes = editor_lines.as_ref().map(|_| {
+    fn parse_with_prefix(text: Text, top: JavaTop, prefix: Option<(&SyntaxTree, usize)>) -> Self {
+        let parsed = parser::document_nodes(top, text.as_str(), text.len(), prefix);
+        let mut doc = Self::from_parse(text, top, stock_node_types().clone(), parsed, None);
+        doc.editor_nodes = doc.editor_lines.as_ref().map(|_| {
             // Lezer's raw line comments stop only at LF. A lone CR can hide
             // following code in the raw tree but not in the editor document.
-            let input = NormalizedInput::new(text.as_str());
-            let (mut nodes, _, _) = parser::document_nodes(mode, &input.text, None);
-            for node in &mut nodes {
-                node.range =
-                    input.original_byte(node.range.start)..input.original_byte(node.range.end);
-            }
+            let input = NormalizedInput::new(doc.text.as_str());
+            let (mut nodes, _, _) =
+                parser::document_nodes(top, &input.text, input.text.len(), None);
+            project_nodes(&input, &mut nodes);
             nodes
         });
-        let mut doc = Self {
+        doc
+    }
+
+    pub(crate) fn parse_editor(
+        text: Text,
+        top: JavaTop,
+        strict: bool,
+        node_types: NodeTypes,
+    ) -> Result<Self, ParseError> {
+        if !strict {
+            return Ok(Self::parse_editor_permissive(text, top, node_types, None));
+        }
+        let input = NormalizedInput::new(text.as_str());
+        let tree = parse_raw(top, &input.text, true)
+            .map_err(|error| error.map_offset(|at| input.original_byte(at)))?;
+        let mut nodes = parser::collect(&tree, None);
+        project_nodes(&input, &mut nodes);
+        Ok(Self::from_parse(
             text,
-            mode,
-            editor_lines,
-            editor_nodes,
+            top,
+            node_types,
+            (nodes, None, None),
+            Some(ReuseStats::default()),
+        ))
+    }
+
+    fn parse_editor_permissive(
+        text: Text,
+        top: JavaTop,
+        node_types: NodeTypes,
+        prefix: Option<(&SyntaxTree, usize)>,
+    ) -> Self {
+        let source = text.as_str();
+        let input = NormalizedInput::new(source);
+        let prefix = prefix.map(|(tree, mut end)| {
+            // An edit can join or split CRLF at the prefix boundary.
+            if end > 0 && source.as_bytes()[end - 1] == b'\r' {
+                end -= 1;
+            }
+            (tree, input.normalized_byte(end))
+        });
+        let (mut nodes, error, incremental) =
+            parser::document_nodes(top, &input.text, source.len(), prefix);
+        project_nodes(&input, &mut nodes);
+        let error = error.map(|error| error.map_offset(|at| input.original_byte(at)));
+        let mut reuse = incremental
+            .as_ref()
+            .map_or_else(ReuseStats::default, SyntaxTree::reuse_stats);
+        reuse.resumed_at = input.original_byte(reuse.resumed_at);
+        Self::from_parse(
+            text,
+            top,
+            node_types,
+            (nodes, error, incremental),
+            Some(reuse),
+        )
+    }
+
+    fn from_parse(
+        text: Text,
+        top: JavaTop,
+        node_types: NodeTypes,
+        (nodes, parse_error, incremental): parser::Parsed,
+        editor_reuse: Option<ReuseStats>,
+    ) -> Self {
+        let mut doc = Self {
+            editor_lines: editor_lines(text.as_str()),
+            text,
+            mode: top,
+            editor_nodes: None,
             isolate_ranges: OnceLock::new(),
             nodes,
+            node_types,
             highlights: Vec::new(),
             parse_error,
             incremental: incremental.map(Box::new),
+            editor_reuse,
         };
         doc.highlights = highlight::collect(&doc);
         doc
@@ -290,6 +391,16 @@ impl JavaDocument {
             nodes: &self.nodes,
             id: 0,
         }
+    }
+
+    /// Look up a grammar row by term, including configured properties.
+    /// Legacy Java node services always use their stock rules.
+    pub fn node_type(&self, term: u16) -> Option<&NodeType> {
+        self.node_types.get(term)
+    }
+
+    pub(crate) fn node_types(&self) -> &NodeTypes {
+        &self.node_types
     }
 
     /// All visible nodes in pre-order, with each parent before its children.
@@ -416,5 +527,11 @@ impl JavaDocument {
             node.id = id;
         }
         node
+    }
+}
+
+fn project_nodes(input: &NormalizedInput<'_>, nodes: &mut [Node]) {
+    for node in nodes {
+        node.range = input.original_byte(node.range.start)..input.original_byte(node.range.end);
     }
 }

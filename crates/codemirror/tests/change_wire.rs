@@ -58,6 +58,34 @@ fn concrete_wire_matches_pinned_state_sections() {
 }
 
 #[test]
+fn collab_preserves_wire_markers_in_accepted_updates() {
+    let doc = "é😀尾";
+    let wire = json!([1, [0], 3]);
+    let mut sender = EditorState::with_extensions(doc, collab(CollabConfig::new("a", 7))).unwrap();
+    let mut receiver =
+        EditorState::with_extensions(doc, collab(CollabConfig::new("b", 7))).unwrap();
+    let marker = ChangeSet::from_utf16_json(&wire, sender.text()).unwrap();
+    sender.update(Transaction::new(marker)).unwrap();
+    assert_eq!(sender.text().as_str(), doc);
+    let pending = sendable_updates(&sender).unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(
+        pending[0].changes().to_utf16_json(sender.text()).unwrap(),
+        wire
+    );
+
+    let receipt = receive_updates(&receiver, 7, &pending).unwrap();
+    assert_eq!(
+        receipt.changes().to_utf16_json(receiver.text()).unwrap(),
+        wire
+    );
+    receiver.update(receipt).unwrap();
+    assert_eq!(receiver.text().as_str(), doc);
+    assert_eq!(get_synced_version(&receiver).unwrap(), 8);
+    assert!(sendable_updates(&receiver).unwrap().is_empty());
+}
+
+#[test]
 fn concrete_receipts_and_full_rebase_match_pinned_effect_maps() {
     let mark = StateEffectType::with_mapping(|values: &Vec<Value>, desc| {
         let mut values = values.clone();

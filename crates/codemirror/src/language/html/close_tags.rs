@@ -4,8 +4,8 @@
 use std::ops::Range;
 
 use crate::{
-    Assoc, Change, ChangeSet, EditError, EditorState, MapMode, RangeEdit, SelectionRange, Text,
-    Transaction, TransactionCoordinates,
+    Assoc, Change, ChangeSet, EditError, EditorSelection, EditorState, MapMode, RangeEdit,
+    SelectionRange, Text, Transaction, TransactionCoordinates,
 };
 
 use super::{HtmlDocument, HtmlNode, HtmlNodeKind::*, HtmlOptions, lexer};
@@ -61,7 +61,7 @@ pub fn auto_close_tags_in(
         ..EditorState::new("")
     };
     let complete =
-        post.change_by_range(|selection| close_tag(&after, scope.start, typed, selection))?;
+        post.change_by_range(|selection| close_tag(&after, scope.start, typed, selection, None))?;
     if complete.changes().is_empty() {
         return Ok(None);
     }
@@ -92,11 +92,24 @@ fn parse(text: &Text, scope: Range<usize>, options: HtmlOptions) -> HtmlDocument
     HtmlDocument::parse_with_options(text.slice_owned(scope).expect("valid HTML range"), options)
 }
 
+/// Plan the second step from the accepted default state. The caller checks
+/// pre-input ownership; this uses left-biased syntax for each resulting range.
+pub(crate) fn close_tags_after(
+    state: &EditorState,
+    doc: &HtmlDocument,
+    typed: &str,
+) -> Result<Option<Transaction>, EditError> {
+    let complete = state
+        .change_by_range(|selection| close_tag(doc, 0, typed, selection, Some(Assoc::Before)))?;
+    Ok((!complete.changes().is_empty()).then(|| complete.with_scroll_into_view()))
+}
+
 fn close_tag(
     doc: &HtmlDocument,
     offset: usize,
     typed: &str,
     selection: SelectionRange,
+    slash_assoc: Option<Assoc>,
 ) -> Result<RangeEdit, EditError> {
     let source = doc.text().as_str();
     let head = selection.head() - offset;
@@ -116,7 +129,7 @@ fn close_tag(
     };
     if typed == "/" {
         let end = selection.head() + insert.len();
-        edit.selection = SelectionRange::new(end, end);
+        edit.selection = EditorSelection::cursor(end, slash_assoc, None, None);
     }
     let end = selection.head() + usize::from(source.as_bytes().get(head) == Some(&b'>'));
     edit.changes = ChangeSet::single(Change::new(selection.head()..end, insert))?;
@@ -158,6 +171,19 @@ pub(crate) fn tag_close_insert(
     } else {
         format!("{name}>")
     })
+}
+
+/// Inspect the HTML tree with the XML handler's last-child check.
+pub(crate) fn xml_policy_end_tag_name(doc: &HtmlDocument, head: usize) -> Option<&str> {
+    let node = resolve_left(doc, head);
+    if node.kind() != EndTag {
+        return None;
+    }
+    let element = node.parent()?.parent()?;
+    if has_close(element) {
+        return None;
+    }
+    element_name(doc.text().as_str(), element, head)
 }
 
 fn resolve_left(doc: &HtmlDocument, position: usize) -> HtmlNode<'_> {

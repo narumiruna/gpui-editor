@@ -209,13 +209,13 @@ mod rust_contract {
     use gpui_editor_codemirror::{EditError, Text};
 
     #[test]
-    fn collapses_selections_strictly_inside_a_replacement() {
-        // Pinned upstream maps these endpoints across one another. Rust
-        // collapses them to the start of the replacement in either direction.
-        for (anchor, head) in [(2, 3), (3, 2)] {
+    fn maps_selections_strictly_inside_a_replacement() {
+        for ((anchor, head), mapped) in [((2, 3), (4, 1)), ((3, 2), (1, 4))] {
             let mut state = state_with_selection("abcdefg", anchor, head);
             state.update(replace(1..4, "XYZ")).unwrap();
-            assert_eq!(endpoints(state.selection().main()), (1, 1));
+            let range = state.selection().main();
+            assert_eq!(endpoints(range), mapped);
+            assert_eq!(range.range(), 1..4);
         }
     }
 

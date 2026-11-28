@@ -1,4 +1,10 @@
 use gpui::{Modifiers, TestAppContext, Window, point, px, size};
+use gpui_editor_codemirror::{
+    Change, ChangeSet, Compartment, Extension, HistoryIsolation, READ_ONLY, TransactionExtension,
+    language::fold::{fold_gutter, fold_service},
+    language_data::json_extension,
+    transaction_extender, transaction_filter,
+};
 
 use super::*;
 use crate::{
@@ -593,5 +599,337 @@ fn folding_cannot_touch_fences_prose_or_composition(cx: &mut TestAppContext) {
             assert!(editor.source_fold_ranges().is_empty());
             assert_eq!(editor.source(), CODE);
         });
+    });
+}
+
+const JSON: &str = "{\r\n  \"word\": \"猫😀\"\r\n}\r\n";
+
+fn standalone_json(
+    source: &str,
+    extra: Extension,
+    window: &mut Window,
+    cx: &mut Context<Editor>,
+) -> Editor {
+    let mut editor = Editor::with_native_extensions(
+        source.to_owned(),
+        Extension::group([json_extension(), fold_gutter(Default::default()), extra]),
+        window,
+        cx,
+    )
+    .unwrap();
+    editor.set_path(Some("sample.json".into()), None);
+    editor
+}
+
+fn fold_lane_hit(editor: &Editor, start: usize) -> gpui::Point<gpui::Pixels> {
+    let layout = editor.layout.as_ref().unwrap();
+    let caret = layout.bounds_at(start, false).unwrap();
+    point((caret.left() + layout.origin.x) / 2., caret.center().y)
+}
+
+fn reconfigure(editor: &mut Editor, effect: StateEffect, cx: &mut Context<Editor>) {
+    editor
+        .view
+        .update(Transaction::default().with_effects([effect]), None, |_| {
+            (None, None)
+        })
+        .unwrap();
+    cx.notify();
+}
+
+#[gpui::test]
+fn standalone_json_fold_rejects_invalid_ranges_and_filtered_effects(cx: &mut TestAppContext) {
+    let slot = Compartment::new();
+    let start = JSON.find('猫').unwrap();
+    let end = JSON.find('}').unwrap();
+    let (editor, cx) = cx.add_window_view(|window, cx| {
+        standalone_json(JSON, slot.of(Extension::default()), window, cx)
+    });
+    cx.run_until_parked();
+    let hit = cx.update(|_, cx| fold_lane_hit(editor.read(cx), 0));
+    for rejected in [2..end, 1..start + 1, 0..1] {
+        cx.update(|_, cx| {
+            editor.update(cx, |editor, cx| {
+                reconfigure(
+                    editor,
+                    slot.reconfigure(fold_service(move |_, from, _| {
+                        (from == 0).then(|| rejected.clone())
+                    })),
+                    cx,
+                );
+            })
+        });
+        cx.run_until_parked();
+        cx.simulate_click(hit, Modifiers::none());
+        cx.run_until_parked();
+        cx.update(|_, cx| assert!(folded_ranges(editor.read(cx).view.state()).is_empty()));
+    }
+    let folding = |tr: &Transaction| {
+        tr.effects()
+            .iter()
+            .any(|effect| effect.get(fold_effect()).is_some())
+    };
+    for extension in [
+        transaction_filter(move |_, tr| {
+            if folding(&tr) {
+                return Ok(Transaction::new(ChangeSet::single(Change::new(0..1, "X"))?));
+            }
+            Ok(tr)
+        }),
+        transaction_filter(move |_, tr| {
+            Ok(if folding(&tr) {
+                tr.with_selection(EditorSelection::single(1, 1))
+            } else {
+                tr
+            })
+        }),
+        transaction_extender(move |_, tr| TransactionExtension {
+            annotations: folding(tr)
+                .then(|| Transaction::history_isolation_annotation().of(HistoryIsolation::Full))
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        }),
+        transaction_extender(move |_, tr| TransactionExtension {
+            scroll_into_view: folding(tr),
+            ..Default::default()
+        }),
+    ] {
+        cx.update(|_, cx| {
+            editor.update(cx, |editor, cx| {
+                reconfigure(editor, slot.reconfigure(extension), cx)
+            })
+        });
+        cx.run_until_parked();
+        cx.simulate_click(hit, Modifiers::none());
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            assert!(folded_ranges(editor.view.state()).is_empty());
+            assert_eq!(editor.source(), JSON);
+            assert_eq!(editor.cursor(), 0);
+            assert_eq!(editor.view.revision(), 0);
+        });
+    }
+    cx.update(|_, cx| {
+        editor.update(cx, |editor, cx| {
+            reconfigure(editor, slot.reconfigure(Extension::default()), cx);
+            editor.set_selection(start, 0);
+        })
+    });
+    cx.run_until_parked();
+    cx.simulate_click(hit, Modifiers::none());
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        editor.update(cx, |editor, cx| {
+            assert!(folded_ranges(editor.view.state()).is_empty());
+            assert_eq!(editor.anchor(), start);
+            reconfigure(editor, fold_effect().of(1..end), cx);
+            // An externally stored fold also must not hide that selection anchor.
+            assert!(!folded_ranges(editor.view.state()).is_empty());
+        })
+    });
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let editor = editor.read(cx);
+        assert!(!editor.layout.as_ref().unwrap().fold_hides(start));
+        assert_eq!(editor.anchor(), start);
+        assert!(!editor.view.can_undo());
+    });
+}
+
+#[gpui::test]
+fn standalone_json_fold_input_is_inert_during_composition_freeze_and_read_only(
+    cx: &mut TestAppContext,
+) {
+    let slot = Compartment::new();
+    let (editor, cx) = cx.add_window_view(|window, cx| {
+        standalone_json(JSON, slot.of(Extension::default()), window, cx)
+    });
+    cx.run_until_parked();
+    let hit = cx.update(|_, cx| fold_lane_hit(editor.read(cx), 0));
+    for gate in ["composition", "freeze", "read-only"] {
+        cx.update(|_, cx| {
+            editor.update(cx, |editor, cx| {
+                match gate {
+                    "composition" => {
+                        editor.marked = Some(0..0);
+                        cx.notify();
+                    }
+                    "freeze" => editor.set_input_enabled(false, cx),
+                    "read-only" => reconfigure(editor, slot.reconfigure(READ_ONLY.of(true)), cx),
+                    _ => unreachable!(),
+                }
+                assert!(editor.mouse_down_fold_gutter(hit, cx));
+                assert!(editor.source_fold_ranges().is_empty());
+            })
+        });
+        cx.run_until_parked();
+        cx.simulate_click(hit, Modifiers::none());
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            editor.update(cx, |editor, cx| {
+                assert!(folded_ranges(editor.view.state()).is_empty());
+                assert_eq!(fold_lane_hit(editor, 0), hit);
+                assert!(
+                    editor
+                        .layout
+                        .as_ref()
+                        .unwrap()
+                        .painted_active_lines
+                        .standalone_fold_labels
+                        .is_empty()
+                );
+                assert_eq!(editor.source(), JSON);
+                match gate {
+                    "composition" => {
+                        editor.finish_composition();
+                        cx.notify();
+                    }
+                    "freeze" => editor.set_input_enabled(true, cx),
+                    "read-only" => reconfigure(editor, slot.reconfigure(Extension::default()), cx),
+                    _ => unreachable!(),
+                }
+            })
+        });
+        cx.run_until_parked();
+    }
+    cx.simulate_click(hit, Modifiers::none());
+    cx.run_until_parked();
+    cx.update(|_, cx| assert_eq!(only_fold(editor.read(cx)), 1..JSON.find('}').unwrap()));
+}
+
+#[gpui::test]
+fn standalone_json_fold_unfolds_for_edge_deletion_and_find(cx: &mut TestAppContext) {
+    let slot = Compartment::new();
+    let (editor, cx) = cx.add_window_view(|window, cx| {
+        standalone_json(JSON, slot.of(Extension::default()), window, cx)
+    });
+    cx.update(|window, cx| {
+        bind_keys(cx);
+        window.focus(&editor.read(cx).focus);
+    });
+    cx.run_until_parked();
+    let end = JSON.find('}').unwrap();
+    let start = JSON.find('猫').unwrap();
+    for (head, key) in [(1, "delete"), (end, "backspace"), (0, "cmd-f")] {
+        cx.update(|_, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.set_selection(head, head);
+                cx.notify();
+            })
+        });
+        cx.run_until_parked();
+        let hit = cx.update(|_, cx| fold_lane_hit(editor.read(cx), 0));
+        cx.simulate_click(hit, Modifiers::none());
+        cx.run_until_parked();
+        cx.update(|_, cx| assert!(editor.read(cx).layout.as_ref().unwrap().fold_hides(start)));
+        if key == "delete" {
+            let reject = transaction_filter(|_, tr| {
+                Ok(
+                    if tr
+                        .effects()
+                        .iter()
+                        .any(|effect| effect.get(unfold_effect()).is_some())
+                    {
+                        Transaction::default()
+                    } else {
+                        tr
+                    },
+                )
+            });
+            cx.update(|_, cx| {
+                editor.update(cx, |editor, cx| {
+                    reconfigure(editor, slot.reconfigure(reject), cx)
+                })
+            });
+            cx.simulate_keystrokes(key);
+            cx.run_until_parked();
+            cx.update(|_, cx| {
+                editor.update(cx, |editor, cx| {
+                    assert_eq!(only_fold(editor), 1..end);
+                    assert_eq!(editor.source(), JSON);
+                    reconfigure(editor, slot.reconfigure(Extension::default()), cx);
+                })
+            });
+        }
+        cx.simulate_keystrokes(key);
+        if key == "cmd-f" {
+            cx.run_until_parked();
+            cx.simulate_input("猫😀");
+            cx.simulate_keystrokes("enter");
+        }
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            assert!(folded_ranges(editor.view.state()).is_empty());
+            assert!(!editor.layout.as_ref().unwrap().fold_hides(start));
+            assert_eq!(editor.source(), JSON);
+            assert_eq!(editor.view.revision(), 0);
+            assert!(!editor.view.can_undo());
+            assert_eq!(
+                editor.selection(),
+                if key == "cmd-f" {
+                    start..start + "猫😀".len()
+                } else {
+                    head..head
+                }
+            );
+        });
+    }
+}
+
+#[gpui::test]
+fn standalone_json_fold_keeps_a_visible_source_row_when_expanded_above_it(cx: &mut TestAppContext) {
+    let source = format!(
+        "{{\r\n  \"fold\": [\r\n{}    0\r\n  ],\r\n  \"keep\": [\r\n    1234,\r\n{}    0\r\n  ]\r\n}}",
+        "    1,\r\n".repeat(24),
+        "    2,\r\n".repeat(24)
+    );
+    let opening = source.find("  \"fold\"").unwrap();
+    let anchor = source.find("    1234,").unwrap();
+    let (editor, cx) =
+        cx.add_window_view(|window, cx| standalone_json(&source, Extension::default(), window, cx));
+    cx.simulate_resize(size(px(420.), px(350.)));
+    cx.run_until_parked();
+    let hit = cx.update(|_, cx| fold_lane_hit(editor.read(cx), opening));
+    cx.simulate_click(hit, Modifiers::none());
+    cx.run_until_parked();
+    let anchor_y = |editor: &Editor| {
+        editor
+            .layout
+            .as_ref()
+            .unwrap()
+            .source_bounds(anchor)
+            .unwrap()
+            .top()
+            - editor.scroll.bounds().top()
+    };
+    cx.update(|window, cx| {
+        let editor = editor.read(cx);
+        let next = editor.scroll.offset().y - anchor_y(editor) + px(7.);
+        editor.scroll.set_offset(point(px(0.), next));
+        window.refresh();
+    });
+    cx.run_until_parked();
+    let collapsed = cx.update(|_, cx| {
+        editor.update(cx, |editor, cx| {
+            assert_eq!(anchor_y(editor), px(7.));
+            assert_eq!(editor.capture_source_scroll().unwrap().anchor(), anchor);
+            let old = editor.scroll.offset().y;
+            assert!(editor.open_source_fold(only_fold(editor), cx));
+            old
+        })
+    });
+    cx.run_until_parked();
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let editor = editor.read(cx);
+        assert_eq!(anchor_y(editor), px(7.));
+        assert!(editor.scroll.offset().y < collapsed);
+        assert_eq!(editor.cursor(), 0);
+        assert_eq!(editor.source(), source);
+        assert!(!editor.view.can_undo());
     });
 }

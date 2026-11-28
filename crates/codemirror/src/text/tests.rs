@@ -67,6 +67,41 @@ fn a_line_crossing_several_chunks_has_one_contiguous_borrow() {
 }
 
 #[test]
+fn line_cursor_copies_only_a_spanning_line_and_keeps_the_snapshot_unflattened() {
+    use std::borrow::Cow;
+
+    let prefix = "x".repeat(1023);
+    let long = "abc💡".repeat(700);
+    let source = format!("{prefix}\r\n{long}\nend\n");
+    let text = Text::new(&source);
+    // The first CR and LF are in different leaves.
+    assert_eq!(text.0.tree.chunk_at(0).unwrap().end(), 1024);
+    let mut cursor = text.line_cursor();
+    assert!(matches!(cursor.next(), Some(Cow::Borrowed(row)) if row == prefix));
+    assert!(matches!(cursor.next(), Some(Cow::Owned(row)) if row == long));
+    assert!(matches!(cursor.next(), Some(Cow::Borrowed("end"))));
+    assert!(matches!(cursor.next(), Some(Cow::Borrowed(""))));
+    assert_eq!(cursor.next(), None);
+    assert_eq!(cursor.next_with_skip(isize::MIN), Ok(None));
+
+    let mut cursor = text.line_cursor();
+    assert_eq!(
+        cursor.next_with_skip(isize::MAX).unwrap().as_deref(),
+        Some("")
+    );
+    assert_eq!(
+        cursor.next_with_skip(isize::MIN).unwrap().as_deref(),
+        Some(prefix.as_str())
+    );
+    let mut ranged = text.line_cursor_range(2..4).unwrap();
+    assert!(matches!(ranged.next(), Some(Cow::Owned(row)) if row == long));
+    assert!(matches!(ranged.next(), Some(Cow::Borrowed("end"))));
+    assert_eq!(ranged.next_with_skip(isize::MIN), Ok(None));
+    assert_eq!(text.to_string(), source);
+    assert!(text.0.flat.get().is_none());
+}
+
+#[test]
 fn local_edits_and_owned_slices_share_branches() {
     let text = Text::new("abλ\n".repeat(60_000));
     let at = text.len() / 2;

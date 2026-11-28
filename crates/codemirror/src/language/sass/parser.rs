@@ -87,16 +87,55 @@ pub(super) fn parse(
     let (tree, cutoff) = match result {
         Ok(tree) => (Some(tree), logical.len()),
         Err(ParseError::UnexpectedToken { offset, .. }) if logical.len() <= MAX_REPAIR_BYTES => {
-            recover(logical, offset, dialect, parse)
+            if let Some(nodes) = recover_call(parser, logical, source.len(), offset, dialect, byte)
+            {
+                return (nodes, None);
+            }
+            recover_prefix(logical, offset, dialect, parse)
         }
         Err(_) => (None, 0),
     };
     (materialize(tree.as_ref(), cutoff, source.len(), byte), None)
 }
 
+// Accept a single missing call closer at a declaration separator. Keep the
+// prefix fallback for all other recovery shapes.
+fn recover_call(
+    parser: &Parser,
+    input: &str,
+    len: usize,
+    offset: usize,
+    dialect: SassDialect,
+    byte: impl Fn(usize) -> usize,
+) -> Option<Vec<Node>> {
+    let separator = match dialect {
+        SassDialect::Scss => b';',
+        SassDialect::Indented => b'\n',
+    };
+    if input.as_bytes().get(offset) != Some(&separator) {
+        return None;
+    }
+    let tree = parser.parse_recovering(input).ok()?;
+    let nodes = materialize(Some(&tree), input.len(), len, &byte);
+    let at = byte(offset);
+    let mut errors = nodes.iter().enumerate().filter(|(_, node)| node.term == 0);
+    let (id, error) = errors.next()?;
+    let args = &nodes[error.parent?];
+    let call = &nodes[args.parent?];
+    let in_declaration = std::iter::successors(call.parent, |&id| nodes[id].parent)
+        .any(|id| name(nodes[id].term) == "Declaration");
+    (error.range == (at..at)
+        && errors.next().is_none()
+        && name(args.term) == "ArgList"
+        && args.children.last() == Some(&id)
+        && name(call.term) == "CallExpression"
+        && in_declaration)
+        .then_some(nodes)
+}
+
 // Bounded local repair. Only append to a prefix, so no real source is removed
 // from a valid syntax span and synthetic text cannot leak into the tree.
-fn recover(
+fn recover_prefix(
     input: &str,
     offset: usize,
     dialect: SassDialect,

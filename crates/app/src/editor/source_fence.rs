@@ -5,7 +5,10 @@ use gpui_editor_codemirror::{
     Change, ChangeSet, EditorSelection, EditorState, TAB_SIZE, Text, Transaction,
     language::{
         StreamSettings,
-        markdown::{MarkdownCodeParser, configured_markdown_parser},
+        markdown::{
+            MarkdownCodeLanguages, MarkdownCodeParser, configured_markdown_parser,
+            markdown_snapshot,
+        },
     },
     language_data::{LANGUAGES, LanguageDescription, NativeLanguage, SupportedDocument},
 };
@@ -65,7 +68,7 @@ impl Editor {
             return None;
         }
         let info = header[ticks..].trim_start_matches([' ', '\t']);
-        let parser = fence_parser_in(self.view.state(), info);
+        let parser = pane_code_parser(self.view.state(), &active.source, info);
         if !include_unlabeled && info.is_empty() && parser.is_none() {
             return None;
         }
@@ -294,6 +297,24 @@ pub(super) fn translate_selection(
         })
         .collect::<Option<Vec<_>>>()?;
     EditorSelection::new(ranges, selection.main_index()).ok()
+}
+
+pub(super) fn pane_code_parser(
+    state: &EditorState,
+    block: &Range<usize>,
+    info: &str,
+) -> Option<MarkdownCodeParser> {
+    if configured_markdown_parser(state).is_some_and(|config| {
+        matches!(
+            &config.code_languages,
+            Some(MarkdownCodeLanguages::Deferred { .. })
+        )
+    }) {
+        return markdown_snapshot(state)?
+            .published_markdown_code_parser(block)
+            .cloned();
+    }
+    fence_parser_in(state, info)
 }
 
 pub(super) fn fence_parser_in(state: &EditorState, info: &str) -> Option<MarkdownCodeParser> {

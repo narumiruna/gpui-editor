@@ -1,6 +1,6 @@
 use super::{
-    EDITOR_FRONTIER, EDITOR_MAX_BRANCHES, ParseError, Parser, SyntaxTree, TokenCache, TreeBuilder,
-    Work,
+    EDITOR_FRONTIER, EDITOR_MAX_BRANCHES, Glr, GlrMode, ParseError, Parser, SyntaxTree, TokenCache,
+    TreeBuilder, Work,
 };
 use crate::language::lezer::tree::Roots;
 use crate::language::lezer::{ExternalOptions, ExternalTokenizer, Tables, Tokenizer};
@@ -60,6 +60,7 @@ fn fork_parser(branches: u16, second: u16, reads: usize) -> Parser {
         specializers: Box::new([]),
         dynamic_precedence: Box::new([]),
         context_tracker: None,
+        prune_recovery_frontier: false,
     }
 }
 
@@ -140,7 +141,7 @@ fn stage_charges_only_reachable_records_and_restores_the_live_arena() {
     // and one copied edge. No charge or allocation for discarded records.
     for budget in [6, 7] {
         let work = Work::new(budget);
-        let staged = tree.with_staged_output(|tree| tree.finish_stage(&parser, roots, 1, &work));
+        let staged = tree.with_staged_output(&parser, 1, &work, |_| Ok(roots));
         assert_eq!(tree.node_count(), 10_001);
         if budget == 6 {
             assert_eq!(staged.unwrap_err(), ParseError::LimitExceeded { offset: 1 });
@@ -179,10 +180,10 @@ fn deferred_repeat_is_metered_and_flattened_in_staged_and_final_output() {
     };
     for budget in [135, 136, 136] {
         let work = Work::new(budget);
-        let result = tree.with_staged_output(|tree| {
+        let result = tree.with_staged_output(&parser, 32, &work, |tree| {
             let mut staged = roots;
             tree.reduce(&mut staged, base, repeat, 0..32, 32, &work)?;
-            tree.finish_stage(&parser, staged, 32, &work)
+            Ok(staged)
         });
         assert_eq!(tree.node_count(), 32);
         if budget == 135 {
@@ -256,6 +257,22 @@ fn pruned_glr_keeps_tied_branches_in_order_after_a_shift() {
         later.parse_glr_pruned(SOURCE),
         Err(ParseError::UnexpectedToken { offset: 5, .. })
     ));
+}
+
+#[test]
+fn recovery_frontier_keeps_earlier_ties_without_changing_strict_glr() {
+    let frontier = EDITOR_FRONTIER as u16;
+    let parser = fork_parser(frontier + 1, frontier + 1, 0).with_pruned_recovery();
+    let mut recovery = Glr::new(&parser, SOURCE.into(), GlrMode::Recovering);
+    assert!(recovery.round().unwrap().is_none());
+    assert!(
+        recovery
+            .pending
+            .iter()
+            .map(|b| b.stack.state())
+            .eq(1..=frontier)
+    );
+    assert!(parser.parse_glr(SOURCE).is_ok());
 }
 
 #[test]

@@ -1,0 +1,10 @@
+{"name":"unclosed ASCII","source":"/* comment\n  foo","nodes":[[2,14]],"lines":[[0,[2,14]],[11,null]]}
+{"name":"unclosed after expression","source":"x\n/*\nfoo\n*","nodes":[[4,8]],"lines":[[0,null],[2,[4,8]],[5,null],[9,null]]}
+{"name":"unclosed with two BMP scalars","source":"/*\nline 猫犬","nodes":[[2,8]],"lines":[[0,[2,8]],[3,null]]}
+{"name":"unclosed with supplementary scalar","source":"/*\nline 😀","nodes":[[2,8]],"lines":[[0,[2,8]],[3,null]]}
+{"name":"unclosed with split surrogate","source":"/*\nline 😀x","nodes":[[2,null]],"lines":[[0,[2,null]],[3,null]]}
+{"name":"unclosed with trailing CRLF","source":"/*\r\n  猫\r\n","nodes":[[2,6]],"lines":[[0,[2,6]],[4,null],[11,null]]}
+{"name":"unclosed ending after trailing CRLF","source":"/*\r\n  猫\r\na","nodes":[[2,9]],"lines":[[0,[2,9]],[4,null],[11,null]]}
+{"name":"closed with CRLF and supplementary scalar","source":"/*\r\n  猫😀\r\n*/","nodes":[[2,15]],"lines":[[0,[2,15]],[4,null],[15,null]]}
+{"name":"empty","source":"/**/","nodes":[[2,2]],"lines":[[0,null]]}
+{"name":"delete and restore closer","source":"const x = 1;\r\n/*\r\n  猫😀\r\n*/","nodes":[[16,29]],"lines":[[0,null],[14,[16,29]],[18,null],[29,null]],"edit":{"nodes":[[16,null]],"lines":[[0,null],[14,[16,null]],[18,null],[29,null]]},"repair":{"nodes":[[16,29]],"lines":[[0,null],[14,[16,29]],[18,null],[29,null]]}}

@@ -77,6 +77,7 @@ pub struct TooltipPlacement {
 pub struct TooltipPositions {
     pub position: TooltipPosition,
     pub parent: Option<TooltipParentId>,
+    /// Use static space or the viewport when no measurement runs.
     pub space: TooltipRect,
     /// Facet order. A placement of `None` hides the box.
     pub placements: Vec<(TooltipId, Option<TooltipPlacement>)>,
@@ -102,8 +103,9 @@ impl TooltipLayout {
         let active = active_tooltips(state);
         let ids: HashSet<_> = active.iter().map(|tip| tip.tooltip.id()).collect();
         self.above.retain(|id, _| ids.contains(id));
+        let should_measure = geometry.in_view && !active.is_empty();
         let mut position = config.position.unwrap_or_default();
-        if position == TooltipPosition::Fixed && geometry.in_view && !active.is_empty() {
+        if position == TooltipPosition::Fixed && should_measure {
             self.made_absolute |= geometry.force_absolute;
         }
         let (origin, scale) = if self.made_absolute || position == TooltipPosition::Absolute {
@@ -121,6 +123,7 @@ impl TooltipLayout {
         let space = settings
             .measure_space
             .as_ref()
+            .filter(|_| should_measure)
             .map(|measure| measure(state, &geometry))
             .or(config.tooltip_space)
             .unwrap_or(geometry.viewport);

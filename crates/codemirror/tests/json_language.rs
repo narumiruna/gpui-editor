@@ -485,9 +485,11 @@ fn parses_and_drops_deep_syntax_without_recursing() {
     let source = ["[".repeat(depth), "0".into(), "]".repeat(depth)].concat();
     let doc = parse(&source);
     assert!(doc.diagnostic().is_none());
-    assert_eq!(doc.nodes().len(), 3 * depth + 2);
+    // The pinned parser splits deep trees after forcing the large reductions.
+    assert_eq!(doc.nodes().len(), 52_404);
     assert_eq!(doc.highlights(depth..depth + 1).unwrap().count(), 1);
+    // The unfinished tree also follows the pinned parser's forced reductions.
     let unfinished = parse(&"[".repeat(depth));
-    assert_eq!(unfinished.nodes().len(), 3 * depth + 1);
+    assert_eq!(unfinished.nodes().len(), 32_397);
     assert!(unfinished.diagnostic().is_some());
 }

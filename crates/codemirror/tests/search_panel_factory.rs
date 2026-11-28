@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use gpui_editor_codemirror::{
-    Compartment, EditorState, Extension, Transaction,
+    Compartment, ConfigurationError, EditError, EditorState, Extension, Precedence, Transaction,
     search::{
         SearchOptions, SearchPanel, SearchPanelInput, SearchQuery, close_search_panel, extension,
         get_search_query, open_search_panel, search_panel_factory, search_panel_id,
@@ -100,8 +100,7 @@ fn factory_lifecycle_matches_pinned_search() {
     )
     .unwrap();
     let mut view = Some(EditorView::new(state));
-    for row in include_str!("fixtures/search_panel_factory.jsonl").lines() {
-        let row: Value = serde_json::from_str(row).unwrap();
+    for row in factory_rows().filter(|row| row["step"] != "factory_config") {
         let step = row["step"].as_str().unwrap();
         if step == "destroy_view" {
             drop(view.take().unwrap());
@@ -131,18 +130,53 @@ fn factory_lifecycle_matches_pinned_search() {
                     PanelPlacement::Top => "top",
                     PanelPlacement::Bottom => "bottom",
                 });
-            // Native placement is a live registry slot. The old upstream
-            // custom panel retains its own bottom placement until it closes.
-            let expected = match step {
-                "change_top" | "change_factory" | "set_query" => json!("top"),
-                _ => row["placement"].clone(),
-            };
-            assert_eq!(json!(placement), expected, "{step}");
+            assert_eq!(json!(placement), row["placement"], "{step}");
             assert!(!view.can_undo());
         }
         assert_eq!(trace.take(), row["events"], "{step}");
     }
     assert!(view.is_none());
+}
+
+fn factory_rows() -> impl Iterator<Item = Value> {
+    include_str!("fixtures/search_panel_factory.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+}
+
+#[test]
+fn factory_conflicts_reject_creation_and_live_reconfiguration() {
+    let expected = factory_rows()
+        .find(|row| row["step"] == "factory_config")
+        .unwrap();
+    let trace = Arc::new(Trace::default());
+    let a = trace.factory("a");
+    let b = trace.factory("b").with_precedence(Precedence::High);
+    let initial = |extensions| EditorState::with_extensions("source", extensions);
+    let duplicate = Extension::group([a.clone(), a.clone().with_precedence(Precedence::High)]);
+    let conflict = Extension::group([a.clone(), b]);
+    let rejection = ConfigurationError::InvalidFieldData;
+    assert_eq!(
+        json!(initial(duplicate.clone()).is_err()),
+        expected["duplicate"]
+    );
+    let rejected = initial(conflict.clone());
+    assert_eq!(json!(rejected.is_err()), expected["conflict"]);
+    assert_eq!(rejected.unwrap_err(), rejection);
+
+    let slot = Compartment::new();
+    let mut view = EditorView::new(initial(slot.of(duplicate)).unwrap());
+    let prepare = open(view.state());
+    apply(&mut view, prepare);
+    assert_eq!(trace.take(), json!([["create", "a1", ""], ["mount", "a1"]]));
+    let invalid = Transaction::default().with_effects([slot.reconfigure(conflict)]);
+    assert_eq!(
+        view.update(invalid, (), |_| (None, ())),
+        Err(EditError::Configuration(rejection))
+    );
+    assert!(search_panel_open(view.state()));
+    assert_eq!(trace.take(), json!([]));
+    assert!(!view.can_undo());
 }
 
 #[test]

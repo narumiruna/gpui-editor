@@ -1,7 +1,9 @@
 use std::{
     collections::VecDeque,
     fmt,
+    marker::PhantomData,
     process::ExitStatus,
+    rc::{Rc, Weak},
     time::{Duration, Instant},
 };
 
@@ -27,6 +29,14 @@ pub enum StdioClientError {
     Workspace(LspError),
     Feature(FeatureError),
     UnsupportedCapability(&'static str),
+    /// The connection has no free staging slot.
+    DeferredQueueFull,
+    /// The token has already settled or does not belong to this connection.
+    InvalidDeferredRequest,
+    /// The notification token has settled or belongs to another connection.
+    InvalidDeferredNotification,
+    /// The managed transport owns this notification method.
+    ManagedNotification(&'static str),
 }
 
 impl fmt::Display for StdioClientError {
@@ -36,6 +46,16 @@ impl fmt::Display for StdioClientError {
             Self::Workspace(error) => error.fmt(f),
             Self::Feature(error) => error.fmt(f),
             Self::UnsupportedCapability(name) => write!(f, "LSP server does not support {name}"),
+            Self::DeferredQueueFull => f.write_str("the deferred LSP queue is full"),
+            Self::InvalidDeferredRequest => {
+                f.write_str("the deferred LSP request is not staged on this connection")
+            }
+            Self::InvalidDeferredNotification => {
+                f.write_str("the deferred LSP notification is not staged on this connection")
+            }
+            Self::ManagedNotification(method) => {
+                write!(f, "the managed LSP transport owns {method}")
+            }
         }
     }
 }
@@ -46,7 +66,11 @@ impl std::error::Error for StdioClientError {
             Self::Transport(error) => Some(error),
             Self::Workspace(error) => Some(error),
             Self::Feature(error) => Some(error),
-            Self::UnsupportedCapability(_) => None,
+            Self::UnsupportedCapability(_)
+            | Self::DeferredQueueFull
+            | Self::InvalidDeferredRequest
+            | Self::InvalidDeferredNotification
+            | Self::ManagedNotification(_) => None,
         }
     }
 }
@@ -82,6 +106,25 @@ impl PreparedRequest for SignatureRequest {
     }
 }
 
+/// A host-owned place in one connection's deferred request queue.
+/// Dropping it before admission cancels the request locally. It has no RPC ID
+/// and no deadline until admission.
+#[derive(Debug)]
+#[must_use = "dropping this token cancels the deferred request"]
+pub struct DeferredRequest<R> {
+    ticket: Rc<()>,
+    timeout: Duration,
+    request: PhantomData<fn() -> R>,
+}
+
+/// A host-owned place in the deferred queue for a notification. Dropping
+/// the token before admission cancels it without sending a message.
+#[derive(Debug)]
+#[must_use = "dropping this token cancels the deferred notification"]
+pub struct DeferredNotification {
+    ticket: Rc<()>,
+}
+
 /// Drive one trusted subprocess with one editor workspace. Poll [`Self::next_event`]
 /// to drive I/O, including when no request is pending. Editor callbacks only
 /// record changes. The host supplies initialize params, handles peer messages,
@@ -93,11 +136,13 @@ pub struct StdioClient {
     editor: LspClient,
     transport: Option<StdioTransport>,
     outbox: VecDeque<Value>,
+    deferred: VecDeque<Weak<()>>,
 }
 
 impl StdioClient {
-    /// Start the specified program and queue `initialize`. Attachments may be
-    /// added during initialization; feature requests require `Initialized`.
+    /// Start the specified program and queue `initialize`. Attachments and
+    /// deferred requests can be staged during initialization. Sending feature
+    /// requests requires `Initialized`.
     pub fn start(
         program: &Program,
         params: Map<String, Value>,
@@ -109,6 +154,7 @@ impl StdioClient {
             editor: LspClient::default(),
             transport: Some(transport),
             outbox: VecDeque::new(),
+            deferred: VecDeque::new(),
         })
     }
 
@@ -182,6 +228,136 @@ impl StdioClient {
         Ok((id, request))
     }
 
+    /// Reserve a slot for a request during initialization or readiness. The
+    /// deferred queue holds at most 64 requests and notifications combined.
+    /// This neither prepares nor sends a request. Use [`Self::try_admit_request`]
+    /// to admit it, or drop the token to cancel without sending anything.
+    pub fn defer_request<R: PreparedRequest>(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<DeferredRequest<R>, StdioClientError> {
+        Ok(DeferredRequest {
+            ticket: self.reserve_deferred()?,
+            timeout,
+            request: PhantomData,
+        })
+    }
+
+    /// Reserve a slot for a host notification. It shares the request FIFO but
+    /// does not allocate a request ID or start a timeout.
+    pub fn defer_notification(&mut self) -> Result<DeferredNotification, StdioClientError> {
+        Ok(DeferredNotification {
+            ticket: self.reserve_deferred()?,
+        })
+    }
+
+    fn reserve_deferred(&mut self) -> Result<Rc<()>, StdioClientError> {
+        self.transport_mut()?;
+        self.prune_deferred();
+        if self.deferred.len() == MAX_PENDING.get() {
+            return Err(StdioClientError::DeferredQueueFull);
+        }
+        let ticket = Rc::new(());
+        self.deferred.push_back(Rc::downgrade(&ticket));
+        Ok(ticket)
+    }
+
+    /// Try to admit a deferred request on its original connection. `Ok(None)`
+    /// leaves the token staged and does not call `prepare`. Poll
+    /// [`Self::next_event`] and retry after initialization or transport
+    /// backpressure; admit or drop earlier tokens first. FIFO order applies
+    /// to deferred requests and notifications. Polling never admits a token.
+    ///
+    /// The callback runs after pending document traffic has been queued. Check
+    /// that the intended attachment and host context are still current before
+    /// preparing a new request against this workspace. For example, a workspace
+    /// mapping captured at staging can detect a close and reopen of the same
+    /// URI. Do not edit or destroy attached views in the callback.
+    ///
+    /// An admitted request returns its RPC ID and original typed request, and
+    /// its timeout starts when the transport queues it. Except for `Ok(None)`,
+    /// an admission attempt ends staging on this connection. Connection failure
+    /// and shutdown invalidate all its tokens; they cannot be replayed.
+    pub fn try_admit_request<R: PreparedRequest>(
+        &mut self,
+        token: &DeferredRequest<R>,
+        prepare: impl FnOnce(&DocumentWorkspace) -> Result<R, FeatureError>,
+    ) -> Result<Option<(RequestId, R)>, StdioClientError> {
+        if !self.deferred_ready(&token.ticket, StdioClientError::InvalidDeferredRequest)?
+            || self.transport_mut()?.deadlines.len() >= MAX_PENDING.get()
+        {
+            return Ok(None);
+        }
+        let result = self.try_request(token.timeout, prepare);
+        self.finish_deferred(result)
+    }
+
+    /// Admit a host notification after earlier deferred operations and queued
+    /// document traffic. `Ok(false)` keeps the token staged and does not run
+    /// `prepare`. `Ok(true)` means the transport accepted the notification.
+    /// The callback runs once when ready and can reject stale host state.
+    /// Other errors end staging. Use the managed APIs for document lifecycle,
+    /// initialization, cancellation, and shutdown.
+    pub fn try_admit_notification(
+        &mut self,
+        token: &DeferredNotification,
+        prepare: impl FnOnce(&DocumentWorkspace) -> Result<(&'static str, Option<Value>), FeatureError>,
+    ) -> Result<bool, StdioClientError> {
+        if !self.deferred_ready(&token.ticket, StdioClientError::InvalidDeferredNotification)? {
+            return Ok(false);
+        }
+        let result = (|| {
+            self.try_flush()?;
+            self.transport_mut()?.check_queue()?;
+            let (method, params) = self
+                .with_workspace(prepare)
+                .map_err(StdioClientError::Feature)?;
+            if matches!(
+                method,
+                "initialize"
+                    | "initialized"
+                    | "shutdown"
+                    | "exit"
+                    | "$/cancelRequest"
+                    | "textDocument/didOpen"
+                    | "textDocument/didChange"
+                    | "textDocument/didClose"
+            ) {
+                return Err(StdioClientError::ManagedNotification(method));
+            }
+            self.transport_mut()?.notify(method, params)?;
+            Ok(())
+        })();
+        self.finish_deferred(result).map(|value| value.is_some())
+    }
+
+    fn deferred_ready(
+        &mut self,
+        ticket: &Rc<()>,
+        invalid: StdioClientError,
+    ) -> Result<bool, StdioClientError> {
+        self.prune_deferred();
+        let index = self
+            .deferred
+            .iter()
+            .position(|entry| std::ptr::eq(entry.as_ptr(), Rc::as_ptr(ticket)))
+            .ok_or(invalid)?;
+        Ok(index == 0 && !matches!(self.state(), LspState::Initializing(_)))
+    }
+
+    fn finish_deferred<T>(
+        &mut self,
+        result: Result<T, StdioClientError>,
+    ) -> Result<Option<T>, StdioClientError> {
+        match result {
+            Err(StdioClientError::Transport(TransportError::QueueFull)) => Ok(None),
+            result => {
+                self.deferred.pop_front();
+                result.map(Some)
+            }
+        }
+    }
+
     /// Queue a reply to a peer request, including during initialization. On
     /// `QueueFull`, poll and retry. This does not capture new document edits.
     pub fn reply(
@@ -234,7 +410,7 @@ impl StdioClient {
 
     /// Flush document traffic, then send `shutdown` and `exit` under one
     /// deadline. This requires readiness and discards unrelated events. It
-    /// consumes the client, including on failure.
+    /// consumes the client, including on failure. Staged requests are discarded.
     pub fn shutdown(mut self, timeout: Duration) -> Result<ExitStatus, StdioClientError> {
         self.require_ready()?;
         let deadline = Deadline::new(timeout);
@@ -285,10 +461,13 @@ impl StdioClient {
         } else if matches!(event, Some(TransportEvent::Disconnected { .. })) {
             self.disconnect();
         } else if self.state() == LspState::Failed {
-            self.editor.disconnected();
-            self.outbox.clear();
+            self.invalidate();
         }
         Ok(event)
+    }
+
+    fn prune_deferred(&mut self) {
+        self.deferred.retain(|ticket| ticket.strong_count() != 0);
     }
 
     fn send_lifecycle(&mut self) -> Result<(), TransportError> {
@@ -333,9 +512,14 @@ impl StdioClient {
             .ok_or_else(|| RpcError::InvalidSessionState.into())
     }
 
-    fn disconnect(&mut self) {
+    fn invalidate(&mut self) {
         self.editor.disconnected();
         self.outbox.clear();
+        self.deferred.clear();
+    }
+
+    fn disconnect(&mut self) {
+        self.invalidate();
         self.transport.take();
     }
 }

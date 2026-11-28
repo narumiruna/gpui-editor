@@ -278,6 +278,40 @@ fn prefix_any_and_prevention_only_bindings() {
 }
 
 #[test]
+fn keymap_scope_names_match_pinned_space_delimiting_and_empty_default() {
+    use serde_json::{Value, json};
+
+    for row in include_str!("fixtures/keymap_scope.jsonl").lines() {
+        let expected: Value = serde_json::from_str(row).unwrap();
+        let at = |key| expected[key].as_str().unwrap();
+        let map = Keymap::new(
+            KeyPlatform::Other,
+            [KeyBinding {
+                scope: at("bindingScope").into(),
+                any: Some("decline"),
+                stop_propagation: true,
+                ..KeyBinding::new("ArrowLeft", "move")
+            }],
+        )
+        .unwrap();
+        let mut calls = Vec::new();
+        let result = map.dispatch(
+            at("eventScope"),
+            event(at("key")),
+            Duration::ZERO,
+            &mut KeySequence::default(),
+            |id| {
+                calls.push(*id);
+                *id == "move"
+            },
+        );
+        assert_eq!(json!(calls), expected["calls"], "{row}");
+        assert_eq!(json!(result.handled), expected["handled"], "{row}");
+        assert_eq!(json!(result.stop_propagation), expected["stopped"], "{row}");
+    }
+}
+
+#[test]
 fn invalid_modifiers_and_prefix_conflicts_are_rejected() {
     assert!(matches!(
         Keymap::new(KeyPlatform::Mac, [KeyBinding::new("Super-a", 0)]),

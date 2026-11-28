@@ -1,9 +1,16 @@
-use std::{borrow::Cow, ops::Range, sync::LazyLock};
+use std::{
+    ops::Range,
+    sync::{Arc, LazyLock},
+};
 
 use super::{
-    super::lezer::{
-        GrammarSpec, ParseError, Parser, ReuseStats, SerializedTables, Specialization, Specializer,
-        SyntaxTree, TreeFragment,
+    super::{
+        lezer::{
+            CLOSED_BY, FOLD, GROUP, GrammarSpec, ISOLATE, Isolation, LANGUAGE_DATA, LanguageFacet,
+            LrFoldCallback, NodeTypes, OPENED_BY, ParseError, Parser, ReuseStats, SerializedTables,
+            Specialization, Specializer, SyntaxTree, TreeFragment, stock_fold,
+        },
+        line_projection::NormalizedInput,
     },
     Node, recovery, tables, tokens,
 };
@@ -36,6 +43,83 @@ static PARSER: LazyLock<Parser> = LazyLock::new(|| {
     .expect("valid tables for the pinned C++ grammar")
 });
 
+pub(crate) fn stock_data_facet() -> &'static LanguageFacet {
+    static FACET: LazyLock<LanguageFacet> =
+        LazyLock::new(|| LanguageFacet::new(Some(super::language_data())));
+    &FACET
+}
+
+pub(crate) fn stock_node_types() -> &'static NodeTypes {
+    static COMMENT_FOLD: LazyLock<LrFoldCallback> =
+        LazyLock::new(|| Arc::new(|node, _| node.cpp_fold_range()));
+    static TYPES: LazyLock<NodeTypes> = LazyLock::new(|| {
+        let top = tables::TOP_RULE[1];
+        // Structural properties from SHA-512-pinned @lezer/cpp 1.1.6.
+        NodeTypes::new(
+            tables::NODE_NAMES,
+            tables::REPEAT_NODE_COUNT,
+            top,
+            &[
+                0, 3, 4, 5, 6, 7, 10, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 308, 349,
+                350,
+            ],
+            |term, _, props| {
+                if term == top {
+                    props.insert(&LANGUAGE_DATA, Some(stock_data_facet().clone()));
+                }
+                // Exact fold rows from SHA-512-pinned @codemirror/lang-cpp 6.0.3.
+                match term {
+                    5 => props.insert(&FOLD, Some(COMMENT_FOLD.clone())),
+                    78 | 126 | 136 | 260 => props.insert(&FOLD, Some(stock_fold())),
+                    _ => {}
+                }
+                let group = match term {
+                    1
+                    | 8
+                    | 11
+                    | 15..=17
+                    | 19
+                    | 71
+                    | 72
+                    | 100..=102
+                    | 104
+                    | 191
+                    | 208
+                    | 229
+                    | 242
+                    | 243
+                    | 270..=272
+                    | 277
+                    | 280..=282
+                    | 284..=287
+                    | 290
+                    | 292..=296 => Some("Expression"),
+                    18 | 25..=27 | 43 | 255..=258 | 262 | 263 | 265 | 266 => Some("Type"),
+                    126 | 129 | 147 | 150 | 152 | 153 | 158 | 160 | 163 | 164 | 166 | 168 | 170
+                    | 172 | 174 | 176 | 178 | 179 | 188 => Some("Statement"),
+                    _ => None,
+                };
+                if let Some(group) = group {
+                    props.insert(&GROUP, vec![group.into()]);
+                }
+                match term {
+                    4 | 5 | 8 | 10 => props.insert(&ISOLATE, Some(Isolation::Auto)),
+                    12 => props.insert(&OPENED_BY, vec!["(".into()]),
+                    13 => props.insert(&CLOSED_BY, vec![")".into()]),
+                    51 => props.insert(&CLOSED_BY, vec!["}".into()]),
+                    52 => props.insert(&OPENED_BY, vec!["{".into()]),
+                    53 => props.insert(&CLOSED_BY, vec!["]".into()]),
+                    54 => props.insert(&OPENED_BY, vec!["[".into()]),
+                    _ => {}
+                }
+            },
+        )
+    });
+    &TYPES
+}
+
+const MAX_RECOVERY_SEED_BYTES: usize = 16 * 1024;
+
 #[derive(Debug)]
 pub(super) struct Cache {
     tree: SyntaxTree,
@@ -46,38 +130,29 @@ pub(super) fn parse(
     source: &str,
     prefix: Option<(&Cache, usize)>,
 ) -> (Vec<Node>, bool, Option<Cache>) {
-    // CodeMirror normalizes line endings before it parses the document.
-    let breaks: Vec<_> = source
-        .match_indices("\r\n")
-        .enumerate()
-        .map(|(i, (at, _))| (at, at - i))
-        .collect();
-    let input = if source.contains('\r') {
-        Cow::Owned(source.replace("\r\n", "\n").replace('\r', "\n"))
-    } else {
-        Cow::Borrowed(source)
-    };
-    let byte = |at| at + breaks.partition_point(|&(_, lf)| lf < at);
+    let normalized = NormalizedInput::new(source);
+    let byte = |at| normalized.original_byte(at);
     let fragment = prefix.map(|(cache, mut end)| {
         // The edit can join or split CRLF at the prefix boundary.
         if end > 0 && source.as_bytes()[end - 1] == b'\r' {
             end -= 1;
         }
-        let end = end - breaks.partition_point(|&(cr, _)| cr < end);
+        let end = normalized.normalized_byte(end);
         TreeFragment {
             tree: &cache.tree,
             old_range: 0..end,
             new_range: 0..end,
         }
     });
-    let failure = match PARSER.parse_incremental(&input, fragment.clone()) {
+    let input = normalized.text.as_ref();
+    let failure = match PARSER.parse_incremental(input, fragment.clone()) {
         Ok(tree) => {
             let mut reuse = tree.reuse_stats();
             reuse.resumed_at = byte(reuse.resumed_at);
             let nodes = project(&tree, input.len(), source.len(), None, byte);
             return (nodes, false, Some(Cache { tree, reuse }));
         }
-        Err(error) => match try_glr(&input, error) {
+        Err(error) => match try_glr(input, error) {
             Ok(tree) => {
                 return (
                     project(&tree, input.len(), source.len(), None, byte),
@@ -89,11 +164,14 @@ pub(super) fn parse(
         },
     };
     if let ParseError::UnexpectedToken { offset, .. } = failure {
-        // Repeat strict LR only for small malformed documents. The recovery
-        // tree retains strict checkpoints, not any of its recovered nodes.
-        if input.len() <= 16 * 1024
-            && let Ok(tree) = PARSER.parse_incremental_recovering(&input, fragment.as_slice())
-        {
+        // The size limit applies to repeating strict LR for checkpoints,
+        // not to bounded recovery. Large inputs keep no recovery seed.
+        let recovered = if input.len() <= MAX_RECOVERY_SEED_BYTES {
+            PARSER.parse_incremental_recovering(input, fragment.as_slice())
+        } else {
+            PARSER.parse_recovering(input)
+        };
+        if let Ok(tree) = recovered {
             let nodes = project(&tree, input.len(), source.len(), None, byte);
             let cache = tree.has_incremental_state().then_some(Cache {
                 tree,
@@ -101,7 +179,7 @@ pub(super) fn parse(
             });
             return (nodes, true, cache);
         }
-        if let Some((tree, cutoff, hole)) = recovery::recover(&input, offset) {
+        if let Some((tree, cutoff, hole)) = recovery::recover(input, offset) {
             return (project(&tree, cutoff, source.len(), hole, byte), true, None);
         }
     }
@@ -113,6 +191,20 @@ pub(super) fn parse(
     }];
     add_node(&mut nodes, 0, 0..source.len(), Some(0));
     (nodes, true, None)
+}
+
+pub(crate) fn parse_raw(source: &str, strict: bool) -> Result<SyntaxTree, ParseError> {
+    match parse_tree(source) {
+        Err(ParseError::UnexpectedToken { .. }) if !strict => PARSER.parse_recovering(source),
+        result => result,
+    }
+}
+
+pub(super) fn parse_editor_strict(source: &str) -> Result<Vec<Node>, ParseError> {
+    let input = NormalizedInput::new(source);
+    let byte = |at| input.original_byte(at);
+    let tree = parse_tree(&input.text).map_err(|error| error.map_offset(byte))?;
+    Ok(project(&tree, input.text.len(), source.len(), None, byte))
 }
 
 pub(super) fn parse_tree(source: &str) -> Result<SyntaxTree, ParseError> {

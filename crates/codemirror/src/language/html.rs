@@ -28,7 +28,10 @@ mod tables;
 mod tag_context;
 
 pub use close_tags::{auto_close_tags, auto_close_tags_in};
-pub(crate) use close_tags::{html_input_is_active, tag_close_insert};
+pub(crate) use close_tags::{
+    close_tags_after, html_input_is_active, tag_close_insert, xml_policy_end_tag_name,
+};
+pub(crate) use completion::html_schema_completion_source;
 pub use completion::{
     HtmlAttributeSpec, HtmlCompletionConfig, HtmlTagSpec, html_completion_source,
     html_completion_source_with,
@@ -44,6 +47,10 @@ pub const NAME: &str = "html";
 pub const BLOCK_COMMENT: (&str, &str) = ("<!--", "-->");
 /// Extra characters that count as part of a word in HTML.
 pub const WORD_CHARS: &str = "-_";
+
+pub(super) fn is_void_tag_name(name: &str) -> bool {
+    lexer::is_void(name)
+}
 
 /// Language data for HTML outside a mounted region.
 pub fn language_data() -> LanguageData {
@@ -221,7 +228,16 @@ impl HtmlDocument {
 
     /// Parse HTML with additional routes checked before the stock routes.
     pub fn parse_with_nesting(text: Text, options: HtmlOptions, nesting: HtmlNesting<'_>) -> Self {
-        Self::parse_top(text, options, nesting, None)
+        Self::parse_top(text, options, nesting, None, None)
+    }
+
+    pub(super) fn parse_projected(
+        text: Text,
+        options: HtmlOptions,
+        nesting: HtmlNesting<'_>,
+        original: nesting::OriginalSource<'_>,
+    ) -> Self {
+        Self::parse_top(text, options, nesting, None, Some(original))
     }
 
     /// Apply byte edits with the same HTML dialect. Rebuild mounts with stock
@@ -250,7 +266,7 @@ impl HtmlDocument {
             old_range: 0..end,
             new_range: 0..end,
         });
-        Ok(Self::parse_top(text, self.options, nesting, fragment))
+        Ok(Self::parse_top(text, self.options, nesting, fragment, None))
     }
 
     /// Strict HTML LR checkpoint reuse in the last parse, in UTF-8 bytes and
@@ -267,6 +283,7 @@ impl HtmlDocument {
         options: HtmlOptions,
         nesting: HtmlNesting<'_>,
         fragment: Option<TreeFragment<'_>>,
+        original: Option<nesting::OriginalSource<'_>>,
     ) -> Self {
         let source = text.as_str();
         let (nodes, strict) = lr::parse(source, options, fragment)
@@ -280,7 +297,7 @@ impl HtmlDocument {
             strict,
             bracket_lines: OnceLock::new(),
         };
-        doc.mounts = nesting::collect(&doc, nesting);
+        doc.mounts = nesting::collect(&doc, nesting, original);
         doc.highlights = highlight::collect(&doc);
         doc
     }

@@ -40,7 +40,9 @@ pub use references::{ReferenceResults, ReferenceRow};
 use rename::Rename;
 pub use rename::SourceLspRename;
 use signature::SignatureHelp;
-pub(super) use signature::{NextSignature, PreviousSignature, ShowSignatureHelp, bind_keys};
+pub(super) use signature::{
+    NextSignature, PreviousSignature, ShowSignatureHelp, SignatureTimer, bind_keys,
+};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 const POLL_STEPS: usize = 8;
@@ -166,7 +168,7 @@ impl Editor {
             pending: None,
             result: None,
             references: References::default(),
-            signature: SignatureHelp::attach(&mut self.view),
+            signature: SignatureHelp::attach(&mut self.view, self.signature_timer.clone()),
             formatting: Formatting::attach(&mut self.view),
             navigation: Navigation::attach(&mut self.view),
             rename: Rename::attach(&mut self.view),
@@ -177,9 +179,9 @@ impl Editor {
     }
 
     /// Drive a bounded number of nonblocking I/O steps, including when idle.
-    /// No GPUI timer is installed. Call `cx.notify()` after polling a live editor
-    /// entity to update its display. On terminal failure the attachment is removed;
-    /// the native transport may kill and reap its direct child during cleanup.
+    /// Call `cx.notify()` after polling a live editor entity to update its display.
+    /// On terminal failure the attachment is removed; the native transport may
+    /// kill and reap its direct child during cleanup.
     pub fn poll_source_lsp(&mut self) -> Status {
         let Some(mut lsp) = self.source_lsp.take() else {
             return Status::Detached;
@@ -343,7 +345,8 @@ impl SourceLsp {
                         self.references
                             .resolve(&self.client, &self.uri, editor, reply);
                     } else if self.signature.is_pending(reply.id) {
-                        self.signature.resolve(&self.client, &self.uri, reply);
+                        self.signature
+                            .resolve(&self.client, &self.uri, editor, reply);
                     } else if self.formatting.is_pending(reply.id) {
                         self.formatting
                             .resolve(&self.client, &self.uri, editor, reply);

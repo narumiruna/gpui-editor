@@ -12,9 +12,11 @@ pub mod gutters;
 pub mod highlights;
 pub mod input;
 pub mod keymap;
+mod lr_viewport;
 pub mod matches;
 pub mod measure;
 pub mod panels;
+mod parse_viewport;
 mod plugins;
 mod scroll;
 mod scroll_handlers;
@@ -22,6 +24,9 @@ pub mod selection_layers;
 pub mod tooltips;
 mod wast_viewport;
 
+pub use lr_viewport::{
+    JsonIdleStep, JsonIdleWork, JsonViewportError, LezerIdleStep, LezerIdleWork, LezerViewportError,
+};
 pub use wast_viewport::{WastIdleStep, WastIdleWork, WastViewportError};
 
 pub use clipboard::{
@@ -36,6 +41,7 @@ pub use highlights::{
     ViewHighlight, highlight_active_line, highlight_active_line_for_blocks,
     highlight_trailing_whitespace, highlight_whitespace,
 };
+use input::InputStep;
 pub use matches::{
     MatchContext, MatchDecorator, PlaceholderProjection, SpecialChar, SpecialCharAppearance,
     SpecialCharConfig, SpecialCharRender, highlight_special_chars, placeholder,
@@ -222,9 +228,12 @@ pub struct ViewUpdate<'a> {
     pub start_state: &'a EditorState,
     pub state: &'a EditorState,
     pub changes: &'a ChangeDesc,
-    /// Effects accepted with the dispatched transaction or replay. Geometry
-    /// reports, direct selection reports, and WAST publications have none.
+    /// Accepted effects in the final document's coordinates. Geometry reports,
+    /// direct selection reports, and parser publications have none.
     pub effects: &'a [StateEffect],
+    /// The original step coordinates and metadata for a headless input.
+    /// Other updates leave this slice empty.
+    pub input_steps: &'a [InputStep],
     pub start_viewport: &'a Viewport,
     pub viewport: &'a Viewport,
     pub selection_set: bool,
@@ -286,11 +295,25 @@ impl ScrollRequest {
     }
 }
 
+enum Transition<'a> {
+    Edit(CursorScrollMargin, bool),
+    Input(&'a [InputStep]),
+}
+
+#[derive(Default)]
+struct UpdateDetails<'a> {
+    selection_set: bool,
+    focus_changed: bool,
+    effects: &'a [StateEffect],
+    input_steps: &'a [InputStep],
+}
+
 /// Editor state and history with the lifecycle needed by a native view host.
 pub struct EditorView<M> {
     history: History<M>,
     viewport: Viewport,
     wast_viewport: wast_viewport::WastViewport,
+    lr_viewport: lr_viewport::LrViewport,
     scroll_request: Option<ScrollRequest>,
     focused: bool,
     revision: u64,
@@ -315,12 +338,15 @@ impl<M: Clone> EditorView<M> {
         let mut history = History::new(state);
         let mut wast_viewport = wast_viewport::WastViewport::default();
         wast_viewport.sync(&mut history, None, None, 0);
+        let mut lr_viewport = lr_viewport::LrViewport::default();
+        lr_viewport.sync(&mut history, None, None, 0);
         let mut configured = ConfiguredPlugins::default();
         configured.refresh(history.state(), None);
         Self {
             history,
             viewport,
             wast_viewport,
+            lr_viewport,
             scroll_request,
             focused: false,
             revision: 0,
@@ -352,10 +378,12 @@ impl<M: Clone> EditorView<M> {
         }
         self.viewport = Viewport::complete(state.text());
         self.wast_viewport = wast_viewport::WastViewport::default();
+        self.lr_viewport = lr_viewport::LrViewport::default();
         self.scroll_request = None;
         self.revision = self.revision.wrapping_add(1);
         self.history = History::new(state);
         self.wast_viewport.sync(&mut self.history, None, None, 0);
+        self.lr_viewport.sync(&mut self.history, None, None, 0);
         self.configured.refresh(self.history.state(), None);
     }
 
@@ -458,6 +486,7 @@ impl<M: Clone> EditorView<M> {
             return Err(EditError::InvalidRange);
         }
         self.wast_viewport.has_geometry |= measured;
+        self.lr_viewport.has_geometry |= measured;
         let focus_changed = focused != self.focused;
         if !focus_changed && self.viewport == viewport {
             return Ok(());
@@ -509,7 +538,12 @@ impl<M: Clone> EditorView<M> {
             true,
         )?;
         self.focused = focused;
-        self.report_transition(Some(previous), accepted, length, margin, true);
+        self.report_transition(
+            Some(previous),
+            accepted,
+            length,
+            Transition::Edit(margin, true),
+        );
         Ok(result)
     }
 
@@ -542,7 +576,7 @@ impl<M: Clone> EditorView<M> {
         let (result, accepted) =
             self.history
                 .update_resolved_reporting(transaction, metadata, finish, true)?;
-        self.report_transition(previous, accepted, length, margin, false);
+        self.report_transition(previous, accepted, length, Transition::Edit(margin, false));
         Ok(result)
     }
 
@@ -556,8 +590,7 @@ impl<M: Clone> EditorView<M> {
                 ..Default::default()
             },
             self.state().text().len(),
-            CursorScrollMargin::default(),
-            false,
+            Transition::Edit(CursorScrollMargin::default(), false),
         );
         Ok(())
     }
@@ -605,11 +638,12 @@ impl<M: Clone> EditorView<M> {
     }
 
     fn replay(&mut self, redo: bool, selection: Option<M>) -> Option<M> {
-        let previous = if self.state().wast_publication.is_some() {
-            Some(self.state().clone())
-        } else {
-            self.previous_state()
-        };
+        let previous =
+            if self.state().wast_publication.is_some() || self.state().lr_publication.is_some() {
+                Some(self.state().clone())
+            } else {
+                self.previous_state()
+            };
         let length = self.state().text().len();
         let margin = CursorScrollMargin::configured(self.state());
         let (metadata, accepted) = match (redo, selection) {
@@ -618,7 +652,7 @@ impl<M: Clone> EditorView<M> {
             (false, None) => self.history.undo_reporting(true),
             (true, None) => self.history.redo_reporting(true),
         }?;
-        self.report_transition(previous, accepted, length, margin, false);
+        self.report_transition(previous, accepted, length, Transition::Edit(margin, false));
         Some(metadata)
     }
 
@@ -634,35 +668,45 @@ impl<M: Clone> EditorView<M> {
         start: Option<EditorState>,
         accepted: UpdateReport,
         length: usize,
-        margin: CursorScrollMargin,
-        focus_changed: bool,
+        mode: Transition<'_>,
     ) {
+        let (margin, focus_changed, input_steps) = match mode {
+            Transition::Edit(margin, focus_changed) => (margin, focus_changed, &[][..]),
+            Transition::Input(steps) => (
+                CursorScrollMargin::configured(&steps[0].start_state),
+                false,
+                steps,
+            ),
+        };
         let changes = accepted.changes.as_ref().map(|changes| {
             changes
                 .desc(length)
                 .expect("accepted changes have valid lengths")
         });
+        // A cancellation can leave the composed changes empty after a step
+        // removed the old parser publication. In that case sync the worker too.
+        let syntax_changes = changes.as_ref().filter(|changes| {
+            !changes.is_empty()
+                || input_steps
+                    .iter()
+                    .any(|step| !step.transaction.changes().is_empty())
+        });
         self.wast_viewport.sync(
             &mut self.history,
             start.as_ref(),
-            changes.as_ref().filter(|changes| !changes.is_empty()),
+            syntax_changes,
+            self.viewport.interval().end,
+        );
+        self.lr_viewport.sync(
+            &mut self.history,
+            start.as_ref(),
+            syntax_changes,
             self.viewport.interval().end,
         );
         if start.is_none() {
             self.configured.refresh(self.history.state(), None);
         }
-        let explicit_scroll = accepted.effects.iter().rev().find_map(|effect| {
-            effect
-                .get(&SCROLL_INTO_VIEW)
-                .copied()
-                .map(ScrollRequest::Reveal)
-                .or_else(|| {
-                    effect
-                        .get(&SCROLL_SNAPSHOT)
-                        .copied()
-                        .map(ScrollRequest::Restore)
-                })
-        });
+        let explicit_scroll = explicit_scroll(&accepted.effects);
         if start.is_none()
             && accepted.changes.is_none()
             && explicit_scroll.is_none()
@@ -678,41 +722,45 @@ impl<M: Clone> EditorView<M> {
         let previous = self.viewport.clone();
         if !changes.is_empty() {
             self.viewport = self.viewport.map(&changes);
-            self.scroll_request = self
-                .scroll_request
-                .and_then(|request| request.map(&changes));
             self.revision = self.revision.wrapping_add(1);
         }
-        if accepted.scroll_into_view {
-            let main = self.state().selection().main();
-            let range = if main.is_empty() {
-                main
-            } else {
-                let side = if main.head() > main.anchor() {
-                    Assoc::Before
-                } else {
-                    Assoc::After
-                };
-                EditorSelection::cursor(main.head(), Some(side), None, None)
-            };
-            self.scroll_request = Some(ScrollRequest::Reveal(ScrollTarget {
-                x_margin: margin.x,
-                y_margin: margin.y,
-                ..ScrollTarget::new(range)
-            }));
-        }
-        if let Some(request) = explicit_scroll.and_then(|request| request.clip(self.state().text()))
-        {
-            self.scroll_request = Some(request);
+        if input_steps.is_empty() {
+            self.scroll_request = transition_scroll(
+                self.scroll_request,
+                &changes,
+                explicit_scroll,
+                accepted.scroll_into_view,
+                self.state(),
+                margin,
+            );
+        } else {
+            for step in input_steps {
+                let transaction = &step.transaction;
+                let changes = transaction
+                    .changes()
+                    .desc(step.start_state.text().len())
+                    .expect("accepted step has valid lengths");
+                self.scroll_request = transition_scroll(
+                    self.scroll_request,
+                    &changes,
+                    self::explicit_scroll(transaction.effects()),
+                    transaction.scroll_into_view(),
+                    &step.state,
+                    margin,
+                );
+            }
         }
         if let Some(start) = start {
-            self.notify(
+            self.notify_details(
                 &start,
                 &changes,
                 &previous,
-                accepted.selection_set,
-                focus_changed,
-                &accepted.effects,
+                UpdateDetails {
+                    selection_set: accepted.selection_set,
+                    focus_changed,
+                    effects: &accepted.effects,
+                    input_steps,
+                },
             );
         }
     }
@@ -726,16 +774,37 @@ impl<M: Clone> EditorView<M> {
         focus_changed: bool,
         effects: &[StateEffect],
     ) {
+        self.notify_details(
+            previous,
+            changes,
+            viewport,
+            UpdateDetails {
+                selection_set,
+                focus_changed,
+                effects,
+                ..Default::default()
+            },
+        );
+    }
+
+    fn notify_details(
+        &mut self,
+        previous: &EditorState,
+        changes: &ChangeDesc,
+        viewport: &Viewport,
+        details: UpdateDetails<'_>,
+    ) {
         let update = ViewUpdate {
             start_state: previous,
             state: self.history.state(),
             changes,
-            effects,
+            effects: details.effects,
+            input_steps: details.input_steps,
             start_viewport: viewport,
             viewport: &self.viewport,
-            selection_set,
+            selection_set: details.selection_set,
             viewport_changed: viewport != &self.viewport,
-            focus_changed,
+            focus_changed: details.focus_changed,
             focused: self.focused,
         };
         self.configured.refresh(update.state, Some(&update));
@@ -750,6 +819,55 @@ impl<M: Clone> EditorView<M> {
             });
         plugins::notify_listeners(&update);
     }
+}
+
+fn explicit_scroll(effects: &[StateEffect]) -> Option<ScrollRequest> {
+    effects.iter().rev().find_map(|effect| {
+        effect
+            .get(&SCROLL_INTO_VIEW)
+            .copied()
+            .map(ScrollRequest::Reveal)
+            .or_else(|| {
+                effect
+                    .get(&SCROLL_SNAPSHOT)
+                    .copied()
+                    .map(ScrollRequest::Restore)
+            })
+    })
+}
+
+fn transition_scroll(
+    mut request: Option<ScrollRequest>,
+    changes: &ChangeDesc,
+    explicit: Option<ScrollRequest>,
+    reveal_selection: bool,
+    state: &EditorState,
+    margin: CursorScrollMargin,
+) -> Option<ScrollRequest> {
+    if !changes.is_empty() {
+        request = request.and_then(|request| request.map(changes));
+    }
+    if reveal_selection {
+        let main = state.selection().main();
+        let range = if main.is_empty() {
+            main
+        } else {
+            let side = if main.head() > main.anchor() {
+                Assoc::Before
+            } else {
+                Assoc::After
+            };
+            EditorSelection::cursor(main.head(), Some(side), None, None)
+        };
+        request = Some(ScrollRequest::Reveal(ScrollTarget {
+            x_margin: margin.x,
+            y_margin: margin.y,
+            ..ScrollTarget::new(range)
+        }));
+    }
+    explicit
+        .and_then(|request| request.clip(state.text()))
+        .or(request)
 }
 
 impl<M> Drop for EditorView<M> {

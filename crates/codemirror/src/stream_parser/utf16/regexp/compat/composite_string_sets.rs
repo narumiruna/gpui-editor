@@ -2,15 +2,20 @@
 
 use std::{cmp::Reverse, collections::BTreeSet, fmt::Write, mem};
 
-use super::{after_braces, ascii, class_code_point, class_set_character_end};
+use super::{after_braces, ascii, case_fold, class_code_point, class_set_character_end};
 
 const STRING_OPERAND: [u16; 3] = [b'\\' as u16, b'q' as u16, b'{' as u16];
 // A successful rewrite recompiles the whole pattern, not just this atom.
 const MAX_PATTERN_UNITS: usize = 4096;
-// Each member comes from the source. The span bounds total member storage and
-// generated source size; the depth bounds how often a member can move up sets.
+// Bound the source span, total range width, and depth of each outer class.
+// The folded output budget covers all folded replacements in a pattern.
 const MAX_CLASS_UNITS: usize = 1024;
+const MAX_RANGE_WIDTH: u32 = 256;
 const MAX_DEPTH: usize = 16;
+pub(super) const MAX_FOLDED_OUTPUT_UNITS: usize = 16 * 1024;
+// Regress 0.12 counts the outer disjunction and each group against a limit of
+// 256. Leave room for the generated flag group even in a flat class.
+pub(super) const MAX_FOLDED_SCOPE_DEPTH: usize = 254;
 
 type Members = BTreeSet<Vec<u32>>;
 
@@ -19,22 +24,32 @@ pub(super) fn has_string_operand(pattern: &[u16]) -> bool {
     pattern.len() <= MAX_PATTERN_UNITS && pattern.windows(3).any(|window| window == STRING_OPERAND)
 }
 
-/// Return the exclusive end and the replacement for a complete class atom.
-/// The caller only probes outermost `v` classes with effective `i` disabled.
-pub(super) fn rewrite(pattern: &[u16], start: usize) -> Option<(usize, Vec<u16>)> {
+/// Return the exclusive end and the replacement for a complete outer `v` class.
+/// A budget is present only when `i` is active at the class.
+pub(super) fn rewrite(
+    pattern: &[u16],
+    start: usize,
+    folded_budget: Option<usize>,
+) -> Option<(usize, Vec<u16>)> {
     let rest = pattern.get(start..)?;
     let source = &rest[..rest.len().min(MAX_CLASS_UNITS)];
-    if ascii(source, 0) != Some(b'[') || !might_contain_string_operand(source) {
+    if folded_budget.is_some_and(|units| units < 2)
+        || ascii(source, 0) != Some(b'[')
+        || !might_contain_string_operand(source)
+    {
         return None;
     }
+    let icase = folded_budget.is_some();
     let mut parser = Parser {
         source,
         pos: 0,
+        icase,
+        remaining_range_width: MAX_RANGE_WIDTH,
         composite: false,
         has_empty_or_long: false,
     };
     let members = parser.class(1)?;
-    if !parser.composite || !parser.has_empty_or_long {
+    if !parser.composite || (!icase && !parser.has_empty_or_long) {
         return None;
     }
 
@@ -48,11 +63,14 @@ pub(super) fn rewrite(pattern: &[u16], start: usize) -> Option<(usize, Vec<u16>)
     // Keep lexicographic order for equal-length strings. Separately spelled
     // surrogates can make two such strings match prefixes of different lengths.
     members.sort_by_key(|member| Reverse(member.len()));
-    let mut replacement = String::from("(?:");
+    let mut replacement = String::from(if icase { "(?-i:" } else { "(?:" });
     for (index, member) in members.into_iter().enumerate() {
         if index > 0 {
             replacement.push('|');
         }
+        // Singletons are already exact. Long members use a Cartesian product
+        // of fold classes, represented by one character atom per position.
+        let fold_member = icase && member.len() > 1;
         let mut codes = member.into_iter().peekable();
         while let Some(mut code) = codes.next() {
             // Set operations compare the source code points. Node then matches
@@ -62,17 +80,49 @@ pub(super) fn rewrite(pattern: &[u16], start: usize) -> Option<(usize, Vec<u16>)
             {
                 code = 0x10000 + ((code - 0xd800) << 10) + (trail - 0xdc00);
             }
-            if let Ok(byte) = u8::try_from(code)
-                && byte.is_ascii_alphanumeric()
-            {
-                replacement.push(char::from(byte));
+            if fold_member {
+                write_equivalents(&mut replacement, code);
             } else {
-                write!(replacement, r"\u{{{code:x}}}").expect("write to String");
+                write_code(&mut replacement, code);
+            }
+            // The source is ASCII. Reserve one unit for the closing group.
+            if folded_budget.is_some_and(|units| replacement.len() >= units) {
+                return None;
             }
         }
     }
     replacement.push(')');
+    if folded_budget.is_some_and(|units| replacement.len() > units) {
+        return None;
+    }
     Some((end, replacement.encode_utf16().collect()))
+}
+
+fn write_equivalents(output: &mut String, code: u32) {
+    let mut codes = case_fold::equivalents(code).peekable();
+    let canonical = codes
+        .next()
+        .expect("fold class includes its canonical code point");
+    if codes.peek().is_some() {
+        output.push('[');
+        write_code(output, canonical);
+        for source in codes {
+            write_code(output, source);
+        }
+        output.push(']');
+    } else {
+        write_code(output, canonical);
+    }
+}
+
+fn write_code(output: &mut String, code: u32) {
+    if let Ok(byte) = u8::try_from(code)
+        && byte.is_ascii_alphanumeric()
+    {
+        output.push(char::from(byte));
+    } else {
+        write!(output, r"\u{{{code:x}}}").expect("write to String");
+    }
 }
 
 // Skip allocations for other class atoms in a pattern that uses `\q`.
@@ -139,6 +189,8 @@ impl Operation {
 struct Parser<'a> {
     source: &'a [u16],
     pos: usize,
+    icase: bool,
+    remaining_range_width: u32,
     composite: bool,
     has_empty_or_long: bool,
 }
@@ -156,17 +208,21 @@ impl Parser<'_> {
             self.pos += 1;
             return Some(Members::new());
         }
-        let mut members = self.operand(depth)?;
+        let mut members = self.operand(depth, true)?;
         if self.peek() != Some(b']') {
             self.composite = true;
             let (operation, _) = self.operator();
             while self.peek() != Some(b']') {
                 let (next, width) = self.operator();
-                if operation != next {
+                if operation != next
+                    || next == Operation::Intersection
+                        && ascii(self.source, self.pos + 2) == Some(b'&')
+                {
+                    // Do not consume `&&&` as `&&` followed by a literal `&`.
                     return None;
                 }
                 self.pos += width;
-                members = operation.apply(members, self.operand(depth)?);
+                members = operation.apply(members, self.operand(depth, next == Operation::Union)?);
             }
         }
         self.pos += 1;
@@ -181,7 +237,7 @@ impl Parser<'_> {
         }
     }
 
-    fn operand(&mut self, depth: usize) -> Option<Members> {
+    fn operand(&mut self, depth: usize, allow_range: bool) -> Option<Members> {
         if self.peek() == Some(b'[') {
             self.composite = true;
             return self.class(depth + 1);
@@ -200,11 +256,43 @@ impl Parser<'_> {
                             return Some(members);
                         }
                     }
-                    _ => member.push(self.character()?),
+                    _ => {
+                        let code = self.character()?;
+                        member.push(if self.icase {
+                            case_fold::fold(code)
+                        } else {
+                            code
+                        });
+                    }
                 }
             }
         }
-        Some(Members::from([vec![self.character()?]]))
+        let first = self.character()?;
+        let last = if self.peek() == Some(b'-') && self.operator().0 != Operation::Difference {
+            if !self.icase || !allow_range {
+                return None;
+            }
+            self.pos += 1;
+            let last = self.character()?;
+            // A range must be nested to be an operand of `&&` or `--`.
+            if self.operator().0 != Operation::Union {
+                return None;
+            }
+            self.remaining_range_width = self
+                .remaining_range_width
+                .checked_sub(last.checked_sub(first)? + 1)?;
+            last
+        } else {
+            first
+        };
+        Some(if self.icase {
+            (first..=last)
+                .flat_map(case_fold::equivalents)
+                .map(|code| vec![code])
+                .collect()
+        } else {
+            Members::from([vec![first]])
+        })
     }
 
     fn character(&mut self) -> Option<u32> {
@@ -251,25 +339,106 @@ mod tests {
     use super::*;
 
     fn rewrite_class(source: &str) -> Option<(usize, Vec<u16>)> {
-        rewrite(&source.encode_utf16().collect::<Vec<_>>(), 0)
+        rewrite(&source.encode_utf16().collect::<Vec<_>>(), 0, None)
+    }
+
+    fn rewrite_folded_class(source: &str, budget: usize) -> Option<String> {
+        let (end, replacement) =
+            rewrite(&source.encode_utf16().collect::<Vec<_>>(), 0, Some(budget))?;
+        assert_eq!(end, source.encode_utf16().count());
+        Some(String::from_utf16(&replacement).unwrap())
+    }
+
+    #[test]
+    fn folded_sets_reconstruct_exact_members_in_match_order() {
+        for (source, expected) in [
+            (r"[[\q{a|ab|}]&&[\q{A|AB|}]]", "(?-i:[aA][bB]|a|)"),
+            (r"[a--\q{A}]", "(?-i:A)"),
+            (r"[[A-C]--\q{A}]", "(?-i:A|B|C|b|c)"),
+            (r"[\q{a|ab}&&[a-z]]", "(?-i:a)"),
+            (r"[\q{A}--a]", "[]"),
+            (r"[[\q{a}][\q{b}]]", "(?-i:a|b)"),
+            (r"[Σ--\q{ς}]", r"(?-i:\u{3a3}|\u{3c2})"),
+            (
+                r"[\q{\u{D801}\u{DC00}}--\q{𐐀}]",
+                r"(?-i:[\u{10428}\u{10400}])",
+            ),
+            (
+                r"[[\q{𐐨b|\u{D801}\u{DC00}|}]]",
+                r"(?-i:[\u{10428}\u{10400}]|[\u{10428}\u{10400}][bB]|)",
+            ),
+        ] {
+            assert_eq!(
+                rewrite_folded_class(source, expected.len()).as_deref(),
+                Some(expected)
+            );
+            assert!(
+                rewrite_folded_class(source, expected.len() - 1).is_none(),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn folded_sets_limit_total_output_and_leave_room_for_the_flag_group() {
+        use super::super::unicode_pattern;
+
+        let atom = format!(r"[[\q{{{}}}]]", "Σ".repeat(384));
+        let encoded_atom = rewrite_folded_class(&atom, MAX_FOLDED_OUTPUT_UNITS).unwrap();
+        assert!(encoded_atom.len() * 2 > MAX_FOLDED_OUTPUT_UNITS);
+        let tail = r"[a--\q{A}]";
+        let source = format!("{atom}{atom}{tail}")
+            .encode_utf16()
+            .collect::<Vec<_>>();
+        let output = unicode_pattern(&source, true, true).unwrap();
+        assert_eq!(
+            String::from_utf16(&output).unwrap(),
+            format!("{encoded_atom}{atom}(?-i:A)")
+        );
+
+        let depth = MAX_FOLDED_SCOPE_DEPTH + 1;
+        let nested = format!("{}{tail}{}", "(?:".repeat(depth), ")".repeat(depth));
+        let source = nested.encode_utf16().collect::<Vec<_>>();
+        assert_eq!(&*unicode_pattern(&source, true, true).unwrap(), &source);
+    }
+
+    #[test]
+    fn folded_sets_restore_ignore_case_after_inline_groups() {
+        use crate::stream_parser::utf16::RegExp;
+
+        let source = r"^(?i:[a--\q{A}](?-i:[a--\q{A}])[a--\q{A}])[a--\q{A}]$";
+        for (flags, matched, unmatched) in [("v", "AaAa", "AaAA"), ("iv", "AaAA", "AaAa")] {
+            let mut regex = RegExp::new(source, flags).unwrap();
+            assert!(regex.test(&matched.encode_utf16().collect::<Vec<_>>()));
+            assert!(!regex.test(&unmatched.encode_utf16().collect::<Vec<_>>()));
+        }
     }
 
     #[test]
     fn composite_string_sets_leave_unsupported_or_invalid_atoms_unchanged() {
+        assert!(rewrite_class(r"[[\q{a}][\q{b}]]").is_none());
+        assert!(rewrite_class(r"[\q{a|ab}&&[a-z]]").is_none());
         for source in [
             r"[\q{a|}]",
-            r"[[\q{a}][\q{b}]]",
             r"[a][[\q{a|}]]",
             r"[\\q\{a\}][[\q{a|}]]",
             r"[^[[\q{a|}]]]",
             r"[[^x][\q{a|}]]",
-            r"[\q{a|ab}&&[a-z]]",
+            r"[[a-A]&&\q{a|ab}]",
+            r"[a-z&&\q{a|ab}]",
+            r"[\q{a|ab}&&a-z]",
+            r"[a-z--\q{a|ab}]",
+            r"[\q{a|ab}--a-z]",
+            r"[a-\q{a|ab}]",
+            r"[a-\d\q{a|ab}]",
             r"[\q{a|ab}&&\d]",
             r"[\q{a|ab}&&\p{RGI_Emoji}]",
             r"[[]&&[\q{a|}]&&\p{ASCII}]",
             r"[[\q{a|}]&&[\q{b|}]--[\q{c|}]]",
             r"[[\q{a|}]&&[\q{b|}]x]",
             r"[[\q{a|}]&&&[\q{b|}]]",
+            r"[[\q{a|}]&&&]",
+            r"[\q{A}&&&]",
             r"[[\q{a|}]a--[\q{b|}]]",
             r"[[\q{a|}]--]",
             r"[[\q{a|}]--[\q{b|}]",
@@ -285,6 +454,27 @@ mod tests {
             r"[[\q{\x+1|}]]",
         ] {
             assert!(rewrite_class(source).is_none(), "{source}");
+            assert!(
+                rewrite_folded_class(source, MAX_FOLDED_OUTPUT_UNITS).is_none(),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn folded_sets_limit_total_range_width_before_set_operations() {
+        let budget = MAX_FOLDED_OUTPUT_UNITS;
+        for source in [
+            r"[[\u0100-\u01ff]&&\q{A}]",
+            r"[[\u0100-\u017f]&&[\u0200-\u027f]&&\q{A}]",
+        ] {
+            assert_eq!(rewrite_folded_class(source, budget).as_deref(), Some("[]"));
+        }
+        for source in [
+            r"[[\u0100-\u0200]&&\q{A}]",
+            r"[[\u0100-\u017f]&&[\u0200-\u0280]&&\q{A}]",
+        ] {
+            assert!(rewrite_folded_class(source, budget).is_none(), "{source}");
         }
     }
 

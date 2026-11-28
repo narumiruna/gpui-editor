@@ -2,7 +2,8 @@ use std::{sync::Mutex, time::Duration};
 
 use gpui::{EntityInputHandler, Modifiers, TestAppContext};
 use gpui_editor_codemirror::{
-    Change, ChangeSet, Compartment, Extension, Precedence, StateEffect,
+    Change, ChangePermission, ChangeSet, Compartment, Extension, Precedence, StateEffect,
+    change_filter,
     language::{
         StreamSettings,
         javascript::{EslintFinding, EslintFix, es_lint},
@@ -927,6 +928,318 @@ fn configured_work_is_invalidated_by_edits_reconfiguration_fence_switch_and_ime(
         assert_eq!(marks[0].range.start, editor.source().find("other").unwrap());
         assert_eq!(editor.source(), DRAFT.replacen('字', "x字", 1));
     });
+}
+
+#[gpui::test]
+fn standalone_native_diagnostics_require_an_explicit_source_and_keep_original_bytes(
+    cx: &mut TestAppContext,
+) {
+    const SOURCE: &str = "字 first\r\nnext\r\n";
+    let next = SOURCE.find("next").unwrap();
+    let end = SOURCE.len();
+    let middle = SOURCE.find('\n').unwrap();
+    let slot = Compartment::new();
+    let settings = LintConfig {
+        delay: Some(ms(30)),
+        marker_filter: Some(Arc::new(move |diagnostics, _| {
+            assert_eq!(diagnostics.len(), 3);
+            diagnostics
+        })),
+        ..Default::default()
+    };
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let observed = calls.clone();
+    let provider = LintSource::new(move |state| {
+        observed
+            .lock()
+            .unwrap()
+            .push(state.text().as_str().to_owned());
+        let mut first = Diagnostic::new(0..'字'.len_utf8(), Severity::Error, "first");
+        first.actions.push(Action::new("Must not run", |_, _| {
+            panic!("standalone diagnostic action")
+        }));
+        vec![
+            first,
+            Diagnostic::new(next..next, Severity::Warning, "next line"),
+            Diagnostic::new(end..end, Severity::Info, "end of file"),
+            Diagnostic::new(1..2, Severity::Error, "inside UTF-8"),
+            Diagnostic::new(middle..middle, Severity::Error, "inside CRLF"),
+            Diagnostic::new(4..middle, Severity::Error, "split CRLF endpoint"),
+            Diagnostic::new(end..end + 1, Severity::Error, "past EOF"),
+        ]
+    });
+    let (editor, cx) = cx.add_window_view(|window, cx| {
+        let mut editor = Editor::with_native_extensions(
+            SOURCE.into(),
+            Extension::group([
+                slot.of(linter(None, settings.clone())),
+                change_filter(|_, _| ChangePermission::Reject),
+            ]),
+            window,
+            cx,
+        )
+        .unwrap();
+        editor.set_path(Some("invalid.json".into()), None);
+        editor
+    });
+    let clock = cx.executor();
+    cx.run_until_parked();
+    clock.advance_clock(DEFAULT_LINT_DELAY);
+    cx.run_until_parked();
+    let before = cx.update(|window, cx| {
+        bind_keys(cx);
+        window.activate_window();
+        editor.update(cx, |editor, cx| {
+            window.focus(&editor.focus);
+            assert!(!editor.open_source_diagnostics(window, cx));
+            assert_eq!(lint::diagnostic_count(editor.view.state()), 0);
+            configure(
+                editor,
+                slot.reconfigure(linter(Some(provider), settings)),
+                cx,
+            );
+            editor.sync_source_diagnostics(cx);
+            assert!(calls.lock().unwrap().is_empty());
+            assert!(!editor.replace(0..0, "rejected", cx));
+            editor.view.state().selection().clone()
+        })
+    });
+    cx.run_until_parked();
+    clock.advance_clock(ms(29));
+    cx.run_until_parked();
+    assert!(calls.lock().unwrap().is_empty());
+    clock.advance_clock(ms(1));
+    cx.run_until_parked();
+    assert_eq!(*calls.lock().unwrap(), [SOURCE]);
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| {
+            let marks = editor.source_diagnostic_marks();
+            let ranges: Vec<_> = marks.iter().map(|mark| mark.range.clone()).collect();
+            assert_eq!(ranges, [0..'字'.len_utf8(), next..next, end..end]);
+            assert_eq!(lint::diagnostic_count(editor.view.state()), 3);
+            editor.run_source_diagnostic_action(&marks[0].diagnostic, 0, cx);
+            assert_eq!(editor.source(), SOURCE);
+            assert_eq!(editor.view.state().selection(), &before);
+            assert_eq!(
+                (
+                    editor.view.revision(),
+                    editor.view.undo_depth(),
+                    editor.view.redo_depth()
+                ),
+                (0, 0, 0)
+            );
+            assert!(!editor.view.can_undo_selection() && !editor.view.can_redo_selection());
+            assert!(editor.focus.is_focused(window));
+        });
+    });
+    cx.simulate_keystrokes("f8");
+    cx.update(|_, cx| assert_eq!(editor.read(cx).selection(), 0..'字'.len_utf8()));
+    cx.simulate_keystrokes("f8");
+    cx.update(|_, cx| assert_eq!(editor.read(cx).selection(), next..next));
+    cx.simulate_keystrokes("f8");
+    cx.update(|_, cx| assert_eq!(editor.read(cx).selection(), end..end));
+    cx.simulate_keystrokes("shift-f8");
+    cx.update(|_, cx| assert_eq!(editor.read(cx).selection(), next..next));
+    cx.simulate_keystrokes("cmd-shift-m");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("source-diagnostics-panel").is_some());
+    let row = cx.debug_bounds("source-diagnostic-0").unwrap().center();
+    cx.simulate_click(row, Modifiers::none());
+    cx.simulate_keystrokes("escape");
+    cx.update(|window, cx| {
+        let editor = editor.read(cx);
+        assert_eq!(editor.selection(), 0..'字'.len_utf8());
+        assert!(editor.focus.is_focused(window));
+        assert_eq!(editor.source(), SOURCE);
+        assert!(!editor.view.can_undo());
+    });
+}
+
+#[gpui::test]
+fn standalone_native_diagnostics_reject_stale_path_text_and_registration_results(
+    cx: &mut TestAppContext,
+) {
+    let slot = Compartment::new();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let (editor, cx) = cx.add_window_view(|window, cx| Editor::new("字\r\n".into(), window, cx));
+    let clock = cx.executor();
+    let provider_clock = clock.clone();
+    let observed = calls.clone();
+    let registration = linter(
+        Some(LintSource::asynchronous(move |state| {
+            let snapshot = state.text().clone();
+            let mut calls = observed.lock().unwrap();
+            calls.push(snapshot.as_str().to_owned());
+            let run = calls.len();
+            let timer = provider_clock.timer(ms(100));
+            async move {
+                timer.await;
+                Ok(vec![Diagnostic::new(
+                    0..0,
+                    Severity::Error,
+                    format!("run {run}: {}", snapshot.as_str()),
+                )])
+            }
+        })),
+        LintConfig {
+            delay: Some(ms(20)),
+            ..Default::default()
+        },
+    );
+    cx.update(|_, cx| {
+        editor.update(cx, |editor, cx| {
+            editor.set_path(Some("original.txt".into()), None);
+            configure(editor, slot.of(registration.clone()).append(), cx);
+            editor.sync_source_diagnostics(cx);
+        });
+    });
+    let mut wait = ms(20);
+    for (i, change) in ["path", "restored path", "edit", "restored registration"]
+        .into_iter()
+        .enumerate()
+    {
+        let path_change = matches!(change, "path" | "restored path");
+        cx.run_until_parked();
+        clock.advance_clock(wait);
+        cx.run_until_parked();
+        assert_eq!(calls.lock().unwrap().len(), i + 1);
+        clock.advance_clock(ms(90));
+        cx.update(|_, cx| {
+            editor.update(cx, |editor, cx| {
+                match change {
+                    "path" => editor.set_path(Some("other.js".into()), None),
+                    "restored path" => {
+                        editor.set_path(Some("other.js".into()), None);
+                        editor.set_path(Some("original.txt".into()), None);
+                        assert!(editor.live_diagnostic_scope().is_some());
+                    }
+                    "edit" => assert!(editor.replace(0..0, "x", cx)),
+                    "restored registration" => {
+                        configure(editor, slot.reconfigure(Extension::default()), cx);
+                        configure(editor, slot.reconfigure(registration.clone()), cx);
+                    }
+                    _ => unreachable!(),
+                }
+                assert!(editor.current_diagnostic_scope().is_none());
+                // Let path-stale work reach its publication check before we
+                // explicitly sync the new scope or request another frame.
+                if !path_change {
+                    editor.sync_source_diagnostics(cx);
+                    cx.notify();
+                }
+            });
+        });
+        clock.advance_clock(ms(10));
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            editor.update(cx, |editor, cx| {
+                assert_eq!(lint::diagnostic_count(editor.view.state()), 0, "{change}");
+                if path_change {
+                    editor.sync_source_diagnostics(cx);
+                    cx.notify();
+                }
+            });
+        });
+        wait = if path_change { ms(20) } else { ms(10) };
+    }
+    clock.advance_clock(wait);
+    cx.run_until_parked();
+    assert_eq!(
+        *calls.lock().unwrap(),
+        ["字\r\n", "字\r\n", "字\r\n", "x字\r\n", "x字\r\n"]
+    );
+    clock.advance_clock(ms(100));
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        editor.update(cx, |editor, cx| {
+            let marks = editor.source_diagnostic_marks();
+            assert_eq!(marks.len(), 1);
+            assert_eq!(marks[0].diagnostic.message, "run 5: x字\r\n");
+            configure(editor, slot.reconfigure(Extension::default()), cx);
+        });
+    });
+    cx.run_until_parked();
+    clock.advance_clock(DEFAULT_LINT_DELAY);
+    cx.run_until_parked();
+    assert_eq!(calls.lock().unwrap().len(), 5);
+    cx.update(|_, cx| {
+        let editor = editor.read(cx);
+        assert!(!editor.has_source_diagnostics());
+        assert_eq!(lint::diagnostic_count(editor.view.state()), 0);
+        assert_eq!(editor.source(), "x字\r\n");
+        assert_eq!((editor.view.revision(), editor.view.undo_depth()), (1, 1));
+    });
+}
+
+#[gpui::test]
+fn standalone_native_diagnostics_wait_for_an_editable_pane(cx: &mut TestAppContext) {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let observed = calls.clone();
+    let (editor, cx) = cx.add_window_view(|window, cx| {
+        Editor::with_native_extensions(
+            "alpha\r\n".into(),
+            linter(
+                Some(LintSource::new(move |state| {
+                    observed
+                        .lock()
+                        .unwrap()
+                        .push(state.text().as_str().to_owned());
+                    vec![Diagnostic::new(0..0, Severity::Warning, "alpha")]
+                })),
+                LintConfig {
+                    delay: Some(ms(20)),
+                    ..Default::default()
+                },
+            ),
+            window,
+            cx,
+        )
+        .unwrap()
+    });
+    let clock = cx.executor();
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| {
+            assert!(!editor.has_source_diagnostics()); // Markdown prose.
+            editor.review_changes("beta\r\n", window, cx);
+            assert!(editor.is_reviewing_changes());
+            editor.set_path(Some("sample.txt".into()), None);
+            assert!(!editor.has_source_diagnostics());
+        });
+    });
+    clock.advance_clock(ms(20));
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        editor.update(cx, |editor, cx| {
+            editor.dismiss_merge_review(cx);
+            assert!(editor.has_source_diagnostics());
+            editor.set_input_enabled(false, cx);
+            assert!(!editor.has_source_diagnostics());
+        });
+    });
+    clock.advance_clock(ms(20));
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| {
+            editor.set_input_enabled(true, cx);
+            editor.replace_and_mark_text_in_range(Some(0..0), "字", None, window, cx);
+            assert!(editor.is_composing());
+            assert!(!editor.has_source_diagnostics());
+        });
+    });
+    clock.advance_clock(ms(20));
+    cx.run_until_parked();
+    assert!(calls.lock().unwrap().is_empty());
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| {
+            editor.unmark_text(window, cx);
+            assert!(editor.has_source_diagnostics());
+        });
+    });
+    cx.run_until_parked();
+    clock.advance_clock(ms(20));
+    cx.run_until_parked();
+    assert_eq!(*calls.lock().unwrap(), ["字alpha\r\n"]);
+    cx.update(|_, cx| assert_eq!(editor.read(cx).source_diagnostic_marks().len(), 1));
 }
 
 #[gpui::test]

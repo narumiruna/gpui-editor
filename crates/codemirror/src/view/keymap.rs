@@ -249,10 +249,14 @@ impl<C: Clone + Eq> Keymap<C> {
         let mut prefixes = HashMap::new();
         let mut next_any = 0;
         for binding in bindings {
-            let spec = binding.key_for(platform);
-            for scope in binding.scope.split_whitespace() {
-                let scope = scopes.entry(scope.to_owned()).or_default();
-                if let Some(any) = &binding.any {
+            let scope_names = if binding.scope.is_empty() {
+                "editor"
+            } else {
+                &binding.scope
+            };
+            if let Some(any) = &binding.any {
+                for name in scope_names.split(' ') {
+                    let scope = scopes.entry(name.to_owned()).or_default();
                     for target in scope
                         .keys
                         .values_mut()
@@ -265,7 +269,12 @@ impl<C: Clone + Eq> Keymap<C> {
                         next_any += 1;
                     }
                 }
-                let Some(spec) = spec else { continue };
+            }
+            let Some(spec) = binding.key_for(platform) else {
+                continue;
+            };
+            for name in scope_names.split(' ') {
+                let scope = scopes.entry(name.to_owned()).or_default();
                 for (spec, command) in std::iter::once((spec.to_owned(), binding.run.as_ref()))
                     .chain(
                         binding

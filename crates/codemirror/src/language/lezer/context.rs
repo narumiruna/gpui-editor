@@ -17,6 +17,7 @@ pub struct ContextTracker<C> {
     start: C,
     shift: Option<Box<Update<C>>>,
     reduce: Option<Box<Update<C>>>,
+    reduce_reads_start: bool,
 }
 
 impl<C: Eq + Send + Sync + 'static> ContextTracker<C> {
@@ -25,6 +26,7 @@ impl<C: Eq + Send + Sync + 'static> ContextTracker<C> {
             start,
             shift: None,
             reduce: None,
+            reduce_reads_start: false,
         }
     }
 
@@ -55,6 +57,20 @@ impl<C: Eq + Send + Sync + 'static> ContextTracker<C> {
         + 'static,
     ) -> Self {
         self.reduce = Some(Box::new(update));
+        self.reduce_reads_start = true;
+        self
+    }
+
+    /// Set a reduce hook that uses only the context and the term. Recovery can
+    /// merge equivalent stacks with different start offsets for this hook.
+    pub(crate) fn with_reduce_term(
+        mut self,
+        update: impl Fn(&C, u16) -> Option<C> + Send + Sync + 'static,
+    ) -> Self {
+        self.reduce = Some(Box::new(move |context, term, _, _| {
+            Ok(update(context, term))
+        }));
+        self.reduce_reads_start = false;
         self
     }
 
@@ -64,6 +80,7 @@ impl<C: Eq + Send + Sync + 'static> ContextTracker<C> {
             start: Context::new(self.start),
             shift: self.shift.map(erase_update),
             reduce: self.reduce.map(erase_update),
+            reduce_reads_start: self.reduce_reads_start,
         }
     }
 }
@@ -84,6 +101,7 @@ pub(super) struct ErasedTracker {
     pub(super) start: Context,
     pub(super) shift: Option<Box<ContextUpdate>>,
     pub(super) reduce: Option<Box<ContextUpdate>>,
+    pub(super) reduce_reads_start: bool,
 }
 
 impl fmt::Debug for ErasedTracker {

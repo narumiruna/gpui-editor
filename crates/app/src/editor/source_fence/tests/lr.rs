@@ -1,10 +1,15 @@
+use std::sync::Mutex;
+
 use gpui_editor_codemirror::{
     language::{
-        HighlightTag, TextDecoration,
+        HighlightTag, INDENT_UNIT, IndentStyle, TextDecoration,
         brackets::BracketMatch,
-        lezer::{CLOSED_BY, LANGUAGE_DATA, LanguageFacet, style_tags},
+        lezer::{
+            BRACKET_MATCHING_HANDLE, CLOSED_BY, INDENT, LANGUAGE_DATA, LanguageFacet,
+            LrBracketHandle, LrIndentStrategy, style_tags,
+        },
     },
-    language_data::{json_language, lezer_language},
+    language_data::{json_language, lezer_language, rust_language},
 };
 
 use super::*;
@@ -23,6 +28,130 @@ fn install(parser: MarkdownCodeParser, named: bool) -> Extension {
             ..Default::default()
         },
     )
+}
+
+#[gpui::test]
+fn configured_lr_enter_uses_parent_state_and_preserves_fences(cx: &mut TestAppContext) {
+    for (body, node_name, marker, named) in [
+        ("{\r\n  \"😀\": [1, 2]\r\n}", "Array", "2]", true),
+        (
+            "@top Main {\r\n  word \"😀\" rule\r\n}",
+            "Body",
+            "rule",
+            false,
+        ),
+        ("fn λ() {\r\n  call(\"😀\");\r\n}", "Block", "call", true),
+    ] {
+        let label = if named { "example" } else { "" };
+        let source = format!("Intro 😀\r\n\r\n```{label}\r\n{body}\r\n```\r\n\r\nTail.");
+        let caret = source.find(marker).unwrap();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let observe = calls.clone();
+        let rule: LrIndentStrategy = Arc::new(move |cx| {
+            let state = cx.state().expect("current parent state");
+            let lines = cx.line_context();
+            assert!(state.text().as_str().ends_with("Tail."));
+            assert_eq!(state.selection().main().head(), caret);
+            assert_eq!(cx.node().name(), node_name);
+            assert!(cx.node().range().contains(&caret));
+            assert_eq!(lines.position(), caret);
+            assert_eq!(lines.simulated_break(), Some(caret));
+            observe.lock().unwrap().push(caret);
+            Some(lines.unit() + 4)
+        });
+        let props = [INDENT.add(move |row| row.is(node_name).then(|| Some(rule.clone())))];
+        let parser = match node_name {
+            "Block" => MarkdownCodeParser::Rust(rust_language().with_node_props(&props)),
+            "Array" => MarkdownCodeParser::Json(json_language().with_node_props(&props)),
+            _ => MarkdownCodeParser::Lezer(lezer_language().with_node_props(&props)),
+        };
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            Editor::with_native_extensions(
+                source.clone(),
+                Extension::group([
+                    install(parser, named),
+                    INDENT_UNIT.of(IndentStyle::parse("   ").unwrap()),
+                ]),
+                window,
+                cx,
+            )
+            .unwrap()
+        });
+        cx.update(|window, cx| {
+            bind_keys(cx);
+            editor.update(cx, |editor, cx| {
+                activate_code(editor, body, cx);
+                editor.set_selection(caret, caret);
+                window.focus(&editor.focus);
+            });
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("enter");
+        cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            let before = &source[..caret];
+            let after = &source[caret..];
+            assert_eq!(editor.source(), format!("{before}\r\n       {after}"));
+            assert_eq!(editor.cursor(), before.len() + 9);
+            assert_eq!(editor.view.undo_depth(), 1);
+            assert_eq!(*calls.lock().unwrap(), vec![caret]);
+        });
+        cx.simulate_keystrokes("secondary-z");
+        cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            assert_eq!(editor.source(), source);
+            assert_eq!(editor.cursor(), caret);
+        });
+    }
+}
+
+#[gpui::test]
+fn configured_rust_closer_uses_one_undo_step_in_the_current_fence(cx: &mut TestAppContext) {
+    let body = "fn λ() {\r\n  call(\"😀\");\r\n    ";
+    let source = format!("Intro\r\n\r\n```example\r\n{body}\r\n```\r\n\r\nTail.");
+    let caret = source.find("    \r\n").unwrap() + 4;
+    let calls = Arc::new(Mutex::new(0));
+    let seen = calls.clone();
+    let rule: LrIndentStrategy = Arc::new(move |cx| {
+        let state = cx.state().unwrap();
+        assert_eq!(state.selection().main().head(), caret + 1);
+        assert_eq!(cx.line_context().position(), caret - 4);
+        assert_eq!(state.text().slice(caret - 4..caret + 1), Some("    }"));
+        *seen.lock().unwrap() += 1;
+        Some(6)
+    });
+    let props = [INDENT.add(move |row| (row.term() == 43).then(|| Some(rule.clone())))];
+    let parser = MarkdownCodeParser::Rust(rust_language().with_node_props(&props));
+    let (editor, cx) = cx.add_window_view(|window, cx| {
+        Editor::with_native_extensions(source.clone(), install(parser, true), window, cx).unwrap()
+    });
+    cx.update(|window, cx| {
+        bind_keys(cx);
+        editor.update(cx, |editor, cx| {
+            activate_code(editor, body, cx);
+            editor.set_selection(caret, caret);
+            window.focus(&editor.focus);
+        });
+    });
+    cx.run_until_parked();
+    cx.simulate_input("}");
+    cx.update(|_, cx| {
+        let editor = editor.read(cx);
+        assert_eq!(
+            editor.source(),
+            source.replace("    \r\n```", "      }\r\n```")
+        );
+        assert_eq!(editor.cursor(), caret + 3);
+        assert_eq!(editor.view.undo_depth(), 1);
+        assert_eq!(*calls.lock().unwrap(), 1);
+    });
+    cx.simulate_keystrokes("secondary-z");
+    cx.update(|_, cx| {
+        let editor = editor.read(cx);
+        assert_eq!(editor.source(), source);
+        assert_eq!(editor.cursor(), caret);
+        assert!(!editor.view.can_undo());
+    });
 }
 
 #[gpui::test]
@@ -129,12 +258,19 @@ fn configured_lr_draft_rebuilds_on_a_same_text_swap_and_rejects_invalid_edits(
 }
 
 #[gpui::test]
-fn configured_lr_roles_refresh_bracket_marks_in_editable_fences(cx: &mut TestAppContext) {
+fn configured_lr_roles_and_handles_refresh_bracket_marks_in_editable_fences(
+    cx: &mut TestAppContext,
+) {
     let json = json_language();
     let lezer = lezer_language();
+    let rust = rust_language();
     let marks = |from, to: &str| {
         let to = to.to_owned();
         CLOSED_BY.add(move |row| row.is(from).then(|| vec![to.clone()]))
+    };
+    let second_child = |name| {
+        let select: LrBracketHandle = Arc::new(|node| node.children().nth(1));
+        BRACKET_MATCHING_HANDLE.add(move |row| row.is(name).then(|| Some(select.clone())))
     };
     for (body, start, end, stock, configured, named) in [
         (
@@ -152,6 +288,41 @@ fn configured_lr_roles_refresh_bracket_marks_in_editable_fences(cx: &mut TestApp
             MarkdownCodeParser::Lezer(lezer.clone()),
             MarkdownCodeParser::Lezer(lezer.with_node_props(&[marks("RuleName", "Literal")])),
             false,
+        ),
+        (
+            "[ [12], {\"字\":0} ]",
+            "12",
+            "\"字\":0",
+            MarkdownCodeParser::Json(json.clone()),
+            MarkdownCodeParser::Json(json.with_node_props(&[
+                marks("Array", "Object"),
+                second_child("Array"),
+                second_child("Object"),
+            ])),
+            true,
+        ),
+        (
+            "@top Main { ( word ) \"😀\" }",
+            "word",
+            "\"😀\"",
+            MarkdownCodeParser::Lezer(lezer.clone()),
+            MarkdownCodeParser::Lezer(lezer.with_node_props(&[
+                marks("ParenExpression", "Literal"),
+                second_child("ParenExpression"),
+            ])),
+            false,
+        ),
+        (
+            "fn λ() { f((12),\r\n  [\"字😀\"]); }",
+            "12",
+            "\"字😀\"",
+            MarkdownCodeParser::Rust(rust.clone()),
+            MarkdownCodeParser::Rust(rust.with_node_props(&[
+                marks("ParenthesizedExpression", "ArrayExpression"),
+                second_child("ParenthesizedExpression"),
+                second_child("ArrayExpression"),
+            ])),
+            true,
         ),
     ] {
         let label = if named { "example" } else { "" };
@@ -219,6 +390,7 @@ fn configured_lr_fold_rules_drive_the_gutter_and_keyboard(cx: &mut TestAppContex
     for (body, row) in [
         ("[ \r\n  \"😀\",\r 1\r\n]", "Array"),
         ("@top Main { \r\n  \"😀\"\r  \"x\"\r\n}", "Body"),
+        ("fn λ() { \r\n  let s = \"😀\";\r  s\r\n}", "Block"),
     ] {
         let source = format!("前 😀\r\n\r\n```example\r\n{body}\r\n```\r\n");
         let origin = source.find(body).unwrap();
@@ -244,11 +416,17 @@ fn configured_lr_fold_rules_drive_the_gutter_and_keyboard(cx: &mut TestAppContex
                 MarkdownCodeParser::Json(stock.with_node_props(&[rule])),
                 MarkdownCodeParser::Json(stock.with_node_props(&[disable])),
             )
-        } else {
+        } else if row == "Body" {
             let stock = lezer_language();
             (
                 MarkdownCodeParser::Lezer(stock.with_node_props(&[rule])),
                 MarkdownCodeParser::Lezer(stock.with_node_props(&[disable])),
+            )
+        } else {
+            let stock = rust_language();
+            (
+                MarkdownCodeParser::Rust(stock.with_node_props(&[rule])),
+                MarkdownCodeParser::Rust(stock.with_node_props(&[disable])),
             )
         };
         let slot = Compartment::new();

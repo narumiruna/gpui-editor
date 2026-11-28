@@ -55,6 +55,12 @@ fn composition_receipt_replaces_only_the_locally_held_suffix() {
     let origin = grouped_updates[1].origin_context().unwrap();
     assert_eq!(origin.start_state().unwrap().text().as_str(), "名😀a");
     assert_eq!(origin.state().unwrap().text().as_str(), "名😀a你好");
+    let start = origin.start_collab_state().unwrap();
+    let result = origin.collab_state().unwrap();
+    assert_eq!(start.sendable_updates().unwrap(), prefix);
+    assert_eq!(result.sendable_updates().unwrap(), old_pending);
+    assert_eq!(start.synced_version(), Ok(3));
+    assert_eq!(result.synced_version(), Ok(3));
     assert_eq!(
         origin.transaction().user_event(),
         Some("input.type.compose")

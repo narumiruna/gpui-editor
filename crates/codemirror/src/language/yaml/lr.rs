@@ -2,8 +2,8 @@ use std::{borrow::Cow, sync::LazyLock};
 
 use super::{
     super::lezer::{
-        GrammarSpec, ParseError, Parser, ReuseStats, SerializedTables, SyntaxNode, SyntaxTree,
-        TreeFragment,
+        GrammarSpec, LANGUAGE_DATA, LanguageFacet, NodeType, NodeTypes, ParseError, Parser,
+        ReuseStats, SerializedTables, SyntaxNode, SyntaxTree, TreeFragment,
     },
     YamlNode as Node,
     YamlNodeKind::*,
@@ -33,8 +33,39 @@ static PARSER: LazyLock<Parser> = LazyLock::new(|| {
     .with_deterministic_context_tracker(tokens::tracker())
 });
 
+pub(crate) fn stock_data_facet() -> &'static LanguageFacet {
+    static FACET: LazyLock<LanguageFacet> =
+        LazyLock::new(|| LanguageFacet::new(Some(super::language_data())));
+    &FACET
+}
+
+pub(crate) fn stock_node_types() -> &'static NodeTypes {
+    static TYPES: LazyLock<NodeTypes> = LazyLock::new(|| {
+        let top = tables::TOP_RULE[1];
+        NodeTypes::new(
+            tables::NODE_NAMES,
+            tables::REPEAT_NODE_COUNT,
+            top,
+            &[0],
+            |term, _, props| {
+                if term == top {
+                    props.insert(&LANGUAGE_DATA, Some(stock_data_facet().clone()));
+                }
+            },
+        )
+    });
+    &TYPES
+}
+
+pub(crate) fn stock_root_type() -> &'static NodeType {
+    stock_node_types()
+        .get(tables::TOP_RULE[1])
+        .expect("YAML top term")
+}
+
 const MAX_PARSE_BYTES: usize = 1 << 20;
 const MAX_TREE_DEPTH: usize = 128;
+const LEZER_BUFFER_UNITS: usize = 1024;
 
 #[derive(Debug)]
 pub(super) struct Cache {
@@ -49,20 +80,66 @@ pub(super) struct Parsed {
 }
 
 pub(super) fn parse(source: &str, prefix: Option<(&Cache, Option<usize>)>) -> Parsed {
-    if source.len() <= MAX_PARSE_BYTES {
-        let input = Input::new(source);
-        if let Some(result) = parse_pinned(&input, prefix) {
-            return result;
-        }
-    }
-    Parsed {
+    parse_pinned(source, prefix, false).unwrap_or_else(|_| Parsed {
         root: parser::parse(source),
         strict: None,
         recovered: true,
+    })
+}
+
+pub(super) fn parse_strict(source: &str) -> Result<Parsed, ParseError> {
+    parse_pinned(source, None, true)
+}
+
+pub(crate) fn parse_raw(source: &str, strict: bool) -> Result<SyntaxTree, ParseError> {
+    check_size(source)?;
+    let (mut tree, _) = finish_tree(source, PARSER.parse(source), strict)?;
+    // Match the pinned unbuffered tree. The packed tree can wrap starts
+    // that precede the buffer base. Keep the original byte ranges instead.
+    tree.move_preceding_children(raw_comment_mapping);
+    Ok(tree)
+}
+
+fn raw_comment_mapping<'a>(
+    comment: SyntaxNode<'a>,
+    mut node: SyntaxNode<'a>,
+) -> Option<SyntaxNode<'a>> {
+    if comment.name() != "Comment" {
+        return None;
+    }
+    let comment = comment.range();
+    // The zero-width implicit map start puts the last skipped comment
+    // before the first Pair, inside the mapping, in the pinned tree.
+    loop {
+        let range = node.range();
+        if range.start > comment.start || range.end < comment.end {
+            return None;
+        }
+        let first = node.children().next()?;
+        if node.name() == "BlockMapping"
+            && first.name() == "Pair"
+            && first.range().start >= comment.end
+        {
+            return Some(node);
+        }
+        node = first;
     }
 }
 
-fn parse_pinned(input: &Input<'_>, prefix: Option<(&Cache, Option<usize>)>) -> Option<Parsed> {
+fn check_size(source: &str) -> Result<(), ParseError> {
+    if source.len() > MAX_PARSE_BYTES {
+        return Err(ParseError::LimitExceeded { offset: 0 });
+    }
+    Ok(())
+}
+
+fn parse_pinned(
+    original: &str,
+    prefix: Option<(&Cache, Option<usize>)>,
+    strict: bool,
+) -> Result<Parsed, ParseError> {
+    check_size(original)?;
+    let input = Input::new(original);
     let source = &input.text;
     let fragment = prefix.map(|(cache, first_edit)| {
         let end = first_edit.map_or(source.len(), |at| input.prefix_end(at));
@@ -72,38 +149,41 @@ fn parse_pinned(input: &Input<'_>, prefix: Option<(&Cache, Option<usize>)>) -> O
             new_range: 0..end,
         }
     });
-    let failure = match PARSER.parse_incremental(source, fragment) {
-        Ok(tree) => {
-            let root = convert(tree.root(), input, 0)?;
-            let mut reuse = tree.reuse_stats();
-            reuse.resumed_at = input.original_byte(reuse.resumed_at);
-            return Some(Parsed {
-                root,
-                strict: Some(Cache { tree, reuse }),
-                recovered: false,
-            });
-        }
-        Err(ParseError::Ambiguous { .. }) => match PARSER.parse_glr(source) {
-            Ok(tree) => {
-                return Some(Parsed {
-                    root: convert(tree.root(), input, 0)?,
-                    strict: None,
-                    recovered: false,
-                });
-            }
-            Err(error) => error,
-        },
-        Err(error) => error,
+    let lr = if strict {
+        PARSER.parse(source)
+    } else {
+        PARSER.parse_incremental(source, fragment)
     };
-    if matches!(failure, ParseError::UnexpectedToken { .. }) {
-        let tree = PARSER.parse_recovering(source).ok()?;
-        return Some(Parsed {
-            root: convert(tree.root(), input, 0)?,
-            strict: None,
-            recovered: true,
-        });
+    let (tree, recovered) = finish_tree(source, lr, strict)
+        .map_err(|error| error.map_offset(|at| input.original_byte(at)))?;
+    let root = convert(tree.root(), &input, 0)?;
+    let cache = tree.has_incremental_state().then(|| {
+        let mut reuse = tree.reuse_stats();
+        reuse.resumed_at = input.original_byte(reuse.resumed_at);
+        Cache { tree, reuse }
+    });
+    Ok(Parsed {
+        root,
+        strict: cache,
+        recovered,
+    })
+}
+
+fn finish_tree(
+    source: &str,
+    lr: Result<SyntaxTree, ParseError>,
+    strict: bool,
+) -> Result<(SyntaxTree, bool), ParseError> {
+    let result = match lr {
+        Err(ParseError::Ambiguous { .. }) => PARSER.parse_glr(source),
+        result => result,
+    };
+    match result {
+        Err(ParseError::UnexpectedToken { .. }) if !strict => {
+            PARSER.parse_recovering(source).map(|tree| (tree, true))
+        }
+        result => result.map(|tree| (tree, false)),
     }
-    None
 }
 
 // CodeMirror's editor normalizes line breaks before passing input to Lezer.
@@ -146,9 +226,11 @@ impl<'a> Input<'a> {
     }
 }
 
-fn convert(node: SyntaxNode<'_>, input: &Input<'_>, depth: usize) -> Option<Node> {
+fn convert(node: SyntaxNode<'_>, input: &Input<'_>, depth: usize) -> Result<Node, ParseError> {
     if depth == MAX_TREE_DEPTH {
-        return None;
+        return Err(ParseError::LimitExceeded {
+            offset: input.original_byte(node.range().start),
+        });
     }
     let kind = match node.name() {
         "⚠" => Error,
@@ -188,8 +270,8 @@ fn convert(node: SyntaxNode<'_>, input: &Input<'_>, depth: usize) -> Option<Node
         "DirectiveContent" => DirectiveContent,
         _ => unreachable!("named node from the pinned YAML grammar"),
     };
-    let range = node.range();
-    let range = input.original_byte(range.start)..input.original_byte(range.end);
+    let normalized = node.range();
+    let range = input.original_byte(normalized.start)..input.original_byte(normalized.end);
     let mut children: Vec<Node> = Vec::new();
     for child in node.children() {
         let mut child = convert(child, input, depth + 1)?;
@@ -203,7 +285,18 @@ fn convert(node: SyntaxNode<'_>, input: &Input<'_>, depth: usize) -> Option<Node
         }
         children.push(child);
     }
-    Some(Node::new(kind, range, children))
+    let mut node = Node::new(kind, range, children);
+    if kind != Stream
+        && node.child_order == super::ChildOrder::Overlapping
+        && input.text[normalized]
+            .encode_utf16()
+            .take(LEZER_BUFFER_UNITS + 1)
+            .count()
+            <= LEZER_BUFFER_UNITS
+    {
+        node.child_order = super::ChildOrder::BufferedOverlap;
+    }
+    Ok(node)
 }
 
 fn leading_mapping<'a>(mut node: &'a mut Node, comment: &Node) -> Option<&'a mut Node> {

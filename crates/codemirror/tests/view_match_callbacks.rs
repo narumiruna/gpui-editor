@@ -109,6 +109,7 @@ fn callbacks_match_the_pinned_browser_on_create_and_update() {
                 state: &state,
                 changes: &desc,
                 effects: &[],
+                input_steps: &[],
                 start_viewport: &Viewport::complete(previous.text()),
                 viewport: &viewport,
                 viewport_changed: false,

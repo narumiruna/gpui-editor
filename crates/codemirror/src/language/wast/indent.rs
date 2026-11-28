@@ -115,6 +115,19 @@ impl WastDocument {
         indentation_from_root(self.root(), state, lines, Some(0))
     }
 
+    pub(in crate::language) fn indentation_in_body(
+        &self,
+        origin: usize,
+        state: &EditorState,
+        lines: &IndentContext<'_>,
+    ) -> Option<usize> {
+        let root = WastNode {
+            coordinates: super::Coordinates::Linear(origin),
+            ..self.root()
+        };
+        indentation_from_root(root, Some(state), lines, Some(0))
+    }
+
     pub(crate) fn indentation_in_markdown(
         &self,
         map: super::MarkdownSourceMap<'_>,

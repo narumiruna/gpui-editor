@@ -241,6 +241,10 @@ impl<'a> TokenCache<'a> {
         self.input.source()
     }
 
+    pub(super) fn utf16_offset(&self, byte: usize) -> usize {
+        self.input.utf16_offset(byte)
+    }
+
     pub(super) fn prepare_input(&self) {
         self.input.prepare();
     }

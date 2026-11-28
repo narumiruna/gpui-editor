@@ -231,8 +231,11 @@ fn mapping_effects_uses_the_same_batch_boundaries_as_changes() {
                     .and_then(|effect| effect.get(&mark)),
                 expected
             );
-            assert_eq!(pending.origin().unwrap().effects()[0].get(&mark), Some(&1));
         }
+        assert!(full[0].origin().is_none());
+        assert!(described[0].origin().is_none());
+        let receipt_origin = client.sendable_updates()[0].origin().unwrap();
+        assert_eq!(receipt_origin.effects()[0].get(&mark), Some(&1));
     }
 }
 

@@ -98,7 +98,7 @@ fn preserves_crlf_and_utf8_byte_ranges() {
 }
 
 #[test]
-fn parses_inline_styles_and_recovers_following_declarations() {
+fn parses_inline_styles_and_recovers_a_stray_closer() {
     let source = "color: red;\r\n/* 字 */ width: 4px;";
     let doc = CssDocument::parse_styles(Text::new(source));
     assert_eq!(doc.root().kind(), CssNodeKind::Styles);
@@ -119,11 +119,9 @@ fn parses_inline_styles_and_recovers_following_declarations() {
     let source = "color: ); width: 4px;";
     let doc = CssDocument::parse_styles(Text::new(source));
     assert_eq!(doc.root().kind(), CssNodeKind::Styles);
-    assert!(
-        doc.nodes().any(
-            |node| node.kind() == CssNodeKind::PropertyName && &source[node.range()] == "width"
-        )
-    );
+    assert!(doc.root().children().any(|node| {
+        node.kind() == CssNodeKind::RuleSet && &source[node.range()] == "width: 4px"
+    }));
 }
 
 #[test]

@@ -7,18 +7,21 @@ use std::{
 
 use crate::{
     Change, ChangeSet, EditError, EditorState, Extension, Facet, Text,
-    language_data::{NativeSyntax, SupportedDocument, attached_language_snapshot},
+    language_data::{
+        NativeSyntax, SupportedDocument, attached_language_snapshot, indent_catalog_markdown_html,
+    },
 };
 
 use super::{
     IndentContext, IndentOptions, StreamSettings,
-    line_projection::{command_line_projection, keeps_separate_breaks},
+    lezer::indent::rust_indentation,
+    line_projection::{command_line_projection, keeps_separate_breaks, splits_crlf},
     markdown::markdown_snapshot,
 };
 
 mod mounted;
 
-pub use mounted::MarkdownWastIndent;
+pub use mounted::{MarkdownCodeIndent, MarkdownWastIndent};
 
 /// The repeated whitespace character that forms one indentation unit.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -97,12 +100,25 @@ pub enum IndentDecision {
 
 type Provider = Arc<dyn Fn(&EditorState, &IndentContext<'_>) -> IndentDecision + Send + Sync>;
 static SERVICES: LazyLock<Facet<Provider, Vec<Provider>>> = LazyLock::new(Facet::collect);
+static SYNTAX_FALLBACKS: LazyLock<Facet<Provider, Vec<Provider>>> = LazyLock::new(Facet::collect);
 
 /// Register an indentation service. Services run before the current syntax rule.
 pub fn indent_service(
     provider: impl Fn(&EditorState, &IndentContext<'_>) -> IndentDecision + Send + Sync + 'static,
 ) -> Extension {
     SERVICES.of(Arc::new(provider))
+}
+
+pub(super) fn syntax_indent_fallback(
+    provider: impl Fn(&EditorState, &IndentContext<'_>) -> IndentDecision + Send + Sync + 'static,
+) -> Extension {
+    SYNTAX_FALLBACKS.of(Arc::new(provider))
+}
+
+impl EditorState {
+    pub(crate) fn has_indent_services(&self) -> Result<bool, EditError> {
+        Ok(!self.context().facet(&SERVICES)?.is_empty())
+    }
 }
 
 pub fn get_indent_unit(state: &EditorState) -> usize {
@@ -121,9 +137,9 @@ pub(crate) fn style(state: &EditorState) -> IndentStyle {
 }
 
 /// Get indentation at a byte position. Consult services in priority order,
-/// then current explicit or attached syntax, including installed Markdown WAST
-/// mounts. A matching syntax projection supplies logical line bounds. Ignore
-/// stale syntax.
+/// then current explicit or attached syntax, including installed Markdown code
+/// mounts with WAST, JSON, Lezer, or configured Rust syntax. A matching syntax projection
+/// supplies logical line bounds. Ignore stale syntax.
 pub fn get_indentation(
     state: &EditorState,
     position: usize,
@@ -191,15 +207,20 @@ struct Indenter<'a> {
     markdown: Option<Arc<SupportedDocument>>,
     settings: StreamSettings,
     services: Arc<Vec<Provider>>,
+    syntax_fallbacks: Arc<Vec<Provider>>,
 }
 
 impl<'a> Indenter<'a> {
     fn new(state: &'a EditorState, syntax: Option<&'a NativeSyntax>) -> Result<Self, EditError> {
         let explicit = syntax.filter(|syntax| syntax.text() == state.text());
-        let tracked = explicit
-            .is_none()
-            .then(|| attached_language_snapshot(state))
-            .flatten();
+        let tracked = if let Some(explicit) = explicit {
+            matches!(explicit, NativeSyntax::Rust(_))
+                .then(|| attached_language_snapshot(state))
+                .flatten()
+                .filter(|doc| std::ptr::eq(doc.syntax(), explicit))
+        } else {
+            attached_language_snapshot(state)
+        };
         let markdown = (explicit.is_none() && tracked.is_none())
             .then(|| markdown_snapshot(state))
             .flatten();
@@ -214,6 +235,7 @@ impl<'a> Indenter<'a> {
                 indent_unit: get_indent_unit(state),
             },
             services: state.context().facet(&SERVICES)?,
+            syntax_fallbacks: state.context().facet(&SYNTAX_FALLBACKS)?,
         })
     }
 
@@ -244,12 +266,31 @@ impl<'a> Indenter<'a> {
                 Some(NativeSyntax::Wast(doc)) => {
                     doc.indentation_with_context(Some(self.state), &context)
                 }
+                Some(NativeSyntax::Json(doc)) => {
+                    doc.indentation_with_state(Some(self.state), position, self.settings, options)
+                }
+                Some(NativeSyntax::LezerGrammar(doc)) => {
+                    doc.indentation_with_state(Some(self.state), position, self.settings, options)
+                }
+                Some(NativeSyntax::Rust(doc))
+                    if self.tracked.is_some() && !splits_crlf(doc.text().as_str(), position) =>
+                {
+                    rust_indentation(doc, self.state, &context)
+                }
+                Some(syntax @ NativeSyntax::Markdown(_)) => self
+                    .tracked
+                    .as_deref()
+                    .and_then(|doc| indent_catalog_markdown_html(self.state, doc, &context))
+                    .or_else(|| syntax.indentation(position, self.settings, options)),
                 Some(syntax) => syntax.indentation(position, self.settings, options),
-                None => self
-                    .markdown
-                    .as_ref()
-                    .and_then(|snapshot| snapshot.markdown_wast_indentation(self.state, &context))
-                    .or_else(|| (position == 0).then_some(0)),
+                None => indent_with_services(self.state, &self.syntax_fallbacks, &context, || {
+                    self.markdown
+                        .as_ref()
+                        .and_then(|snapshot| {
+                            snapshot.markdown_code_indentation(self.state, &context)
+                        })
+                        .or_else(|| (position == 0).then_some(0))
+                }),
             },
         ))
     }

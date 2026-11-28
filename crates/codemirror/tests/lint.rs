@@ -15,7 +15,10 @@ use gpui_editor_codemirror::{
         previous_diagnostic, run_action, select_diagnostic, set_diagnostics,
         set_diagnostics_effect, set_diagnostics_for,
     },
+    setup::minimal_setup,
+    view::keymap::KeyPlatform,
 };
+use serde_json::{Value, json};
 
 fn state(text: &str) -> EditorState {
     EditorState::with_extensions(text, lint::extension()).unwrap()
@@ -160,6 +163,34 @@ fn newline_points_and_end_of_document_follow_upstream() {
         positions(&state),
         [("CRLF".into(), 1..1, 1..3), ("CR".into(), 4..5, 4..5)]
     );
+}
+
+#[test]
+fn diagnostic_points_use_the_configured_editor_lines() {
+    for row in include_str!("fixtures/lint_editor_lines.jsonl").lines() {
+        let case: Value = serde_json::from_str(row).unwrap();
+        let source = case["source"].as_str().unwrap();
+        let id = case["id"].as_str().unwrap();
+        let [from, to]: [usize; 2] = serde_json::from_value(case["range"].clone()).unwrap();
+        let mut editor = minimal_setup::<()>(state(source), KeyPlatform::Linux);
+        editor
+            .view_mut()
+            .update(set_diagnostics(vec![diagnostic(from..to, id)]), (), |_| {
+                (None, ())
+            })
+            .unwrap();
+        let state = editor.view().state();
+        let markers: Vec<_> = positions(state)
+            .into_iter()
+            .map(|(message, range, original)| {
+                assert_eq!(message, id);
+                assert_eq!(original, from..to);
+                [range.start, range.end]
+            })
+            .collect();
+        assert_eq!(json!(markers), case["markers"], "{id}");
+        assert_eq!(state.text().as_str(), source);
+    }
 }
 
 #[test]
