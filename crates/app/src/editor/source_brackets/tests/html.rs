@@ -16,7 +16,7 @@ fn installed_html_bracket_options_follow_the_pinned_mount_probes(cx: &mut TestAp
     }
     let fixture = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../codemirror/tests/fixtures/html_bracket_options.jsonl"
+        "/tests/fixtures/codemirror/html_bracket_options.jsonl"
     ));
     for line in fixture.lines() {
         let case: Case = serde_json::from_str(line).unwrap();
@@ -120,7 +120,7 @@ fn html_mounted_brackets_stay_in_their_syntax_regions(cx: &mut TestAppContext) {
     const SUFFIX: &str = "\r\n```\r\n\r\n```html\r\n<script>f(1)</script>\r\n```";
     let fixtures = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../codemirror/tests/fixtures/html_mounted_brackets.jsonl"
+        "/tests/fixtures/codemirror/html_mounted_brackets.jsonl"
     ));
     for row in fixtures.lines() {
         let case: Case = serde_json::from_str(row).unwrap();

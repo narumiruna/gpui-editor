@@ -102,12 +102,11 @@ fn browser(name: &str) -> Appearance {
         top: f32,
         bottom: f32,
     }
-    let css =
-        include_str!("../../../../codemirror/tests/fixtures/one_dark_panel_menu_browser.jsonl")
-            .lines()
-            .map(|line| serde_json::from_str::<RoleCss>(line).unwrap())
-            .find(|row| row.name == name)
-            .unwrap();
+    let css = include_str!("../../../tests/fixtures/codemirror/one_dark_panel_menu_browser.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str::<RoleCss>(line).unwrap())
+        .find(|row| row.name == name)
+        .unwrap();
     let color = |hex: String| rgb(u32::from_str_radix(&hex, 16).unwrap());
     Appearance {
         fill: css.fill.map(|hex| color(hex).into()),

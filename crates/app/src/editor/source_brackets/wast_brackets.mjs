@@ -1,7 +1,7 @@
-// From the repository root, run the WAST package oracle to verify the archives:
-// node crates/codemirror/tests/fixtures/wast_oracle.mjs /private/tmp/gpui-upstream-exports.UVI6VVWZ
-// Then regenerate this fixture:
-// node crates/app/src/editor/source_brackets/wast_brackets.mjs /private/tmp/gpui-upstream-exports.UVI6VVWZ \
+// From the GPUI Editor repository root, verify the WAST package archives:
+// node ../codemirror-rs/crates/codemirror/tests/fixtures/wast_oracle.mjs /path/to/archives
+// Then regenerate this fixture from the same directory:
+// node crates/app/src/editor/source_brackets/wast_brackets.mjs /path/to/archives \
 //   > crates/app/src/editor/source_brackets/wast_brackets.jsonl
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';

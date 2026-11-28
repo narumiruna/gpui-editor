@@ -1,4 +1,0 @@
-{"source":"é abc\r\nxy","name":"default","marks":[{"line":0,"severity":"error","delay":300,"messages":["first","second"]},{"line":8,"severity":"hint","delay":300,"messages":["tail"]}]}
-{"source":"é abc\r\nxy","name":"filtered","marks":[{"line":0,"severity":"error","delay":45,"messages":["second"]},{"line":8,"severity":"hint","delay":45,"messages":["tail"]}]}
-{"source":"é abc\r\nxy","name":"empty","marks":[{"line":0,"severity":"error","delay":null,"messages":[]},{"line":8,"severity":"hint","delay":null,"messages":[]}]}
-{"source":"é abc\r\nxy","name":"conflict","conflict":true}

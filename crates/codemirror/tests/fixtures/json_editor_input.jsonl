@@ -1,5 +1,0 @@
-{"name":"object closer on a lone CR line","source":"{\r\n  \"名😀\": true\r    ","caret":25,"typed":"}","event":"input.type","result":"{\r\n  \"名😀\": true\r}","finalCaret":22}
-{"name":"nested array closer","source":"[\r\n  [\"😀\"\r    \r\n  false\r\n]","caret":17,"typed":"]","event":"input.type","result":"[\r\n  [\"😀\"\r  ]\r\n  false\r\n]","finalCaret":16}
-{"name":"completion of the closer","source":"{\r\n  \"名😀\": true\r    ","caret":25,"typed":"}","event":"input.complete","result":"{\r\n  \"名😀\": true\r}","finalCaret":22}
-{"name":"non-matching input","source":"{\r\n  \"名😀\": true\r    ","caret":25,"typed":"x","event":"input.type","result":"{\r\n  \"名😀\": true\r    x","finalCaret":26}
-{"name":"non-typing event","source":"{\r\n  \"名😀\": true\r    ","caret":25,"typed":"}","event":"input.paste","result":"{\r\n  \"名😀\": true\r    }","finalCaret":26}

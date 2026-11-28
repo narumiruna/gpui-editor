@@ -15,7 +15,7 @@ gpui-editor-workspace = { path = "../workspace" }
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 base64 = "0.23"
-gpui-editor-codemirror = { path = "../codemirror" }
+gpui-editor-codemirror = { package = "codemirror-rs", version = "0.0.0" }
 gpui.workspace = true
 image = { workspace = true, features = ["jpeg", "png", "tiff"] }
 serde = { version = "1", features = ["derive"] }

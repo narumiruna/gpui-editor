@@ -1,4 +1,0 @@
-{"chosen":"high","doc":"[\n  \"猫\",\n  1\n]\n","range":[1,12],"queryCalls":[["high",0,1]],"handled":true,"folded":[[1,12]],"commandCalls":[["high",0,1]]}
-{"chosen":"default","doc":"[\n  \"猫\",\n  1\n]\n","range":[1,10],"queryCalls":[["high",0,1],["default",0,1]],"handled":true,"folded":[[1,10]],"commandCalls":[["high",0,1],["default",0,1]]}
-{"chosen":"low","doc":"[\n  \"猫\",\n  1\n]\n","range":[1,8],"queryCalls":[["high",0,1],["default",0,1],["later",0,1],["low",0,1]],"handled":true,"folded":[[1,8]],"commandCalls":[["high",0,1],["default",0,1],["later",0,1],["low",0,1]]}
-{"chosen":"syntax","doc":"[\n  \"猫\",\n  1\n]\n","range":[1,15],"queryCalls":[["high",0,1],["default",0,1],["later",0,1],["low",0,1]],"handled":true,"folded":[[1,15]],"commandCalls":[["high",0,1],["default",0,1],["later",0,1],["low",0,1]]}

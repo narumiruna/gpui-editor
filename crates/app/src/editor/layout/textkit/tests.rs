@@ -11,7 +11,7 @@ use objc2_app_kit::NSGraphicsContext;
 
 use super::*;
 
-// Line 1 of `mixed-breaks` in codemirror/tests/fixtures/wast_bidi.jsonl.
+// Line 1 of `mixed-breaks` of the codemirror-rs fixture `tests/fixtures/wast_bidi.jsonl`.
 const SOURCE: &str = "(module (data \"ABC אב 🦀\") ;; عرب";
 
 fn pinned_isolates() -> Vec<BidiIsolate> {

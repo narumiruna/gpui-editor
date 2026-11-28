@@ -1,6 +1,0 @@
-{"step":"install","length":10513,"viewport":256,"root":3003,"coverage":3000,"complete":false,"marker":"first"}
-{"step":"stage","length":10513,"viewport":256,"root":3003,"coverage":5000,"complete":false,"marker":"first","sameState":true,"available":true,"working":5002,"markerAt5000":"first"}
-{"step":"publish","length":10513,"viewport":256,"root":5002,"coverage":5000,"complete":false,"marker":"first","forced":true,"publishedStage":true,"retainedInitial":true}
-{"step":"idle","length":10513,"viewport":256,"root":10513,"coverage":10513,"complete":true,"marker":"first"}
-{"step":"swap","length":10513,"viewport":256,"root":3003,"coverage":3000,"complete":false,"marker":"next","retained":"first"}
-{"step":"detach","length":10513,"viewport":256,"root":0,"coverage":0,"complete":false,"marker":null}

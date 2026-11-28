@@ -1,6 +1,0 @@
-{"grammar":"json","event":"install","viewport":666,"through":3000,"pub":3001,"inFlight":null}
-{"grammar":"json","event":"pending","viewport":666,"through":3000,"pub":3001,"inFlight":3452,"requested":8000,"available":false}
-{"grammar":"json","event":"edit","viewport":667,"through":3453,"pub":3454,"inFlight":null,"insert":" ","retained":true,"available":true}
-{"grammar":"lezer","event":"install","viewport":256,"through":3000,"pub":3003,"inFlight":null}
-{"grammar":"lezer","event":"pending","viewport":256,"through":3000,"pub":3003,"inFlight":6150,"requested":8000,"available":false}
-{"grammar":"lezer","event":"edit","viewport":257,"through":6151,"pub":6154,"inFlight":null,"insert":"\n","retained":true,"available":true}

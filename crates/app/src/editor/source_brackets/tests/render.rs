@@ -24,7 +24,7 @@ fn configured_render_callbacks_control_canvas_marks(cx: &mut TestAppContext) {
     }
     let fixture = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../codemirror/tests/fixtures/bracket_render_roles.jsonl"
+        "/tests/fixtures/codemirror/bracket_render_roles.jsonl"
     ));
     let origin = PREFIX.len();
     for line in fixture.lines() {

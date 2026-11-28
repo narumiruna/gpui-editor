@@ -245,7 +245,7 @@ fn javascript_family_feedback_uses_pinned_delimiters_in_live_fences(cx: &mut Tes
     }
     let rows: Vec<Case> = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../codemirror/tests/fixtures/javascript_brackets.jsonl"
+        "/tests/fixtures/codemirror/javascript_brackets.jsonl"
     ))
     .lines()
     .map(|row| serde_json::from_str(row).unwrap())

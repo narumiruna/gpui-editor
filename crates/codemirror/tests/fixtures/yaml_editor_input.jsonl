@@ -1,3 +1,0 @@
-{"name":"mapping closer","source":"root: {\r\n  v: \"名😀\"\r    ","caret":28,"typed":"}","event":"input.type","result":"root: {\r\n  v: \"名😀\"\r}","finalCaret":25}
-{"name":"nested sequence closer","source":"root:\r\n  [\r    \"😀\"\r      ","caret":28,"typed":"]","event":"input.complete","result":"root:\r\n  [\r    \"😀\"\r  ]","finalCaret":25}
-{"name":"paste is not reindented","source":"root: {\r\n  v: \"名😀\"\r    ","caret":28,"typed":"}","event":"input.paste","result":"root: {\r\n  v: \"名😀\"\r    }","finalCaret":29}

@@ -36,7 +36,7 @@ pub(in crate::editor) fn record_fonts(preview: bool, text: &str, runs: &[TextRun
 }
 
 fn fixture(name: &str) -> Value {
-    include_str!("../../../../codemirror/tests/fixtures/one_dark_stock_paint_browser.jsonl")
+    include_str!("../../../tests/fixtures/codemirror/one_dark_stock_paint_browser.jsonl")
         .lines()
         .map(|line| serde_json::from_str::<Value>(line).unwrap())
         .find(|row| row["name"] == name)

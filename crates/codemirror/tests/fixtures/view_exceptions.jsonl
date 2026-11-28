@@ -1,1 +1,0 @@
-{"events":["create:failure","first:construction","first:manual","update:failure","first:update","destroy:failure","update:ab","update:abc","destroy:survivor"],"final":"abc","active":[false,false,true]}

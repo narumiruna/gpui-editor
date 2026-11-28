@@ -90,11 +90,10 @@ fn find_announces_selected_matches_without_moving_focus_or_editing(cx: &mut Test
 
 #[gpui::test]
 fn find_function_keys_match_pinned_search_in_both_focus_scopes(cx: &mut TestAppContext) {
-    let mut rows =
-        include_str!("../../../../codemirror/tests/fixtures/setup_find_keys_browser.jsonl")
-            .lines()
-            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-            .filter(|row| row["preset"] == "basic");
+    let mut rows = include_str!("../../../tests/fixtures/codemirror/setup_find_keys_browser.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter(|row| row["preset"] == "basic");
     let panel = rows.next().unwrap();
     let body = rows.next().unwrap();
     assert!(rows.next().is_none());

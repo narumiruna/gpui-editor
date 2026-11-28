@@ -1,6 +1,0 @@
-{"preset":"basic","mode":"off","source":"","select":[0,0],"steps":[{"key":"(","doc":"()","selection":[1,1]},{"key":"Backspace","doc":"","selection":[0,0]}]}
-{"preset":"minimal","mode":"off","source":"","select":[0,0],"steps":[{"key":"(","doc":"(","selection":[1,1]},{"key":"Backspace","doc":"","selection":[0,0]}]}
-{"preset":"minimal","mode":"initial","source":"","select":[0,0],"steps":[{"key":"(","doc":"()","selection":[1,1]},{"key":"Backspace","doc":")","selection":[0,0]}]}
-{"preset":"minimal","mode":"initial","source":"","select":[0,0],"steps":[{"key":"(","doc":"()","selection":[1,1]},{"key":")","doc":"()","selection":[2,2]}]}
-{"preset":"minimal","mode":"attach","source":"😀","select":[4,0],"steps":[{"key":"[","doc":"[😀]","selection":[5,1]}]}
-{"preset":"minimal","mode":"detach","source":"","select":[0,0],"steps":[{"key":"(","doc":"(","selection":[1,1]},{"key":")","doc":"()","selection":[2,2]}]}

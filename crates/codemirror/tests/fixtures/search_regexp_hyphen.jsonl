@@ -1,8 +1,0 @@
-{"kind":"cursor","id":"leading hyphen is a range start","parts":["."],"pattern":"[--0]","ignoreCase":false,"range":[0,1],"reject":[],"visits":[0],"matches":[[0,1,"."]]}
-{"kind":"cursor","id":"hyphen is a range end","parts":["*+,-./0"],"pattern":"([+--]+)","ignoreCase":false,"range":[0,7],"reject":[],"visits":[1],"matches":[[1,4,"+,-","+,-"]]}
-{"kind":"cursor","id":"hyphen starts a range after another range","parts":["🦀 A-./0é\nz0_!"],"pattern":"([a-z--0]+)","ignoreCase":true,"range":[0,17],"reject":[],"visits":[5,13],"matches":[[5,10,"A-./0","A-./0"],[13,15,"z0","z0"]]}
-{"kind":"cursor","id":"two trailing hyphens are literals","parts":["a-."],"pattern":"[a-z--]+","ignoreCase":false,"range":[0,3],"reject":[],"visits":[0],"matches":[[0,2,"a-"]]}
-{"kind":"cursor","id":"negated range excludes the same hyphen interval","parts":[".🦀-\n/é0"],"pattern":"([^--0]+)","ignoreCase":false,"range":[0,11],"reject":[],"visits":[1,6,8],"matches":[[1,5,"🦀","🦀"],[6,7,"\n","\n"],[8,10,"é","é"]]}
-{"kind":"cursor","id":"escaped hyphen remains a scalar range endpoint","parts":["-./01"],"pattern":"([\\--0]+)","ignoreCase":false,"range":[0,5],"reject":[],"visits":[0],"matches":[[0,4,"-./0","-./0"]]}
-{"kind":"cursor","id":"set escape next to a literal hyphen","parts":["a23-/"],"pattern":"[\\d-]+","ignoreCase":false,"range":[0,5],"reject":[],"visits":[1],"matches":[[1,4,"23-"]]}
-{"kind":"invalid","patterns":["[a--b]","[--\\d]","[\\w--]","[--\\p{ASCII}]"]}

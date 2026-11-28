@@ -17,7 +17,7 @@ use super::*;
 #[gpui::test]
 fn mounted_typed_indent_uses_the_pinned_parent_state(cx: &mut TestAppContext) {
     for line in
-        include_str!("../../../../../codemirror/tests/fixtures/mounted_indent_input.jsonl").lines()
+        include_str!("../../../../tests/fixtures/codemirror/mounted_indent_input.jsonl").lines()
     {
         let row: Value = serde_json::from_str(line).unwrap();
         let source = row["source"].as_str().unwrap();
@@ -219,7 +219,7 @@ fn closes_wast(line: &str) -> bool {
 #[gpui::test]
 fn configured_wast_indent_commands_match_pinned_host_callbacks(cx: &mut TestAppContext) {
     for line in
-        include_str!("../../../../../codemirror/tests/fixtures/wast_fence_indent_commands.jsonl")
+        include_str!("../../../../tests/fixtures/codemirror/wast_fence_indent_commands.jsonl")
             .lines()
     {
         let row: Value = serde_json::from_str(line).unwrap();

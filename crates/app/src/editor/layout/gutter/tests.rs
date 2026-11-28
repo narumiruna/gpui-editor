@@ -1101,7 +1101,7 @@ fn standalone_script_gutter_replays_pinned_folds_and_mapping(cx: &mut TestAppCon
     }
 
     let fixtures =
-        include_str!("../../../../../codemirror/tests/fixtures/standalone_javascript_folds.jsonl");
+        include_str!("../../../../tests/fixtures/codemirror/standalone_javascript_folds.jsonl");
     let marker_starts = |editor: &Editor| {
         standalone_fold_lane(editor)
             .1

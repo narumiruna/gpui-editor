@@ -39,7 +39,7 @@ fn stock_plain_feedback_counts_logical_utf16_chunks(cx: &mut TestAppContext) {
     const PREFIX: &str = "字 😀\r\n\r\n```text\r\n";
     let fixture = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../codemirror/tests/fixtures/bracket_plain_defaults.jsonl"
+        "/tests/fixtures/codemirror/bracket_plain_defaults.jsonl"
     ));
     for row in fixture.lines() {
         let case: Case = serde_json::from_str(row).unwrap();
@@ -79,7 +79,7 @@ fn installed_plain_pairs_and_scan_limit_control_live_feedback(cx: &mut TestAppCo
         cx,
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../codemirror/tests/fixtures/bracket_plain_config.jsonl"
+            "/tests/fixtures/codemirror/bracket_plain_config.jsonl"
         )),
         |mode| Some(mode),
     );
@@ -91,7 +91,7 @@ fn installed_javascript_bracket_options_match_pinned_hits(cx: &mut TestAppContex
         cx,
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../codemirror/tests/fixtures/javascript_bracket_options.jsonl"
+            "/tests/fixtures/codemirror/javascript_bracket_options.jsonl"
         )),
         |mode| Some(mode),
     );
@@ -103,7 +103,7 @@ fn installed_css_bracket_options_match_pinned_hits(cx: &mut TestAppContext) {
         cx,
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../codemirror/tests/fixtures/css_bracket_options.jsonl"
+            "/tests/fixtures/codemirror/css_bracket_options.jsonl"
         )),
         |mode| (mode == "stylesheet").then_some("css"),
     );
@@ -115,7 +115,7 @@ fn installed_grammar_bracket_options_match_pinned_hits(cx: &mut TestAppContext) 
         cx,
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../codemirror/tests/fixtures/grammar_bracket_options.jsonl"
+            "/tests/fixtures/codemirror/grammar_bracket_options.jsonl"
         )),
         |mode| Some(mode),
     );
@@ -127,7 +127,7 @@ fn installed_go_and_rust_bracket_options_match_pinned_hits(cx: &mut TestAppConte
         cx,
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../codemirror/tests/fixtures/go_rust_bracket_options.jsonl"
+            "/tests/fixtures/codemirror/go_rust_bracket_options.jsonl"
         )),
         |mode| Some(mode),
     );
@@ -139,7 +139,7 @@ fn installed_java_and_python_bracket_options_match_pinned_hits(cx: &mut TestAppC
         cx,
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../codemirror/tests/fixtures/java_python_bracket_options.jsonl"
+            "/tests/fixtures/codemirror/java_python_bracket_options.jsonl"
         )),
         |mode| Some(mode),
     );
@@ -229,7 +229,7 @@ fn installed_json_bracket_options_match_pinned_marks(cx: &mut TestAppContext) {
     const PREFIX: &str = "前 😀\r\n\r\n```json\r\n";
     let fixture = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../codemirror/tests/fixtures/json_bracket_options.jsonl"
+        "/tests/fixtures/codemirror/json_bracket_options.jsonl"
     ));
     for line in fixture.lines() {
         let case: Case = serde_json::from_str(line).unwrap();
@@ -356,7 +356,7 @@ fn installed_after_cursor_rule_controls_live_bracket_feedback(cx: &mut TestAppCo
     }
     let fixture = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../codemirror/tests/fixtures/bracket_after_cursor.jsonl"
+        "/tests/fixtures/codemirror/bracket_after_cursor.jsonl"
     ));
     for line in fixture.lines() {
         let case: Case = serde_json::from_str(line).unwrap();

@@ -416,11 +416,11 @@ fn wast_and_lezer_enter_match_the_pinned_delimiter_gap_command(cx: &mut TestAppC
     }
     let wast = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../codemirror/tests/fixtures/wast_newline.jsonl"
+        "/tests/fixtures/codemirror/wast_newline.jsonl"
     ));
     let lezer = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../codemirror/tests/fixtures/lezer_state.jsonl"
+        "/tests/fixtures/codemirror/lezer_state.jsonl"
     ));
     let cases = wast
         .lines()
