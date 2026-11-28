@@ -33,7 +33,7 @@ use gpui_editor_codemirror::{
         EditorView, EndScrollPadding, ViewException, Viewport, filter_clipboard_input,
         input::{InputChange, InputHandling, run_input_handlers},
         log_exception,
-        selection_layers::{RectangularSelection, rectangular_selection},
+        selection_layers::rectangular_selection,
     },
 };
 
@@ -191,7 +191,7 @@ pub struct Editor {
     active: Option<Section>,
     source_syntax: Option<SourceSyntax>,
     selecting: bool,
-    rectangle: Option<(RectangularSelection, Pixels, bool)>,
+    rectangle: Option<source_rectangle::RectangleDrag>,
     layout: Option<Layout>,
     highlighting: highlight::Highlighting,
     input_enabled: bool,
@@ -1015,6 +1015,9 @@ impl Editor {
     }
 
     fn remove(&mut self, right: bool, cx: &mut Context<Self>) {
+        if self.view.state().read_only() {
+            return;
+        }
         if self.unfold_at_deletion_edge(right, cx)
             || (!right && (self.delete_source_bracket_pair(cx) || self.edit_markup(true, cx)))
         {
@@ -3196,6 +3199,34 @@ mod tests {
             assert_eq!(e.cursor(), code.start);
             visible(e, "`ls -la`");
         });
+    }
+
+    #[gpui::test]
+    fn deletion_keys_respect_the_read_only_facet(cx: &mut TestAppContext) {
+        use gpui_editor_codemirror::READ_ONLY;
+
+        let source = "Read only prose";
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            Editor::with_native_extensions(source.into(), READ_ONLY.of(true), window, cx).unwrap()
+        });
+        cx.update(|window, cx| {
+            bind_keys(cx);
+            window.focus(&editor.read(cx).focus);
+        });
+        for (anchor, head) in [(5, 9), (5, 5)] {
+            for key in ["backspace", "delete"] {
+                cx.update(|_, cx| {
+                    editor.update(cx, |editor, _| editor.set_selection(anchor, head))
+                });
+                cx.simulate_keystrokes(key);
+                cx.update(|_, cx| {
+                    let editor = editor.read(cx);
+                    assert_eq!(editor.source(), source, "{key} at {anchor}..{head}");
+                    assert_eq!(editor.selection(), anchor..head);
+                    assert!(!editor.view.can_undo());
+                });
+            }
+        }
     }
 
     #[gpui::test]

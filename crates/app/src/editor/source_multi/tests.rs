@@ -103,6 +103,64 @@ fn linewise_clipboard_preserves_fence_separators_and_undo(cx: &mut TestAppContex
 }
 
 #[gpui::test]
+fn linewise_clipboard_pastes_multiple_crlf_lines_above_target_carets(cx: &mut TestAppContext) {
+    use gpui_editor_codemirror::EditorSelection;
+
+    let source = "Before.\r\n\r\n```txt\r\nalpha\r\nbeta\r\nthird\r\nfourth\r\n```\r\n\r\nAfter.";
+    let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(source.into(), window, cx));
+    let carets = |first, second| {
+        let at = |line| {
+            let offset = source.find(line).unwrap() + 1;
+            SelectionRange::new(offset, offset)
+        };
+        EditorSelection::new(vec![at(first), at(second)], 0).unwrap()
+    };
+    cx.update(|window, cx| {
+        bind_keys(cx);
+        editor.update(cx, |editor, cx| {
+            let block = editor
+                .markdown()
+                .sections()
+                .into_iter()
+                .find(|section| matches!(section.preview, Some(BlockPreview::Code { .. })))
+                .unwrap()
+                .source;
+            editor.activate(
+                Section::new(SectionKind::DraftCode, block.clone(), block),
+                false,
+                cx,
+            );
+            editor.view.set_selection(carets("alpha", "beta")).unwrap();
+            window.focus(&editor.focus);
+        });
+    });
+    cx.simulate_keystrokes("secondary-c");
+    cx.update(|_, cx| {
+        assert_eq!(
+            cx.read_from_clipboard().unwrap().text().as_deref(),
+            Some("alpha\r\nbeta")
+        );
+        editor.update(cx, |editor, _| {
+            editor
+                .view
+                .set_selection(carets("third", "fourth"))
+                .unwrap();
+        });
+    });
+    cx.simulate_keystrokes("secondary-v");
+    cx.update(|_, cx| {
+        let editor = editor.read(cx);
+        assert_eq!(
+            editor.source(),
+            source.replace("third\r\nfourth", "alpha\r\nthird\r\nbeta\r\nfourth")
+        );
+        assert_eq!(editor.view.undo_depth(), 1);
+    });
+    cx.simulate_keystrokes("secondary-z");
+    cx.update(|_, cx| assert_eq!(editor.read(cx).source(), source));
+}
+
+#[gpui::test]
 fn linewise_clipboard_uses_displayed_lone_cr_breaks(cx: &mut TestAppContext) {
     let source = "Intro\r\n\r\n```json\r\n[\r  \"猫\",\r  \"dog\"\r\n]\r\n```\r\n\r\nAfter";
     let removed = "  \"猫\",\r";

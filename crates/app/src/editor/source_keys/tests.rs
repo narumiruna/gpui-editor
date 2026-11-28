@@ -1208,6 +1208,53 @@ fn option_drag_selects_one_column_range_per_source_line(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
+fn option_drag_uses_projected_line_bounds_and_keeps_original_breaks(cx: &mut TestAppContext) {
+    let draft = "Before.\r\n\r\n```rust\r\nprefix\rabc\rdef\r\n```\r\n";
+    let first = draft.find("abc").unwrap();
+    let last = draft.find("def").unwrap();
+    let (editor, cx) = cx.add_window_view(|window, cx| Editor::new(draft.into(), window, cx));
+    cx.update(|window, cx| {
+        bind_keys(cx);
+        editor.update(cx, |editor, cx| activate_code(editor, first, window, cx));
+    });
+    cx.run_until_parked();
+    let (start, end) = cx.update(|_, cx| {
+        let layout = editor.read(cx).layout.as_ref().unwrap();
+        let at = |offset| layout.bounds_at(offset, false).unwrap().center();
+        (at(first), at(last + 1))
+    });
+    let alt = Modifiers {
+        alt: true,
+        ..Default::default()
+    };
+    cx.simulate_mouse_down(start, MouseButton::Left, alt);
+    cx.simulate_mouse_move(end, MouseButton::Left, alt);
+    cx.simulate_mouse_up(end, MouseButton::Left, alt);
+    cx.update(|_, cx| {
+        let editor = editor.read(cx);
+        let ranges: Vec<_> = editor
+            .view
+            .state()
+            .selection()
+            .ranges()
+            .iter()
+            .map(|range| range.range())
+            .collect();
+        assert_eq!(ranges, [first..first + 1, last..last + 1]);
+        assert_eq!(editor.source(), draft);
+        assert!(!editor.view.can_undo());
+    });
+    cx.simulate_input("Z");
+    cx.update(|_, cx| {
+        let editor = editor.read(cx);
+        assert_eq!(editor.source(), draft.replace("abc\rdef", "Zbc\rZef"));
+        assert_eq!(editor.view.undo_depth(), 1);
+    });
+    cx.simulate_keystrokes("secondary-z");
+    cx.update(|_, cx| assert_eq!(editor.read(cx).source(), draft));
+}
+
+#[gpui::test]
 fn typing_reindents_a_mounted_language_in_one_undo_step(cx: &mut TestAppContext) {
     use gpui::EntityInputHandler;
 

@@ -130,14 +130,13 @@ impl ClipboardLinewiseMemory {
         self.0 = None;
     }
 
-    fn matches(&self, state: &EditorState, text: &Text) -> bool {
-        self.0.as_ref().is_some_and(|copied| {
+    fn copied_text_for_cursors(&self, state: &EditorState) -> Option<&str> {
+        self.0.as_deref().filter(|_| {
             state
                 .selection()
                 .ranges()
                 .iter()
                 .all(|range| range.is_empty())
-                && text.iter_lines().eq(copied.split('\n'))
         })
     }
 }
@@ -301,7 +300,10 @@ pub fn plan_clipboard_paste(
     }
     let input = filter_clipboard_input(state, input.to_owned())?;
     let text = state.to_text(&input);
-    let linewise = memory.matches(state, &text).then(|| {
+    let matches_copy = memory
+        .copied_text_for_cursors(state)
+        .is_some_and(|copied| text.iter_lines().eq(copied.split('\n')));
+    let linewise = matches_copy.then(|| {
         let line_break = state.line_break();
         move |part: &str| {
             state
@@ -314,8 +316,9 @@ pub fn plan_clipboard_paste(
 }
 
 /// Plan a paste above each distinct cursor line when the already-filtered
-/// input matches the last handled linewise copy. The host supplies the line
-/// break to append and validates the proposed edit against its scope.
+/// input matches the last handled linewise copy. Parse both strings with the
+/// current state. The host supplies the line break to append and validates
+/// the proposed edit against its scope.
 pub fn plan_linewise_paste(
     state: &EditorState,
     input: &str,
@@ -364,7 +367,11 @@ fn paste_lines(
     lines: ClipboardLines<'_>,
 ) -> Result<Option<Transaction>, EditError> {
     let text = state.to_text(input);
-    if state.read_only() || !memory.matches(state, &text) {
+    if state.read_only()
+        || !memory
+            .copied_text_for_cursors(state)
+            .is_some_and(|copied| text.iter_lines().eq(state.to_text(copied).iter_lines()))
+    {
         return Ok(None);
     }
     plan_paste(

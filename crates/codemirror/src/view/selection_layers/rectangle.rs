@@ -60,11 +60,12 @@ struct Endpoint {
 }
 
 impl Endpoint {
-    fn from_hit(state: &EditorState, hit: RectangleHit) -> Result<Self, EditError> {
-        let line = state
-            .text()
-            .line_at(hit.position)
-            .ok_or(EditError::InvalidRange)?;
+    fn from_hit(
+        lines: &Text,
+        tab_size: NonZeroUsize,
+        hit: RectangleHit,
+    ) -> Result<Self, EditError> {
+        let line = lines.line_at(hit.position).ok_or(EditError::InvalidRange)?;
         // A native hit between CR and LF acts like the line end.
         let offset = hit.position.min(line.range.end) - line.range.start;
         let units = line.text[..offset].encode_utf16().count();
@@ -74,7 +75,7 @@ impl Endpoint {
             hit.line_end_column
         } else {
             Some(
-                columns(line.text, state.tab_size())
+                columns(line.text, tab_size)
                     .find(|&(byte, _)| byte >= offset)
                     .unwrap()
                     .1,
@@ -106,12 +107,23 @@ impl RectangularSelection {
         event: RectangleStartEvent,
         hit: RectangleHit,
     ) -> Result<Option<Self>, EditError> {
+        Self::start_with_lines(state, event, hit, state.text())
+    }
+
+    /// Start a drag with the host's displayed line breaks. The line view must
+    /// preserve the original document's byte offsets.
+    pub fn start_with_lines(
+        state: &EditorState,
+        event: RectangleStartEvent,
+        hit: RectangleHit,
+        lines: &Text,
+    ) -> Result<Option<Self>, EditError> {
         let filters = state.context().facet(&RECTANGLE_FILTERS)?;
         if !filters.iter().any(|filter| filter(event)) {
             return Ok(None);
         }
         Ok(Some(Self {
-            start: Endpoint::from_hit(state, hit)?,
+            start: Endpoint::from_hit(lines, state.tab_size(), hit)?,
             initial: state.selection().clone(),
         }))
     }
@@ -161,17 +173,28 @@ impl RectangularSelection {
         hit: Option<RectangleHit>,
         multiple: bool,
     ) -> Result<EditorSelection, EditError> {
+        self.selection_with_lines(state, hit, multiple, state.text())
+    }
+
+    /// Produce a selection using the same line view as at the start of the
+    /// drag. End the drag if the host replaces that view.
+    pub fn selection_with_lines(
+        &self,
+        state: &EditorState,
+        hit: Option<RectangleHit>,
+        multiple: bool,
+        lines: &Text,
+    ) -> Result<EditorSelection, EditError> {
         let Some(hit) = hit else {
             return Ok(self.initial.clone());
         };
-        let end = Endpoint::from_hit(state, hit)?;
+        let tab_size = state.tab_size();
+        let end = Endpoint::from_hit(lines, tab_size, hit)?;
         let a = self.start;
         let b = end;
         let mut ranges = Vec::new();
-        let text = state.text();
-        let tab_size = state.tab_size();
         for number in a.line.min(b.line)..=a.line.max(b.line) {
-            let line = text.line(number).ok_or(EditError::InvalidRange)?;
+            let line = lines.line(number).ok_or(EditError::InvalidRange)?;
             let range = match (a.column, b.column) {
                 (Some(a_col), Some(b_col)) if a.units.max(b.units) <= MAX_OFFSET => {
                     let mut columns = columns(line.text, tab_size);
@@ -195,9 +218,9 @@ impl RectangularSelection {
                         continue;
                     }
                     SelectionRange::new(
-                        offset_in_units(text, line.range.start, a.units.min(b.units))
+                        offset_in_units(lines, line.range.start, a.units.min(b.units))
                             .ok_or(EditError::InvalidSelection)?,
-                        offset_in_units(text, line.range.end, end)
+                        offset_in_units(lines, line.range.end, end)
                             .ok_or(EditError::InvalidSelection)?,
                     )
                 }
