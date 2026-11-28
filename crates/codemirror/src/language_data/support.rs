@@ -1,6 +1,9 @@
 //! Composition of the native services installed by catalog entries.
 
-use std::{ops::Range, sync::Arc};
+use std::{
+    ops::Range,
+    sync::{Arc, LazyLock},
+};
 
 use crate::{
     Assoc, EditorState, Extension, Text,
@@ -10,16 +13,18 @@ use crate::{
         css, go, html,
         html::{HtmlEmbeddedDocument, HtmlEmbeddedLanguage},
         java, javascript, jinja, json, language_data_provider, less,
-        lezer::ParseError,
+        lezer::{LrSyntaxNode, ParseError},
         lezer_grammar,
         line_projection::splits_crlf,
         liquid,
         markdown::{
-            self, MarkdownCodeLanguages, MarkdownDocument, MarkdownMount, MarkdownParserConfig,
+            self, MarkdownCodeLanguages, MarkdownCodeParser, MarkdownDocument, MarkdownMount,
+            MarkdownParserConfig,
         },
         php, python, rust, sass,
+        sql::SqlDialect,
         wast::WastDataFacet,
-        xml, yaml,
+        xml,
     },
     legacy_modes::asn1,
     stream_parser::TokenizeError,
@@ -30,24 +35,41 @@ use route::HtmlHost;
 
 mod completion;
 mod go_install;
+mod html_install;
 mod indent_input;
 mod input;
 mod javascript_regions;
+mod jinja_liquid_install;
 mod lr_data;
+mod markdown_install;
 mod projection;
 mod route;
+mod script_install;
 mod selection;
+mod sql_install;
+mod stylesheet_install;
+mod template_install;
 mod tracked;
 mod update;
+mod xml_install;
 
 pub use go_install::{GoCompletionSource, go_extension, go_language_extension};
 pub use lr_data::LrDataFacet;
-pub use tracked::{
-    JsonLanguage, LezerLanguage, WastLanguage, attached_language_snapshot, json_language,
-    lezer_language, wast_language,
+pub(crate) use markdown_install::{
+    mounted_fold as fold_catalog_markdown_html, mounted_indent as indent_catalog_markdown_html,
+    plan_markup as plan_catalog_markdown_markup, plan_paste as plan_catalog_markdown_paste,
 };
-pub(crate) use tracked::{WastConfig, active_wast_viewport};
+pub use script_install::ScriptCompletionSource;
+pub use sql_install::SqlCompletionSource;
+pub use stylesheet_install::StylesheetCompletionSource;
+pub use tracked::{
+    CppLanguage, GoLanguage, JavaLanguage, JsonLanguage, LezerLanguage, RustLanguage, WastLanguage,
+    YamlLanguage, attached_language_snapshot, cpp_language, go_language, java_language,
+    json_language, lezer_language, rust_language, wast_language, yaml_language,
+};
+pub(crate) use tracked::{LrConfig, WastConfig, active_lr_viewport, active_wast_viewport};
 pub use update::SyntaxUpdateError;
+pub use xml_install::{XmlCompletionSource, xml_extension};
 
 /// The bundled parser configuration and the native default language services.
 /// Embedded syntax reuses the same defaults. This does not install a UI or
@@ -55,11 +77,115 @@ pub use update::SyntaxUpdateError;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativeLanguageSupport {
     language: NativeLanguage,
+    catalog_bundle: Option<CatalogBundle>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CatalogBundle {
+    Stream(usize),
+    Angular,
+    Cpp,
+    Go,
+    Html,
+    Java,
+    Javascript,
+    Jinja,
+    Json,
+    Liquid,
+    Markdown,
+    Php,
+    Python,
+    Rust,
+    Sql(SqlDialect),
+    Stylesheet,
+    Vue,
+    Wast,
+    Xml,
+    Yaml,
 }
 
 impl NativeLanguageSupport {
     pub(super) fn new(language: NativeLanguage) -> Self {
-        Self { language }
+        Self {
+            language,
+            catalog_bundle: None,
+        }
+    }
+
+    pub(super) fn for_catalog(language: NativeLanguage, id: usize) -> Self {
+        let catalog_bundle = match language {
+            NativeLanguage::Legacy(_) | NativeLanguage::Asn1 => Some(CatalogBundle::Stream(id)),
+            NativeLanguage::Angular => Some(CatalogBundle::Angular),
+            NativeLanguage::Cpp => Some(CatalogBundle::Cpp),
+            NativeLanguage::Go => Some(CatalogBundle::Go),
+            NativeLanguage::Html => Some(CatalogBundle::Html),
+            NativeLanguage::Java => Some(CatalogBundle::Java),
+            NativeLanguage::Javascript(_) => Some(CatalogBundle::Javascript),
+            NativeLanguage::Jinja => Some(CatalogBundle::Jinja),
+            NativeLanguage::Json => Some(CatalogBundle::Json),
+            NativeLanguage::Liquid => Some(CatalogBundle::Liquid),
+            NativeLanguage::Markdown => Some(CatalogBundle::Markdown),
+            NativeLanguage::Php => Some(CatalogBundle::Php),
+            NativeLanguage::Python => Some(CatalogBundle::Python),
+            NativeLanguage::Rust => Some(CatalogBundle::Rust),
+            NativeLanguage::Sql(dialect) => Some(CatalogBundle::Sql(dialect)),
+            NativeLanguage::Css | NativeLanguage::Less | NativeLanguage::Sass(_) => {
+                Some(CatalogBundle::Stylesheet)
+            }
+            NativeLanguage::Vue => Some(CatalogBundle::Vue),
+            NativeLanguage::Wast => Some(CatalogBundle::Wast),
+            NativeLanguage::Xml => Some(CatalogBundle::Xml),
+            NativeLanguage::Yaml => Some(CatalogBundle::Yaml),
+            _ => None,
+        };
+        Self {
+            language,
+            catalog_bundle,
+        }
+    }
+
+    /// Install an audited stock catalog bundle: the active parser, its metadata,
+    /// and the default support extensions for this entry. Repeated calls for the
+    /// same entry return the same extension.
+    ///
+    /// Return `None` if the bundle is not implemented or was not loaded through
+    /// [`LanguageDescription::catalog_support_load`].
+    pub fn extension(&self) -> Option<Extension> {
+        Some(match self.catalog_bundle? {
+            CatalogBundle::Stream(id) => super::catalog::stream_extension(id, *self),
+            CatalogBundle::Cpp => cpp_language().extension(),
+            CatalogBundle::Go => {
+                static GO: LazyLock<Extension> = LazyLock::new(go_extension);
+                GO.clone()
+            }
+            CatalogBundle::Html => html_install::extension(),
+            CatalogBundle::Java => java_language().extension(),
+            CatalogBundle::Javascript => script_install::javascript_extension(self.language),
+            CatalogBundle::Jinja | CatalogBundle::Liquid => {
+                jinja_liquid_install::extension(self.language)
+            }
+            CatalogBundle::Json => json_language().extension(),
+            CatalogBundle::Markdown => markdown_install::extension(),
+            CatalogBundle::Php => {
+                static PHP: LazyLock<Extension> = LazyLock::new(|| {
+                    Extension::group([
+                        NativeLanguage::Php.support().tracked_syntax_extension(),
+                        html_install::support(),
+                    ])
+                });
+                PHP.clone()
+            }
+            CatalogBundle::Python => script_install::python_extension(),
+            CatalogBundle::Rust => rust_language().extension(),
+            CatalogBundle::Sql(dialect) => sql_install::sql_extension(dialect),
+            CatalogBundle::Stylesheet => stylesheet_install::extension(self.language),
+            CatalogBundle::Angular | CatalogBundle::Vue => {
+                template_install::extension(self.language)
+            }
+            CatalogBundle::Wast => wast_language().extension(),
+            CatalogBundle::Xml => xml_install::extension(),
+            CatalogBundle::Yaml => yaml_language().extension(),
+        })
     }
 
     pub fn language(self) -> NativeLanguage {
@@ -143,8 +269,13 @@ enum StrictParser {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LrGrammar {
+    Cpp,
+    Go,
+    Java(java::JavaTop),
     Json,
     Lezer,
+    Rust,
+    Yaml,
 }
 
 impl SupportedDocument {
@@ -153,9 +284,9 @@ impl SupportedDocument {
         settings: StreamSettings,
         parser: Arc<MarkdownParserConfig>,
     ) -> Result<Self, ParseError> {
-        let syntax =
+        let mut syntax =
             NativeSyntax::Markdown(MarkdownDocument::parse_with_dialect(text, parser.base));
-        let markdown_mounts = markdown_mounts(&syntax, settings, Some(&parser))?;
+        let markdown_mounts = markdown_mounts(&mut syntax, settings, Some(&parser))?;
         Ok(Self {
             language: NativeLanguage::Markdown,
             syntax,
@@ -164,6 +295,25 @@ impl SupportedDocument {
             markdown_mounts,
             strict_parser: None,
         })
+    }
+
+    pub(crate) fn refresh_markdown_mounts(&self) -> Result<Option<Self>, ParseError> {
+        let NativeSyntax::Markdown(doc) = &self.syntax else {
+            return Ok(None);
+        };
+        let Some((doc, mut mounts)) = doc.refresh_mounts(self.settings)? else {
+            return Ok(None);
+        };
+        mounts.extend(self.markdown_mounts.iter().cloned());
+        mounts.sort_by_key(|mount| mount.source_map().bounds().start);
+        Ok(Some(Self {
+            language: self.language,
+            syntax: NativeSyntax::Markdown(doc),
+            settings: self.settings,
+            markdown_parser: self.markdown_parser.clone(),
+            markdown_mounts: mounts,
+            strict_parser: self.strict_parser.clone(),
+        }))
     }
 
     pub fn text(&self) -> &Text {
@@ -246,18 +396,53 @@ impl SupportedDocument {
             })
     }
 
-    pub(crate) fn markdown_wast_body(
+    /// Return the published parser for an exact Markdown code block source range.
+    /// A pending or unmounted block has no parser, even if its load is ready.
+    /// This query does not run the resolver or grant edit access to the block.
+    pub fn published_markdown_code_parser(
         &self,
-        body: &Range<usize>,
-        parser: &WastLanguage,
-    ) -> Option<&MarkdownMount> {
-        self.markdown_mounts.iter().find(|mount| {
-            let map = mount.source_map();
-            mount.uses_wast_parser(parser) && map.is_contiguous() && &map.bounds() == body
+        block: &Range<usize>,
+    ) -> Option<&MarkdownCodeParser> {
+        let NativeSyntax::Markdown(markdown) = self.syntax() else {
+            return None;
+        };
+        let ranges = markdown.code_block_ranges(block)?;
+        self.markdown_mounts.iter().find_map(|mount| {
+            let parser = mount.code_parser()?;
+            mount.source_ranges().eq(ranges.clone()).then_some(parser)
         })
     }
 
-    pub(crate) fn markdown_wast_indentation(
+    pub(crate) fn markdown_code_body(
+        &self,
+        body: &Range<usize>,
+        parser: &MarkdownCodeParser,
+    ) -> Option<&MarkdownMount> {
+        self.markdown_mounts.iter().find(|mount| {
+            let map = mount.source_map();
+            mount.uses_parser(parser) && map.is_contiguous() && &map.bounds() == body
+        })
+    }
+
+    pub(crate) fn has_markdown_lr_mounts(&self) -> bool {
+        self.markdown_mounts.iter().any(|mount| {
+            matches!(
+                mount.syntax(),
+                NativeSyntax::Json(_) | NativeSyntax::LezerGrammar(_)
+            ) || matches!(mount.code_parser(), Some(MarkdownCodeParser::Rust(_)))
+        })
+    }
+
+    pub(crate) fn markdown_lr_bracket_node(
+        &self,
+        position: usize,
+        side: Assoc,
+    ) -> Option<LrSyntaxNode<'_>> {
+        let site = self.site(position, side)?;
+        site.markdown_mount?.lr_bracket_node(site.position.at, side)
+    }
+
+    pub(crate) fn markdown_code_indentation(
         &self,
         state: &EditorState,
         lines: &IndentContext<'_>,
@@ -266,12 +451,17 @@ impl SupportedDocument {
         if splits_crlf(self.text().as_str(), position) {
             return None;
         }
-        let site = self.site(position, Assoc::Before)?;
-        let map = site.markdown_mount?.source_map();
-        // A WAST indentation strategy cannot own a position at a fence or
-        // at a gap boundary unless the mount covers both sides.
-        map.segment_at(position, Assoc::After)?;
-        site.wast()?.indentation_in_markdown(map, state, lines)
+        let mount = self
+            .site(position, Assoc::Before)?
+            .markdown_mount
+            .or_else(|| {
+                let mount = self.site(position, Assoc::After)?.markdown_mount?;
+                // A Rust query can start after a Markdown prefix on a later line.
+                (mount.has_rust_indentation() && position > mount.source_map().bounds().start)
+                    .then_some(mount)
+            })?;
+        mount.source_map().segment_at(position, Assoc::After)?;
+        mount.code_indentation(state, lines)
     }
 
     /// Return WAST regions in original UTF-8 bytes and source order. A WAST
@@ -283,13 +473,13 @@ impl SupportedDocument {
     }
 
     /// Typed metadata for the deepest supported language, with sublanguage
-    /// data before the base data. For WAST, JSON, and Lezer this returns
+    /// data before the base data. For WAST and native LR roots this returns
     /// the effective root's defaults only. Positions must be UTF-8 boundaries.
     pub fn data_at(&self, position: usize, side: Assoc) -> Vec<Arc<LanguageData>> {
         let Some(site) = self.site(position, side) else {
             return Vec::new();
         };
-        if let Some(row) = site.lr_root_type() {
+        if let Some(row) = site.data_root_type() {
             return row
                 .data_facet()
                 .and_then(LrDataFacet::base)
@@ -430,7 +620,7 @@ impl SupportedDocument {
     }
 
     /// Return the scope for a nonempty highlight range in original UTF-8
-    /// bytes. JSON, Lezer, and WAST include the actual root row and its
+    /// bytes. Native LR roots include the actual root row and its
     /// effective facet. A direct Markdown mount of one of these languages
     /// supplies that context within one source segment, not across gaps.
     pub fn highlight_context(&self, range: &Range<usize>) -> Option<HighlightContext> {
@@ -453,17 +643,22 @@ impl SupportedDocument {
         }
     }
 
-    /// Return syntax highlights, with mounted Markdown languages replacing
-    /// the host highlights in their source ranges.
+    /// Return syntax highlights. Markdown mounts replace the host highlights
+    /// in their source segments. Pending fences suppress them in those segments.
     pub fn highlights(&self, range: Range<usize>) -> Option<Vec<HighlightSpan<'_>>> {
         let base = self.syntax.highlights(range.clone())?;
-        if self.markdown_mounts.is_empty() {
+        let pending = match &self.syntax {
+            NativeSyntax::Markdown(doc) => doc.pending_code_ranges(),
+            _ => None,
+        };
+        if self.markdown_mounts.is_empty() && pending.is_none() {
             return Some(base.collect());
         }
         let mut covered: Vec<_> = self
             .markdown_mounts
             .iter()
             .flat_map(MarkdownMount::source_ranges)
+            .chain(pending.into_iter().flatten())
             .collect();
         covered.sort_by_key(|range| range.start);
         let mut spans = Vec::new();
@@ -509,15 +704,14 @@ impl SupportedDocument {
 }
 
 fn markdown_mounts(
-    syntax: &NativeSyntax,
+    syntax: &mut NativeSyntax,
     settings: StreamSettings,
     parser: Option<&MarkdownParserConfig>,
 ) -> Result<Vec<MarkdownMount>, ParseError> {
     let (NativeSyntax::Markdown(doc), Some(parser)) = (syntax, parser) else {
         return Ok(Vec::new());
     };
-    doc.mounts_with_settings(|info| parser.code_parser(info), settings)
-        .collect()
+    doc.configure_mounts(parser, settings)
 }
 
 fn metadata(language: NativeLanguage) -> LanguageData {
@@ -531,13 +725,16 @@ fn metadata(language: NativeLanguage) -> LanguageData {
         Markdown => markdown::language_data(),
         Asn1 => asn1::language_data(),
         Json => json::editor_language_data(),
+        Cpp => return cpp::language_data(),
+        Go => return go::language_data(),
+        Java => return java::language_data(),
+        Rust => return rust::language_data(),
         Legacy(mode) => mode.language().language_data().clone(),
         _ => LanguageData::default(),
     };
     const JS_BRACKETS: &[&str] = &["(", "[", "{", "'", "\"", "`"];
     let brackets = match language {
-        Cpp => Some((None, cpp::STRING_PREFIXES.as_slice())),
-        Go | Javascript(_) | Sql(_) => Some((Some(JS_BRACKETS), [].as_slice())),
+        Javascript(_) | Sql(_) => Some((Some(JS_BRACKETS), [].as_slice())),
         Legacy(_) => data
             .get::<&[&str]>("closeBrackets")
             .copied()
@@ -547,7 +744,6 @@ fn metadata(language: NativeLanguage) -> LanguageData {
             Some(python::CLOSE_BRACKETS.as_slice()),
             python::STRING_PREFIXES.as_slice(),
         )),
-        Rust => Some((None, rust::STRING_PREFIXES.as_slice())),
         _ => None,
     };
     if let Some((brackets, string_prefixes)) = brackets {
@@ -561,17 +757,12 @@ fn metadata(language: NativeLanguage) -> LanguageData {
         );
     }
     let indent: Option<fn(&str) -> bool> = match language {
-        Cpp => Some(cpp::indent_on_input),
         Css => Some(css::indent_on_input),
-        Go => Some(go::indent_on_input),
-        Java => Some(java::indent_on_input),
         Javascript(_) => Some(javascript::indent_on_input),
         Less => Some(less::indent_on_input),
         Python => Some(python::indent_on_input),
-        Rust => Some(rust::indent_on_input),
         Sass(_) => Some(sass::indent_on_input),
         Xml => Some(xml::indent_on_input),
-        Yaml => Some(yaml::indent_on_input),
         _ => None,
     };
     if let Some(indent) = indent {

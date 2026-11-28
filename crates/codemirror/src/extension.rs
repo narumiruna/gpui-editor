@@ -46,6 +46,10 @@ pub enum ConfigurationError {
 
 trait Values {
     fn get(&self, key: Key) -> Result<Option<Value>, ConfigurationError>;
+
+    fn is_reconfiguration_preview(&self) -> bool {
+        false
+    }
 }
 
 /// A read-only view of state available to a field or facet computation.
@@ -62,6 +66,10 @@ impl StateContext<'_> {
     }
     pub fn selection(&self) -> &EditorSelection {
         self.selection
+    }
+
+    pub(crate) fn is_reconfiguration_preview(&self) -> bool {
+        self.values.is_reconfiguration_preview()
     }
 
     /// Read a field by definition identity. A field that is not enabled returns `None`.

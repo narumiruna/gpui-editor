@@ -30,6 +30,7 @@ mod specialize;
 mod tables;
 mod tokens;
 
+pub(crate) use close_tags::close_tags_after;
 pub use close_tags::{auto_close_tags, auto_close_tags_in};
 pub use completion::{
     CompletionPath, JavascriptScope, JavascriptScopeProperty, JavascriptScopeValue,
@@ -92,6 +93,7 @@ struct Node {
 #[derive(Clone, Copy, Debug)]
 pub struct JavascriptNode<'a> {
     nodes: &'a [Node],
+    text: &'a Text,
     id: usize,
 }
 
@@ -125,15 +127,21 @@ impl<'a> JavascriptNode<'a> {
         let range = &self.data().range;
         let name = self.kind().name();
         if name == "BlockComment" {
-            if range.len() < 4
-                || self
-                    .children()
-                    .next_back()
-                    .is_some_and(|n| n.kind().is_error())
-            {
-                return None;
+            let start = range.start + 2;
+            let mut body = self.text.slice(start..range.end)?;
+            // The upstream rule subtracts two logical UTF-16 units, even without a closer.
+            let mut units: usize = 2;
+            while units > 0 {
+                if let Some(before_break) = body.strip_suffix("\r\n") {
+                    body = before_break;
+                    units -= 1;
+                } else {
+                    let (end, ch) = body.char_indices().next_back()?;
+                    units = units.checked_sub(ch.len_utf16())?;
+                    body = &body[..end];
+                }
             }
-            return Some(range.start + 2..range.end - 2);
+            return Some(start..start + body.len());
         }
         let mut children = self.children();
         let first = children.next()?;
@@ -286,6 +294,7 @@ impl JavascriptDocument {
     ) -> Self {
         let highlights = highlight::collect(JavascriptNode {
             nodes: &nodes,
+            text: &text,
             id: 0,
         });
         Self {
@@ -313,6 +322,7 @@ impl JavascriptDocument {
     pub fn root(&self) -> JavascriptNode<'_> {
         JavascriptNode {
             nodes: &self.nodes,
+            text: &self.text,
             id: 0,
         }
     }
@@ -393,16 +403,17 @@ impl JavascriptDocument {
         position: usize,
         side: Option<Assoc>,
     ) -> impl Iterator<Item = JavascriptNode<'_>> {
-        path(&self.nodes, position, side)
+        path(&self.nodes, &self.text, position, side)
     }
 }
 
-fn path(
-    nodes: &[Node],
+fn path<'a>(
+    nodes: &'a [Node],
+    text: &'a Text,
     position: usize,
     side: Option<Assoc>,
-) -> impl Iterator<Item = JavascriptNode<'_>> {
-    std::iter::successors(Some(JavascriptNode { nodes, id: 0 }), move |&node| {
+) -> impl Iterator<Item = JavascriptNode<'a>> {
+    std::iter::successors(Some(JavascriptNode { nodes, text, id: 0 }), move |&node| {
         let children = &node.data().children;
         let index = children.partition_point(|&id| {
             let end = nodes[id].range.end;

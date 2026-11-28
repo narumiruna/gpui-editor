@@ -18,6 +18,10 @@ pub(super) const STATEMENTS: &[u16] = &[
     16, 68, 93, 94, 96, 99, 101, 105, 111, 115, 117, 120, 126, 129, 134, 136, 141, 143, 147, 149,
 ];
 pub(super) const SKIPPED: &[u16] = &[0, 1, 2, 153];
+pub(super) const EXPRESSIONS: &[u16] = &[
+    12, 17, 18, 19, 20, 21, 22, 66, 67, 69, 70, 71, 72, 73, 74, 77, 81, 86,
+];
+pub(super) const TYPES: &[u16] = &[23, 31, 33, 38, 46, 49, 50, 51, 52, 56, 57, 58];
 pub(super) const SPECIALIZATIONS: &[(&str, Specialization)] = {
     use Specialization::{Extend, Replace};
     &[

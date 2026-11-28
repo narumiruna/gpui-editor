@@ -1,7 +1,7 @@
 // Run in a headless browser with an import map for the verified npm archives:
 // @codemirror/search 6.7.3, @codemirror/state 6.7.6, @codemirror/view 6.44.0.
 // Capture globalThis.nativeSupport as JSONL.
-import {Compartment} from '@codemirror/state';
+import {Compartment, EditorState, Prec} from '@codemirror/state';
 import {EditorView} from '@codemirror/view';
 import {closeSearchPanel, getSearchQuery, openSearchPanel, search, SearchQuery, setSearchQuery} from '@codemirror/search';
 
@@ -56,4 +56,18 @@ openSearchPanel(view);
 record('reopen_b');
 view.destroy();
 record('destroy_view');
+
+function factoryConflict(factories) {
+    try {
+        EditorState.create({doc: 'source', extensions: factories});
+        return false;
+    } catch (error) {
+        if (!String(error).includes('Config merge conflict for field createPanel')) throw error;
+        return true;
+    }
+}
+const duplicate = factoryConflict([search({createPanel: a}), search({createPanel: a})]);
+const conflict = factoryConflict([search({createPanel: a}), Prec.high(search({createPanel: b}))]);
+if (duplicate || !conflict) throw new Error('unexpected factory conflict policy');
+rows.push({step: 'factory_config', duplicate, conflict});
 globalThis.nativeSupport = rows.map(row => JSON.stringify(row));

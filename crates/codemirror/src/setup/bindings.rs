@@ -1,7 +1,10 @@
 use crate::{
     autocomplete::{AutocompleteCommand, close_brackets_keymap, completion_keymap},
     commands::bindings::{CommandId, default_keymap, history_keymap},
-    language::fold::{FoldCommand, fold_keymap},
+    language::{
+        fold::{FoldCommand, fold_keymap},
+        markdown::MarkdownMarkupCommand,
+    },
     lint::{LintCommand, lint_keymap},
     search::{SearchAction, search_keymap},
     view::keymap::KeyBinding,
@@ -18,16 +21,28 @@ pub enum SetupCommand {
     FoldAll,
     UnfoldAll,
     Lint(LintCommand),
+    Markdown(MarkdownMarkupCommand),
 }
 
 /// Effective binding order for `basicSetup`. The first completion group is
 /// installed at highest precedence by `autocompletion()` itself. The second
 /// is part of the literal setup keymap. Dispatch skips duplicate commands.
 pub fn basic_setup_keymap() -> Vec<KeyBinding<SetupCommand>> {
-    use SetupCommand::*;
+    highest_setup_bindings()
+        .chain(basic_setup_bindings())
+        .collect()
+}
+
+pub(super) fn highest_setup_bindings() -> impl Iterator<Item = KeyBinding<SetupCommand>> {
     completion_keymap()
         .into_iter()
-        .chain(close_brackets_keymap())
+        .map(|key| map(key, SetupCommand::Completion))
+}
+
+pub(super) fn basic_setup_bindings() -> impl Iterator<Item = KeyBinding<SetupCommand>> {
+    use SetupCommand::*;
+    close_brackets_keymap()
+        .into_iter()
         .map(|key| map(key, Completion))
         .chain(default_keymap().into_iter().map(|key| map(key, Editor)))
         .chain(search_keymap().into_iter().map(|key| map(key, Search)))
@@ -46,7 +61,6 @@ pub fn basic_setup_keymap() -> Vec<KeyBinding<SetupCommand>> {
                 .map(|key| map(key, Completion)),
         )
         .chain(lint_keymap().into_iter().map(|key| map(key, Lint)))
-        .collect()
 }
 
 /// Effective binding order for `minimalSetup`.

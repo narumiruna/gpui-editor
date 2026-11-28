@@ -11,7 +11,7 @@ pub(in crate::language) mod session;
 #[cfg(test)]
 mod tests;
 
-use recovery::{Recovery, Stopped};
+use recovery::{LargeReductions, Recovery, Stopped};
 
 const MAX_BRANCHES: usize = 32;
 pub(super) const MAX_STACK_DEPTH: usize = 2800;
@@ -100,6 +100,7 @@ struct Glr<'parser, 'input> {
     cursor: Position,
     failure: Option<(usize, ParseError)>,
     recovery_distance: usize,
+    large_reductions: Option<LargeReductions>,
 }
 
 impl<'parser, 'input> Glr<'parser, 'input> {
@@ -115,7 +116,11 @@ impl<'parser, 'input> Glr<'parser, 'input> {
         };
         let work = parser.work_budget(&source, work_per_byte);
         let mut tokens = TokenCache::new(source, parser, recover);
-        if matches!(mode, GlrMode::Strict | GlrMode::EditorStrict) {
+        // After the cap drops the comparison branch, Java can run repair
+        // trials on every remaining branch. Reuse exact gotos within this parse.
+        if matches!(mode, GlrMode::Strict | GlrMode::EditorStrict)
+            || (mode == GlrMode::Recovering && parser.prune_recovery_frontier)
+        {
             tokens.reduction_gotos = Some(Box::default());
         }
         Self {
@@ -148,6 +153,7 @@ impl<'parser, 'input> Glr<'parser, 'input> {
             },
             failure: None,
             recovery_distance: 0,
+            large_reductions: (mode == GlrMode::JsonRecovering).then(LargeReductions::default),
         }
     }
 
@@ -169,9 +175,20 @@ impl<'parser, 'input> Glr<'parser, 'input> {
             cursor,
             failure,
             recovery_distance,
+            large_reductions,
             ..
         } = self;
         let work = &*work;
+        let mut recovery = Recovery {
+            parser,
+            work,
+            tree,
+            tokens,
+            large_reductions: large_reductions.as_mut(),
+        };
+        if pending.len() == 1 {
+            recovery.unwind_large_reductions(pending.front_mut().expect("one live branch"))?;
+        }
         let position = cursor.byte;
         let mut stopped = Vec::new();
         let mut accepted: Option<(i64, _)> = None;
@@ -200,8 +217,8 @@ impl<'parser, 'input> Glr<'parser, 'input> {
                     if cut_depth {
                         branch.stack.check_depth(action)?;
                     }
-                    branch.apply(
-                        parser,
+                    recovery.apply(
+                        &mut branch,
                         state,
                         (
                             action,
@@ -210,34 +227,25 @@ impl<'parser, 'input> Glr<'parser, 'input> {
                                 end: position,
                             },
                         ),
-                        work,
-                        tree,
-                        tokens,
                     )?;
                     continue;
                 }
                 let state = if cut_depth && branch.stack.frames.len() > MAX_STACK_DEPTH {
                     *split = true;
-                    Recovery {
-                        parser,
-                        work,
-                        tree,
-                        tokens,
-                    }
-                    .cut_stack(&mut branch)?
+                    recovery.cut_stack(&mut branch)?
                 } else {
                     state
                 };
                 let available = max_branches - pending.len() - advanced.len() - stopped.len();
-                let scan = tokens.actions(
+                let scan = recovery.tokens.actions(
                     &branch.stack.view(parser, work),
                     state,
                     ActionLimit::Split(available),
                     actions,
                 )?;
-                branch.observe_lookahead(scan.lookahead, work, tree)?;
+                branch.observe_lookahead(scan.lookahead, work, recovery.tree)?;
                 let Some((last, alternatives)) = actions.split_last() else {
-                    if position == tokens.source().len() && state.is_accepting() {
+                    if position == recovery.tokens.source().len() && state.is_accepting() {
                         if accepted.is_none_or(|(score, _)| branch.score > score) {
                             accepted = Some((branch.score, branch.stack.roots));
                         }
@@ -264,7 +272,7 @@ impl<'parser, 'input> Glr<'parser, 'input> {
                         branch.stack.check_action_depth(parser, candidate, work)?;
                     }
                     let mut fork = branch.fork(work)?;
-                    fork.apply(parser, state, candidate, work, tree, tokens)?;
+                    recovery.apply(&mut fork, state, candidate)?;
                     if fork.stack.pos > position {
                         advanced.push(fork);
                     } else {
@@ -274,7 +282,7 @@ impl<'parser, 'input> Glr<'parser, 'input> {
                 if cut_depth {
                     branch.stack.check_action_depth(parser, *last, work)?;
                 }
-                branch.apply(parser, state, *last, work, tree, tokens)?;
+                recovery.apply(&mut branch, state, *last)?;
             }
             if branch.stack.pos > position {
                 advanced.push(branch);
@@ -287,13 +295,7 @@ impl<'parser, 'input> Glr<'parser, 'input> {
             }
             if *recovery_distance > 0 {
                 *split = true;
-                finished = Recovery {
-                    parser,
-                    work,
-                    tree,
-                    tokens,
-                }
-                .run(position, stopped, advanced)?;
+                finished = recovery.run(position, stopped, advanced)?;
             }
         }
         if finished.is_some() {
@@ -304,9 +306,11 @@ impl<'parser, 'input> Glr<'parser, 'input> {
         }
         if *recovery_distance == 0 {
             merge_equivalent(advanced, position, work)?;
-            if mode == GlrMode::Pruned && advanced.len() > EDITOR_FRONTIER {
+            let prune = mode == GlrMode::Pruned
+                || (mode == GlrMode::Recovering && parser.prune_recovery_frontier);
+            if prune && advanced.len() > EDITOR_FRONTIER {
                 work.spend(position, advanced.len())?;
-                // Stable sort keeps the earlier branch when scores tie.
+                // Lezer sorts by score only. Stable sort keeps earlier branches on ties.
                 advanced.sort_by_key(|branch| Reverse(branch.score));
                 advanced.truncate(EDITOR_FRONTIER);
             }
@@ -470,7 +474,13 @@ impl Branch {
         Ok(())
     }
 
-    fn equivalent(&self, other: &Self, position: usize, work: &Work) -> Result<bool, ParseError> {
+    fn equivalent(
+        &self,
+        other: &Self,
+        position: usize,
+        work: &Work,
+        compare_starts: bool,
+    ) -> Result<bool, ParseError> {
         work.spend(position, 1)?;
         let (a, b) = (&self.stack, &other.stack);
         if a.pos != b.pos
@@ -484,7 +494,6 @@ impl Branch {
         work.spend(position, a.frames.len())?;
         // Reduce hooks can read input at a frame's start. Old tree nodes do
         // not affect future actions. Keep the winner's ranges and roots intact.
-        let compare_starts = a.context.is_some();
         Ok(a.frames
             .iter()
             .zip(&b.frames)
@@ -503,7 +512,7 @@ fn merge_equivalent(
         let mut j = i + 1;
         while j < branches.len() {
             let (a, b) = (&branches[i], &branches[j]);
-            if a.equivalent(b, position, work)? {
+            if a.equivalent(b, position, work, a.stack.context.is_some())? {
                 let loser = if (a.score, a.records) > (b.score, b.records) {
                     j
                 } else {

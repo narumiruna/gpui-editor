@@ -1,0 +1,2 @@
+{"source":"# example\ndef f(x):\n  print x","at":15,"name":"x","range":[16,17],"insert":" ","changed":"# example\ndef f x):\n  print x","before":"variable","after":"def"}
+{"source":"# example\nclass C(Base):\n  pass","at":17,"name":"Base","range":[18,22],"insert":" ","changed":"# example\nclass C Base):\n  pass","before":"variable","after":"def"}

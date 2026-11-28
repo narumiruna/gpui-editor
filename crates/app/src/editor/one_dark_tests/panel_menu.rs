@@ -9,26 +9,32 @@ use serde::Deserialize;
 
 use super::*;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::editor) enum Role {
+    TopPanels,
+    Find,
+    FindControl(&'static str),
+    GotoLine,
+    GotoClose,
     Diagnostics,
+    DiagnosticsClose,
     References,
     CompletionMenu,
     CompletionOption { label: String, selected: bool },
 }
 
 #[derive(Debug, PartialEq)]
-struct Appearance {
-    fill: Option<Background>,
-    text: Hsla,
-    border: Option<(Hsla, BorderStyle)>,
-    widths: Edges<Pixels>,
+pub(super) struct Appearance {
+    pub(super) fill: Option<Background>,
+    pub(super) text: Hsla,
+    pub(super) border: Option<(Hsla, BorderStyle)>,
+    pub(super) widths: Edges<Pixels>,
 }
 
 #[derive(Debug)]
 pub(in crate::editor) struct Sample {
-    role: Role,
-    appearance: Appearance,
+    pub(super) role: Role,
+    pub(super) appearance: Appearance,
 }
 
 thread_local! {
@@ -122,7 +128,7 @@ pub(in crate::editor) fn assert_panel(samples: &[Sample], role: Role, themed: bo
         panic!("expected one panel: {samples:?}");
     };
     let name = match role {
-        Role::Diagnostics => "stock-top-search",
+        Role::Diagnostics | Role::TopPanels => "stock-top-search",
         Role::References => "stock-bottom-lint",
         _ => unreachable!(),
     };
@@ -179,8 +185,15 @@ fn one_dark_top_diagnostics_panel_roles_follow_live_reconfiguration(cx: &mut Tes
                 })
             });
         }
-        assert_panel(&sample(&editor, cx), Role::Diagnostics, themed);
-        let panel = cx.debug_bounds("source-diagnostics-panel").unwrap();
+        let (role, selector) = if themed {
+            (Role::TopPanels, "editor-top-panels")
+        } else {
+            (Role::Diagnostics, "source-diagnostics-panel")
+        };
+        let mut samples = sample(&editor, cx);
+        samples.retain(|sample| sample.role == role);
+        assert_panel(&samples, role, themed);
+        let panel = cx.debug_bounds(selector).unwrap();
         cx.update(|_, cx| {
             let editor = editor.read(cx);
             let body = editor.scroll.bounds();

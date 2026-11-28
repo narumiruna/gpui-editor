@@ -9,11 +9,23 @@
 //! C and C++ use the same grammar; no preprocessor runs. All ranges are UTF-8
 //! bytes in the original document.
 
-use std::ops::Range;
+use std::{
+    ops::Range,
+    sync::{Arc, OnceLock},
+};
 
-use crate::{Assoc, ChangeSet, EditError, Text};
+use crate::{
+    Assoc, ChangeSet, EditError, RangeSet, Text,
+    commands::CommentTokens,
+    language_data::CloseBracketData,
+    view::{MarkDecoration, Viewport},
+};
 
-use super::{HighlightSpan, IndentOptions, StreamSettings, lezer::ReuseStats};
+use super::{
+    BidiIsolateOptions, HighlightSpan, IndentOptions, LanguageData, StreamSettings,
+    bidi::IsolateRanges,
+    lezer::{ISOLATE, NodeType, NodeTypes, ParseError, ReuseStats},
+};
 
 mod brackets;
 mod highlight;
@@ -25,11 +37,31 @@ mod tables;
 mod tokens;
 
 pub use kind::CppNodeKind;
+pub(crate) use parser::{parse_raw, stock_data_facet, stock_node_types};
 
 pub const NAME: &str = "cpp";
 pub const LINE_COMMENT: &str = "//";
 pub const BLOCK_COMMENT: (&str, &str) = ("/*", "*/");
 pub const STRING_PREFIXES: [&str; 9] = ["L", "u", "U", "u8", "LR", "UR", "uR", "u8R", "R"];
+
+pub(crate) fn language_data() -> LanguageData {
+    LanguageData::default()
+        .with(
+            "commentTokens",
+            CommentTokens {
+                line: Some(LINE_COMMENT),
+                block: Some(BLOCK_COMMENT),
+            },
+        )
+        .with("indentOnInput", indent_on_input as fn(&str) -> bool)
+        .with(
+            "closeBrackets",
+            CloseBracketData {
+                string_prefixes: &STRING_PREFIXES,
+                ..Default::default()
+            },
+        )
+}
 
 /// Whether the text from the start of the line to the cursor triggers reindentation.
 pub fn indent_on_input(line_prefix: &str) -> bool {
@@ -60,8 +92,20 @@ impl<'a> CppNode<'a> {
         &self.doc.nodes[self.id]
     }
 
+    pub(super) fn same_tree(self, other: Self) -> bool {
+        std::ptr::eq(self.doc, other.doc)
+    }
+
     pub fn kind(self) -> CppNodeKind {
         CppNodeKind::from_term(self.data().term)
+    }
+
+    /// The exact grammar row. Synthetic recovery markers use the error row.
+    pub fn node_type(self) -> &'a NodeType {
+        self.doc
+            .node_types
+            .get(self.data().term)
+            .expect("C++ nodes use grammar rows")
     }
 
     pub fn range(self) -> Range<usize> {
@@ -98,7 +142,7 @@ impl<'a> CppNode<'a> {
                 } else {
                     let ch = source[..end].chars().next_back()?;
                     end -= ch.len_utf8();
-                    units = units.saturating_sub(ch.len_utf16());
+                    units = units.checked_sub(ch.len_utf16())?;
                 }
             }
             return (units == 0).then_some(start..end);
@@ -129,6 +173,8 @@ pub struct CppDocument {
     text: Text,
     editor_lines: Option<Text>,
     nodes: Vec<Node>,
+    node_types: NodeTypes,
+    isolate_ranges: OnceLock<IsolateRanges>,
     highlights: Vec<HighlightSpan<'static>>,
     recovered: bool,
     strict: Option<Box<parser::Cache>>,
@@ -151,7 +197,7 @@ impl CppDocument {
             .next()
             .map_or(text.len(), |(range, _)| range.start);
         let prefix = self.strict.as_deref().map(|cache| (cache, end));
-        Ok(Self::parse_with_prefix(text, prefix))
+        Ok(Self::parse_with_prefix(text, prefix).with_node_types(self.node_types.clone()))
     }
 
     /// LR reuse in the last parse. The resume offset is in original UTF-8 bytes,
@@ -163,12 +209,38 @@ impl CppDocument {
             .map_or_else(ReuseStats::default, |cache| cache.reuse)
     }
 
+    pub(crate) fn parse_editor_strict(text: Text) -> Result<Self, ParseError> {
+        let nodes = parser::parse_editor_strict(text.as_str())?;
+        Ok(Self::from_parse(text, nodes, false, None))
+    }
+
+    pub(crate) fn node_types(&self) -> &NodeTypes {
+        &self.node_types
+    }
+
+    pub(crate) fn with_node_types(mut self, rows: NodeTypes) -> Self {
+        self.node_types = rows;
+        self.isolate_ranges.take();
+        self
+    }
+
     fn parse_with_prefix(text: Text, prefix: Option<(&parser::Cache, usize)>) -> Self {
         let (nodes, recovered, strict) = parser::parse(text.as_str(), prefix);
+        Self::from_parse(text, nodes, recovered, strict)
+    }
+
+    fn from_parse(
+        text: Text,
+        nodes: Vec<Node>,
+        recovered: bool,
+        strict: Option<parser::Cache>,
+    ) -> Self {
         let mut doc = Self {
             editor_lines: super::line_projection::editor_lines(text.as_str()),
             text,
             nodes,
+            node_types: stock_node_types().clone(),
+            isolate_ranges: OnceLock::new(),
             highlights: Vec::new(),
             recovered,
             strict: strict.map(Box::new),
@@ -204,6 +276,23 @@ impl CppDocument {
             pending.extend(node.children().rev());
             Some(node)
         })
+    }
+
+    /// Collect isolation marks for verified grammar rows in this viewport.
+    /// A configured row can set, replace, or remove a direction. Returned
+    /// ranges use original byte offsets and cover complete syntax nodes.
+    pub fn bidi_isolate_marks(
+        &self,
+        viewport: &Viewport,
+        options: BidiIsolateOptions,
+    ) -> Result<Arc<RangeSet<MarkDecoration>>, EditError> {
+        let ranges = self.isolate_ranges.get_or_init(|| {
+            IsolateRanges::new(self.nodes().filter_map(|node| {
+                let direction = (*node.node_type().prop(&ISOLATE)?)?;
+                Some((node.range(), direction))
+            }))
+        });
+        ranges.marks(&self.text, self.syntax_lines(), viewport, options)
     }
 
     /// Highlight spans clipped to the byte range, or `None` for an invalid range.

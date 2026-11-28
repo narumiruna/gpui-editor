@@ -9,6 +9,7 @@ use gpui_editor_codemirror::{
 #[derive(Clone, Copy)]
 pub(crate) struct Theme {
     pub surface: Rgba,
+    pub source_body_inherits_surface: bool,
     pub panel: Rgba,
     pub toolbar: Rgba,
     pub text: Rgba,
@@ -64,6 +65,7 @@ impl Theme {
         let colors = editor_surface_colors(state);
         if let Some(background) = colors.background {
             theme.surface = rgba(background.rgba32());
+            theme.source_body_inherits_surface = true;
         }
         if let Some(foreground) = colors.foreground {
             theme.text = rgba(foreground.rgba32());
@@ -84,6 +86,7 @@ impl Theme {
         let choose = |light, night| rgb(if dark { night } else { light });
         Self {
             surface: choose(0xffffff, 0x181b21),
+            source_body_inherits_surface: false,
             panel: choose(0xf0f3f9, 0x20252e),
             toolbar: choose(0xf8faff, 0x1c2028),
             text: choose(0x172336, 0xe9edf6),

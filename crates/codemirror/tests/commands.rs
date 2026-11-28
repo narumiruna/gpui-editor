@@ -138,6 +138,70 @@ fn oracle_document_selection() {
 }
 
 #[test]
+fn simplify_selection_retains_the_main_ranges_metadata() {
+    use gpui_editor_codemirror::Assoc;
+    use serde_json::{Value, json};
+
+    let byte = |value: &Value| usize::try_from(value.as_u64().unwrap()).unwrap();
+    for row in include_str!("fixtures/commands_simplify_selection.jsonl").lines() {
+        let row: Value = serde_json::from_str(row).unwrap();
+        let doc = row["doc"].as_str().unwrap();
+        let before = &row["before"];
+        let ranges = before["ranges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|range| {
+                let (anchor, head) = (byte(&range[0]), byte(&range[1]));
+                if range[5] == true {
+                    EditorSelection::undirectional_range(anchor, head)
+                } else {
+                    let assoc = match range[2].as_i64().unwrap() {
+                        -1 => Some(Assoc::Before),
+                        1 => Some(Assoc::After),
+                        _ => None,
+                    };
+                    let goal = range[4].as_f64();
+                    let bidi = range[3].as_u64().map(|level| u8::try_from(level).unwrap());
+                    EditorSelection::range(anchor, head, goal, bidi, assoc)
+                }
+            })
+            .collect();
+        let mut state = EditorState::new(doc);
+        state
+            .update(
+                Transaction::default()
+                    .with_selection(EditorSelection::new(ranges, byte(&before["main"])).unwrap()),
+            )
+            .unwrap();
+        let snapshot = |state: &EditorState| {
+            json!({"main": state.selection().main_index(), "ranges": state.selection().ranges().iter().map(|range| {
+            let assoc = match range.assoc() { Some(Assoc::Before) => -1, Some(Assoc::After) => 1, None => 0 };
+            json!([range.anchor(), range.head(), assoc, range.bidi_level(), range.goal_column().map(|column| column as u64), range.undirectional()])
+        }).collect::<Vec<_>>()})
+        };
+        assert_eq!(snapshot(&state), *before, "{row}");
+        let transaction = simplify_selection(&state).unwrap();
+        assert_eq!(
+            transaction.is_some(),
+            row["handled"].as_bool().unwrap(),
+            "{row}"
+        );
+        if let Some(transaction) = transaction {
+            assert!(transaction.changes().is_empty());
+            assert_eq!(transaction.user_event(), row["event"].as_str());
+            assert_eq!(
+                transaction.scroll_into_view(),
+                row["scroll"].as_bool().unwrap()
+            );
+            state.update(transaction).unwrap();
+        }
+        assert_eq!(snapshot(&state), row["after"], "{row}");
+        assert_eq!(state.text().as_str(), doc);
+    }
+}
+
+#[test]
 #[rustfmt::skip]
 fn oracle_whole_lines() {
     check(select_line, ("abc\r\nxy\r\nc\r\nlast", &[(1, 1), (9, 5), (16, 16)], 2), ("abc\r\nxy\r\nc\r\nlast", &[(0, 9), (12, 16)], 0), Some(("select", false)));

@@ -234,6 +234,9 @@ fn assert_edit_snapshot(row: &Value, doc: &CppDocument) {
     let source = row["source"].as_str().unwrap();
     assert_eq!(doc.text().as_str(), source, "{id} {stage}");
     assert_eq!(doc.is_recovered(), stage == "broken", "{id} {stage}");
+    if doc.is_recovered() {
+        assert_eq!(doc.reuse_stats(), ReuseStats::default(), "{id} {stage}");
+    }
     let nodes: Vec<_> = doc
         .nodes()
         .map(|node| {
@@ -288,10 +291,14 @@ fn assert_edit_snapshot(row: &Value, doc: &CppDocument) {
     }
 }
 
-fn check_edit_cycles(fixtures: &str) {
+fn check_edit_cycles(fixtures: &str, after_edit: impl Fn(&Value, &CppDocument)) {
     let mut previous = None::<CppDocument>;
     for line in fixtures.lines() {
-        let row: Value = serde_json::from_str(line).unwrap();
+        let mut row: Value = serde_json::from_str(line).unwrap();
+        if let Some(pad) = row["pad"].as_u64() {
+            let source = row["source"].as_str().unwrap();
+            row["source"] = json!(source.replace("{padding}", &" ".repeat(pad as usize)));
+        }
         let fresh = parse(row["source"].as_str().unwrap());
         assert_edit_snapshot(&row, &fresh);
         previous = if let Some(edit) = row["edit"].as_array() {
@@ -299,6 +306,7 @@ fn check_edit_cycles(fixtures: &str) {
             let change = ChangeSet::single(Change::new(range, edit[2].as_str().unwrap())).unwrap();
             let edited = previous.unwrap().reparse(&change).unwrap();
             assert_edit_snapshot(&row, &edited);
+            after_edit(&row, &edited);
             Some(edited)
         } else {
             Some(fresh)
@@ -308,12 +316,39 @@ fn check_edit_cycles(fixtures: &str) {
 
 #[test]
 fn pinned_syntax_services_match_before_during_and_after_common_edits() {
-    check_edit_cycles(include_str!("fixtures/cpp_edit_oracle.jsonl"));
+    check_edit_cycles(include_str!("fixtures/cpp_edit_oracle.jsonl"), |_, _| {});
 }
 
 #[test]
 fn pinned_syntax_services_match_for_ambiguous_expressions_and_edits() {
-    check_edit_cycles(include_str!("fixtures/cpp_ambiguity_oracle.jsonl"));
+    check_edit_cycles(
+        include_str!("fixtures/cpp_ambiguity_oracle.jsonl"),
+        |_, _| {},
+    );
+}
+
+#[test]
+fn pinned_recovery_at_and_above_the_strict_checkpoint_limit() {
+    check_edit_cycles(
+        include_str!("fixtures/cpp_large_recovery.jsonl"),
+        |row, doc| {
+            if row["stage"] != "repaired" {
+                return;
+            }
+            let stats = doc.reuse_stats();
+            if row["id"] == "eof-at-limit" {
+                let at = stats.resumed_at;
+                let edit_start = byte(&row["edit"][0]);
+                let source = doc.text().as_str();
+                assert!((64..=edit_start).contains(&at), "{stats:?}");
+                assert!(stats.nodes_reused > 0, "{stats:?}");
+                assert!(source.is_char_boundary(at));
+                assert_ne!(&source.as_bytes()[at - 1..=at], b"\r\n");
+            } else {
+                assert_eq!(stats, ReuseStats::default());
+            }
+        },
+    );
 }
 
 #[test]
@@ -366,7 +401,7 @@ fn malformed_documents_retain_only_validated_strict_checkpoints_for_repair() {
 }
 
 #[test]
-fn large_malformed_document_uses_local_fallback_without_a_reuse_seed() {
+fn large_malformed_document_does_not_keep_a_reuse_seed() {
     let prefix = "int value = 1;\r\n".repeat(1_200);
     let broken = parse(&format!("{prefix}int last = 1"));
     assert!(broken.is_recovered());

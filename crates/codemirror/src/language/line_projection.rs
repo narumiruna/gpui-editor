@@ -189,6 +189,49 @@ impl NormalizedOffsets {
     }
 }
 
+/// Changes in the difference between original bytes and default CodeMirror
+/// UTF-16 positions. Store only the ends of characters and line endings that
+/// change the difference. A snapshot builds this index only for a predicate.
+#[derive(Debug)]
+pub(in crate::language) struct EditorOffsets(Box<[(usize, usize)]>);
+
+impl EditorOffsets {
+    pub(in crate::language) fn new(source: &str) -> Self {
+        let mut offsets = Vec::new();
+        let mut delta = 0;
+        for (at, ch) in source.char_indices() {
+            let width = ch.len_utf8();
+            let crlf = usize::from(ch == '\r' && source.as_bytes().get(at + 1) == Some(&b'\n'));
+            let removed = width - ch.len_utf16() + crlf;
+            if removed > 0 {
+                delta += removed;
+                let end = at + width + crlf;
+                offsets.push((end, end - delta));
+            }
+        }
+        Self(offsets.into_boxed_slice())
+    }
+
+    pub(in crate::language) fn editor(&self, byte: usize) -> usize {
+        let i = self.0.partition_point(|&(end, _)| end <= byte);
+        byte - self.delta(i)
+    }
+
+    pub(in crate::language) fn source(&self, editor: usize) -> usize {
+        let i = self.0.partition_point(|&(_, end)| end <= editor);
+        // Between two surrogates this yields a byte inside the scalar. Only
+        // compare that byte to node bounds; never use it to slice the text.
+        editor + self.delta(i)
+    }
+
+    fn delta(&self, i: usize) -> usize {
+        i.checked_sub(1).map_or(0, |i| {
+            let (byte, editor) = self.0[i];
+            byte - editor
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

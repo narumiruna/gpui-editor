@@ -68,20 +68,27 @@
 use std::fmt;
 
 mod action;
+mod bracket_handle;
 mod context;
 mod decode;
 mod external;
 mod fold;
 mod fragments;
 mod grammar;
+pub(super) mod indent;
+mod job;
 mod language_facet;
 mod node_props;
 mod parse;
+mod publication;
+pub(super) mod service_node;
 mod style_tags;
 mod tokenize;
 mod tree;
 
 pub use action::{Action, ActionKind};
+pub(in crate::language) use bracket_handle::match_lr_marked;
+pub use bracket_handle::{BRACKET_MATCHING_HANDLE, LrBracketHandle};
 pub use context::ContextTracker;
 pub use decode::DecodeError;
 pub use external::{
@@ -92,6 +99,9 @@ pub(in crate::language) use fold::stock_fold;
 pub use fold::{FOLD, LrFoldCallback, LrFoldNode};
 pub(crate) use fragments::NormalizedEdges;
 pub use grammar::{GrammarError, GrammarSpec, Parser};
+pub use indent::{INDENT, LrIndentContext, LrIndentStrategy};
+pub(crate) use job::LrParseJob;
+pub use job::{LrParseOutput, LrParseStep};
 pub use language_facet::{LANGUAGE_DATA, LanguageFacet};
 pub use node_props::{
     CLOSED_BY, GROUP, ISOLATE, Isolation, NodeProp, NodePropSource, NodeType, OPENED_BY,
@@ -99,6 +109,8 @@ pub use node_props::{
 pub(crate) use node_props::{NodeTypeId, NodeTypes};
 pub(in crate::language) use parse::session;
 pub use parse::{ParseError, ReuseStats, StackView, TreeFragment};
+pub(crate) use publication::LrPublication;
+pub use service_node::LrSyntaxNode;
 pub(crate) use style_tags::{
     ConfiguredHighlights, STYLE_RULES, StyleRules, StyledNode, select_tags,
 };

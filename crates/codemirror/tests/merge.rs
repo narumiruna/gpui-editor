@@ -82,6 +82,57 @@ fn presentable_unicode_thresholds_match_the_pinned_diff() {
 }
 
 #[test]
+fn bounded_diff_alignment_matches_pinned_exports() {
+    use serde_json::{Value, json};
+
+    for row in include_str!("fixtures/merge_diff_oracle.jsonl").lines() {
+        let row: Value = serde_json::from_str(row).unwrap();
+        let name = row["name"].as_str().unwrap();
+        let a = row["a"].as_str().unwrap();
+        let b = row["b"].as_str().unwrap();
+        let limit = row["scanLimit"].as_u64();
+        let config = limit.map_or_else(DiffConfig::default, |limit| DiffConfig {
+            scan_limit: usize::try_from(limit).unwrap(),
+        });
+        // Native precision records every size fallback, even a full replacement.
+        let precise = row["nativePrecise"]
+            .as_bool()
+            .or_else(|| limit.is_none().then_some(true));
+        for (kind, result) in [
+            ("raw", config.diff(a, b)),
+            ("display", config.presentable_diff(a, b)),
+        ] {
+            if let Some(precise) = precise {
+                assert_eq!(result.precise, precise, "{name} {kind}");
+            }
+            let actual: Vec<_> = result
+                .changes
+                .iter()
+                .map(|ch| [ch.a.start, ch.a.end, ch.b.start, ch.b.end])
+                .collect();
+            assert_eq!(json!(actual), row[kind], "{name} {kind}");
+            assert_gaps(a, b, result.changes);
+        }
+    }
+}
+
+#[test]
+fn supplementary_search_keeps_a_valid_coarse_diff() {
+    let large_a = format!("é{}\r\n", "😀".repeat(2_000));
+    let large_b = format!("é{}\r\n", "😁".repeat(2_000));
+    for (a, b, config) in [
+        ("é😀😀\r\n", "é😁😁\r\n", DiffConfig { scan_limit: 0 }),
+        (&large_a, &large_b, DiffConfig::default()),
+    ] {
+        for result in [config.diff(a, b), config.presentable_diff(a, b)] {
+            assert!(!result.precise);
+            assert_eq!(result.changes, [change(2, a.len() - 2, 2, b.len() - 2)]);
+            assert_gaps(a, b, result.changes);
+        }
+    }
+}
+
+#[test]
 fn chunk_ranges_and_relative_changes_match_pinned_examples() {
     // Chunk ranges stop at real EOF rather than the package's sentinel EOF + 1.
     let a = Text::new("cut A\nkeep\ncut B");

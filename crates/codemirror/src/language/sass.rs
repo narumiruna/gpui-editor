@@ -6,7 +6,7 @@
 //! checkpoints. On invalid input, bounded repairs can preserve a prefix. The
 //! remaining text is an error node. This does not reproduce Lezer's recovery. The
 //! parser limits input to 1 MiB, repairs to 64 KiB, and indentation nesting
-//! to 256 levels. CSS property completions use the native browser snapshot.
+//! to 256 levels.
 
 use std::ops::Range;
 
@@ -24,7 +24,7 @@ mod parser;
 mod tables;
 mod tokens;
 
-pub use completion::sass_completion_source;
+pub use completion::{sass_completion_source, sass_completion_source_with_properties};
 
 pub const NAME: &str = "sass";
 pub const LINE_COMMENT: &str = "//";

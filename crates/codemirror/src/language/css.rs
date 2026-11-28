@@ -13,7 +13,7 @@ use crate::{ChangeSet, EditError, Text};
 use super::{HighlightSpan, IndentOptions, StreamSettings, lezer::ReuseStats};
 
 mod brackets;
-mod completion;
+pub(super) mod completion;
 mod highlight;
 mod indent;
 pub(super) mod input;
@@ -23,7 +23,10 @@ mod recovery;
 mod tables;
 mod tokens;
 
-pub use completion::{css_completion_source, define_css_completion_source};
+pub use completion::{
+    CssPropertySnapshot, css_completion_source, css_completion_source_with_properties,
+    define_css_completion_source, define_css_completion_source_with_properties,
+};
 
 /// The name from the upstream language provider.
 pub const NAME: &str = "css";

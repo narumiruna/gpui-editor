@@ -1,7 +1,8 @@
 use std::sync::{Arc, LazyLock};
 
 use crate::{
-    Assoc, ConfigurationError, EditorState, Extension, Facet, StateField, StateFieldOptions,
+    Assoc, ConfigurationError, EditError, EditorState, Extension, Facet, StateContext,
+    StateEffectType, StateField, StateFieldOptions, Transaction,
     autocomplete::session::SourceResult,
     commands::CommandResult,
     language::{LanguageData, StreamSettings, fold::fold_service, language_data_provider},
@@ -46,6 +47,15 @@ static CONFIG: LazyLock<Facet<InstalledConfig, Option<InstalledConfig>>> = LazyL
 });
 static DEFAULT_PARSER: LazyLock<Arc<MarkdownParserConfig>> = LazyLock::new(Arc::default);
 
+pub(crate) struct MarkdownRefresh {
+    source: Arc<SupportedDocument>,
+    parser: Arc<MarkdownParserConfig>,
+    published: Arc<SupportedDocument>,
+}
+
+static REFRESH: LazyLock<StateEffectType<Arc<MarkdownRefresh>>> =
+    LazyLock::new(StateEffectType::new);
+
 static DOCUMENT: LazyLock<StateField<SupportedDocument>> = LazyLock::new(|| {
     StateField::define_shared(
         |state| {
@@ -62,6 +72,12 @@ static DOCUMENT: LazyLock<StateField<SupportedDocument>> = LazyLock::new(|| {
                 .as_ref()
                 .as_ref()
                 .ok_or(ConfigurationError::InvalidFieldData)?;
+            if let Some(refresh) = refresh_effects(update.transaction()).next() {
+                if !Arc::ptr_eq(&refresh.parser, &next.parser) {
+                    return Err(ConfigurationError::InvalidFieldData);
+                }
+                return Ok(Arc::clone(&refresh.published));
+            }
             let start = update.start().facet(&CONFIG)?;
             if !start
                 .as_ref()
@@ -171,6 +187,83 @@ pub fn markdown_snapshot(state: &EditorState) -> Option<Arc<SupportedDocument>> 
         .context()
         .field(&DOCUMENT)
         .expect("typed Markdown document field")
+}
+
+/// Stage a syntax-only update for fences whose selected loads now have support.
+/// The host polls the loads separately. This does not run the resolver, start
+/// attempts, or change the state. Return `None` if there is nothing to publish.
+/// Apply the transaction to a state with the same Markdown snapshot and parser.
+/// It does not record history. It bypasses filters, but extenders still run.
+/// A stale plan or a combined text, selection, or parser change is rejected.
+pub fn plan_markdown_refresh(state: &EditorState) -> Result<Option<Transaction>, EditError> {
+    let (Some(source), Some(parser)) =
+        (markdown_snapshot(state), configured_markdown_parser(state))
+    else {
+        return Ok(None);
+    };
+    let Some(published) = source
+        .refresh_markdown_mounts()
+        .map_err(ConfigurationError::StrictSyntax)?
+    else {
+        return Ok(None);
+    };
+    let refresh = MarkdownRefresh {
+        source,
+        parser,
+        published: Arc::new(published),
+    };
+    Ok(Some(
+        Transaction::default()
+            .with_effects([REFRESH.of(Arc::new(refresh))])
+            .with_add_to_history(false)
+            .without_filtering(),
+    ))
+}
+
+fn refresh_effects(transaction: &Transaction) -> impl Iterator<Item = &Arc<MarkdownRefresh>> {
+    transaction
+        .effects()
+        .iter()
+        .filter_map(|effect| effect.get(&REFRESH))
+}
+
+pub(crate) fn checked_markdown_refresh(
+    start: StateContext<'_>,
+    transaction: &Transaction,
+) -> Result<Option<Arc<MarkdownRefresh>>, ConfigurationError> {
+    let mut effects = refresh_effects(transaction);
+    let Some(refresh) = effects.next() else {
+        return Ok(None);
+    };
+    if effects.next().is_some()
+        || !transaction.changes().is_empty()
+        || transaction.selection().is_some()
+        || transaction.add_to_history()
+        || !start
+            .field(&DOCUMENT)?
+            .is_some_and(|doc| Arc::ptr_eq(&doc, &refresh.source))
+    {
+        return Err(ConfigurationError::InvalidFieldData);
+    }
+    Ok(Some(Arc::clone(refresh)))
+}
+
+impl MarkdownRefresh {
+    pub(crate) fn check_published(
+        &self,
+        start: StateContext<'_>,
+        next: StateContext<'_>,
+    ) -> Result<(), ConfigurationError> {
+        // The field update does not run if reconfiguration removes Markdown.
+        if start.selection() != next.selection()
+            || !next
+                .field(&DOCUMENT)?
+                .is_some_and(|doc| Arc::ptr_eq(&doc, &self.published))
+        {
+            return Err(ConfigurationError::InvalidFieldData);
+        }
+        Ok(())
+    }
 }
 
 fn config(state: &EditorState) -> Option<MarkdownConfig> {

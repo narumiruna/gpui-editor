@@ -77,6 +77,10 @@ impl NativeXmlSchemaExtension {
         position: usize,
         explicit: bool,
     ) -> Option<SourceResult> {
+        self.with_schema(|schema| xml_completion_source(doc, position, explicit, schema))
+    }
+
+    pub(crate) fn with_schema<R>(&self, use_schema: impl FnOnce(XmlSchema<'_>) -> R) -> R {
         let views: Vec<_> = self.schema.elements.iter().map(ElementView::new).collect();
         let local_attributes: Vec<_> = views.iter().map(ElementView::attributes).collect();
         let elements: Vec<_> = views
@@ -97,15 +101,10 @@ impl NativeXmlSchemaExtension {
             .zip(&values)
             .map(|(attr, values)| attr.spec(values.as_deref()))
             .collect();
-        xml_completion_source(
-            doc,
-            position,
-            explicit,
-            XmlSchema {
-                elements: &elements,
-                attributes: &attributes,
-            },
-        )
+        use_schema(XmlSchema {
+            elements: &elements,
+            attributes: &attributes,
+        })
     }
 }
 

@@ -1,20 +1,25 @@
 use std::sync::Arc;
 
 use gpui_editor_codemirror::{
-    Compartment, EditorState, Extension, Text, Transaction,
-    autocomplete::Completion,
+    Assoc, Compartment, EditorState, Extension, Text, Transaction,
+    autocomplete::{Completion, session::SourceResult},
     language::xml::{
         NativeXmlSchemaExtension, XmlAttrSpec, XmlAttribute, XmlDocument, XmlElementSpec,
         XmlSchema, XmlValue, xml_completion_source,
     },
+    language_data::{XmlCompletionSource, xml_extension},
 };
 use serde_json::{Value, json};
 
 fn oracle_schema() -> Extension {
+    with_oracle_schema(|schema| NativeXmlSchemaExtension::new(schema).extension())
+}
+
+fn with_oracle_schema(build: impl FnOnce(XmlSchema<'_>) -> Extension) -> Extension {
     // The extension must outlive the caller's schema, including its strings.
     let root = String::from("root");
     let override_insert = String::from("\"custom\"");
-    NativeXmlSchemaExtension::new(XmlSchema {
+    build(XmlSchema {
         elements: &[
             XmlElementSpec {
                 name: &root,
@@ -89,7 +94,47 @@ fn oracle_schema() -> Extension {
             },
         ],
     })
-    .extension()
+}
+
+fn summarize(result: Option<SourceResult>) -> Value {
+    result.map_or(Value::Null, |result| {
+        json!({
+            "from": result.from,
+            "to": result.to,
+            "options": result.options.iter().map(|item| json!({
+                "label": item.label, "type": item.kind, "detail": item.detail,
+                "boost": item.boost, "apply": item.insert,
+            })).collect::<Vec<_>>(),
+        })
+    })
+}
+
+#[test]
+fn configured_headless_sources_match_pinned_schema_without_entities() {
+    let configured = with_oracle_schema(|schema| xml_extension(schema, true));
+    let stock = xml_extension(XmlSchema::default(), true);
+    for row in include_str!("fixtures/xml_schema_completion.jsonl").lines() {
+        let row: Value = serde_json::from_str(row).unwrap();
+        let marked = row["marked"].as_str().unwrap();
+        let at = marked.find('|').unwrap();
+        let explicit = row["explicit"].as_bool().unwrap();
+        let extension = if row["enabled"] == true {
+            &configured
+        } else {
+            &stock
+        };
+        let state =
+            EditorState::with_extensions(marked.replacen('|', "", 1), extension.clone()).unwrap();
+        let sources =
+            state.language_data_at::<XmlCompletionSource>("autocomplete", at, Assoc::Before);
+        assert_eq!(sources.len(), 1);
+        assert_eq!(
+            summarize(sources[0](&state, at, explicit)),
+            row["result"],
+            "{marked}"
+        );
+        assert!(NativeXmlSchemaExtension::source_for(&state).is_none());
+    }
 }
 
 #[test]
@@ -121,17 +166,7 @@ fn registered_and_stock_sources_match_pinned_order_ranges_and_metadata() {
             );
             continue;
         }
-        let actual = result.map(|result| {
-            json!({
-                "from": result.from,
-                "to": result.to,
-                "options": result.options.iter().map(|item| json!({
-                    "label": item.label, "type": item.kind, "detail": item.detail,
-                    "boost": item.boost, "apply": item.insert,
-                })).collect::<Vec<_>>(),
-            })
-        });
-        assert_eq!(json!(actual), row["result"], "{marked}");
+        assert_eq!(summarize(result), row["result"], "{marked}");
     }
 }
 

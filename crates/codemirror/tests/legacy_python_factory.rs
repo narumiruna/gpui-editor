@@ -193,6 +193,64 @@ fn replays_an_edit_inside_a_format_expression() {
 }
 
 #[test]
+fn retains_definition_style_when_an_edit_joins_declaration_names() {
+    use gpui_editor_codemirror::{
+        language::{StreamDocument, TagModifier},
+        legacy_modes::LegacyPython,
+    };
+
+    let settings = StreamSettings::default();
+    let mode = mk_python(LegacyPythonConfig {
+        version: Some(2),
+        ..Default::default()
+    });
+    let language = mode.language();
+    for row in include_str!("fixtures/legacy_python_declaration_edit.jsonl").lines() {
+        let case: Value = serde_json::from_str(row).unwrap();
+        let byte = |key: &Value| usize::try_from(key.as_u64().unwrap()).unwrap();
+        let range = byte(&case["range"][0])..byte(&case["range"][1]);
+        let name = case["name"].as_str().unwrap();
+        let check = |doc: &StreamDocument<LegacyPython>, expected: &Value| {
+            let text = doc.text().as_str();
+            let token = Tokenizer::new(&mode, text, settings.tab_size, settings.indent_unit)
+                .map(Result::unwrap)
+                .find(|token| token.range == range)
+                .unwrap();
+            assert_eq!(token.text, name);
+            let expected = expected.as_str();
+            assert_eq!(token.style.as_deref(), expected, "token for {name}");
+            let tags = doc.tokens(range.clone()).unwrap().next().unwrap().tags;
+            assert_eq!(tags.len(), 1);
+            assert_eq!(tags[0].name(), "variableName");
+            assert_eq!(
+                tags[0].modifiers().contains(&TagModifier::Definition),
+                expected == Some("def"),
+                "highlight for {name}"
+            );
+        };
+        let source = case["source"].as_str().unwrap();
+        let mut replay = language.parse(Text::new(source), settings).unwrap();
+        check(&replay, &case["before"]);
+        let at = byte(&case["at"]);
+        let edit =
+            ChangeSet::single(Change::new(at..at + 1, case["insert"].as_str().unwrap())).unwrap();
+        replay.apply_changes(&edit).unwrap();
+        let changed = case["changed"].as_str().unwrap();
+        assert_eq!(replay.text().as_str(), changed);
+        check(&replay, &case["after"]);
+        check(
+            &language.parse(Text::new(changed), settings).unwrap(),
+            &case["after"],
+        );
+        replay
+            .apply_changes(&ChangeSet::single(Change::new(at..at + 1, "(")).unwrap())
+            .unwrap();
+        assert_eq!(replay.text().as_str(), source);
+        check(&replay, &case["before"]);
+    }
+}
+
+#[test]
 fn native_overrides_require_progress_at_the_cursor() {
     let mode = mk_python(LegacyPythonConfig {
         identifiers: Some(Regex::new(r"[A-Z]+").unwrap()),

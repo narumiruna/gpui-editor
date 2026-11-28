@@ -183,7 +183,7 @@ impl Parser {
         let (stack, mut tree) = history
             .resume(self, source, fragments, &work)
             .unwrap_or_else(|| (Stack::new(self), TreeBuilder::default()));
-        let result = if wast {
+        let result = if wast || recovery == Some(GlrMode::JsonRecovering) {
             self.run_lr::<true>(source, stack, &mut tree, work, Some(&mut history), suffix)
         } else {
             self.run_lr::<false>(source, stack, &mut tree, work, Some(&mut history), suffix)

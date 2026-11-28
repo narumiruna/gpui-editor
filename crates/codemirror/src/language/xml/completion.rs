@@ -122,7 +122,27 @@ pub fn xml_completion_source(
     explicit: bool,
     schema: XmlSchema<'_>,
 ) -> Option<SourceResult> {
-    let completed = doc.complete(position, explicit, schema)?;
+    completion_source(doc, position, doc.complete(position, explicit, schema)?)
+}
+
+// Pinned xml() does not complete predefined entities.
+pub(crate) fn schema_completion_source(
+    doc: &XmlDocument,
+    position: usize,
+    explicit: bool,
+    schema: XmlSchema<'_>,
+) -> Option<SourceResult> {
+    doc.text.as_str().get(..position)?;
+    let at = doc.path(position, Side::Left).last()?;
+    let completed = doc.complete_schema(position, explicit, schema, at)?;
+    completion_source(doc, position, completed)
+}
+
+fn completion_source(
+    doc: &XmlDocument,
+    position: usize,
+    completed: XmlCompletionResult<'_>,
+) -> Option<SourceResult> {
     let options: Vec<_> = completed
         .options
         .iter()
@@ -168,6 +188,16 @@ impl XmlDocument {
         if let Some(result) = self.complete_entity(prefix, at) {
             return Some(result);
         }
+        self.complete_schema(position, explicit, schema, at)
+    }
+
+    fn complete_schema<'a>(
+        &'a self,
+        position: usize,
+        explicit: bool,
+        schema: XmlSchema<'a>,
+        at: XmlNode<'a>,
+    ) -> Option<XmlCompletionResult<'a>> {
         let (location, from, context) = find_location(at, position)?;
         let pos = position;
         let text = self.text.as_str();

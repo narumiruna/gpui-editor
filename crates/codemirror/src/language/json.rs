@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::{
-    Assoc, ChangeSet, EditError, RangeSet, Text,
+    Assoc, ChangeSet, EditError, EditorState, RangeSet, Text,
     autocomplete::brackets::{CloseBracketConfig, CloseBracketSyntax},
     language_data::CloseBracketData,
     lint::Diagnostic,
@@ -27,15 +27,18 @@ use super::{
         ConfiguredHighlights, ISOLATE, Isolation, NodeType, NodeTypes, NormalizedEdges, ParseError,
         ReuseStats, StyleTags, StyledNode, SyntaxTree, TreeFragment, select_tags,
     },
+    lezer::{indent, service_node::LrSyntaxNode},
     line_projection::{NormalizedInput, NormalizedOffsets, editor_lines},
 };
 
 mod brackets;
+mod job;
 mod lexer;
 mod linter;
 mod lr;
 mod parser;
 
+pub use job::{JsonParseJob, JsonParseOutput, JsonParseStep};
 pub use lr::parse_raw;
 pub(crate) use lr::{stock_data_facet, stock_node_types};
 
@@ -173,6 +176,10 @@ impl<'a> JsonNode<'a> {
         &self.document.nodes[self.id]
     }
 
+    pub(super) fn same_tree(self, other: Self) -> bool {
+        std::ptr::eq(self.document, other.document)
+    }
+
     pub fn kind(self) -> JsonNodeKind {
         self.data().kind
     }
@@ -207,32 +214,6 @@ impl<'a> JsonNode<'a> {
             .children
             .iter()
             .map(move |&id| Self { id, ..self })
-    }
-
-    // Lezer's enterUnfinishedNodesBefore: only an inserted, zero-width
-    // error at the end marks an unfinished node. A skipped token does not.
-    fn enter_unfinished_before(mut self, position: usize) -> Self {
-        let children = &self.data().children;
-        let nodes = &self.document.nodes;
-        let before = children.partition_point(|&id| nodes[id].range.start < position);
-        let mut scan = before.checked_sub(1).map(|i| children[i]);
-        while let Some(id) = scan {
-            let node = &nodes[id];
-            let Some((&last, previous)) = node.children.split_last() else {
-                break;
-            };
-            let end = &nodes[last];
-            if end.range.end != node.range.end {
-                break;
-            }
-            if end.kind == JsonNodeKind::Error && end.range.is_empty() {
-                self.id = id;
-                scan = previous.last().copied();
-            } else {
-                scan = Some(last);
-            }
-        }
-        self
     }
 
     /// Range inside the first and last children of an object or array.
@@ -576,67 +557,37 @@ impl JsonDocument {
             .find(|range| (line_start..=line_end).contains(&range.start) && range.end > line_end)
     }
 
-    /// Indent a position using the innermost container or recovered opener.
-    /// Use the reference line's indentation on a container's matching closer,
-    /// or add one unit otherwise.
-    /// Return `None` for an invalid UTF-8 byte position.
+    /// Query syntax indentation at a UTF-8 byte position, including configured
+    /// node strategies. Return `None` for an invalid position or no column.
     pub fn indentation(
         &self,
         position: usize,
         settings: StreamSettings,
         options: IndentOptions<'_>,
     ) -> Option<usize> {
-        let text = self.syntax_lines();
-        let cx = IndentContext::new(text, position, settings, options)?;
-        let inner = self
-            .node_at(position, None)?
-            .enter_unfinished_before(position);
-        let strategy = std::iter::successors(Some(inner), |node| node.parent()).find_map(|node| {
-            use JsonNodeKind::*;
-            let closer = match node.kind() {
-                Object => Some('}'),
-                Array => Some(']'),
-                // A recovered error can contain one skipped token. When it
-                // is an opener, CodeMirror uses its default delimited rule.
-                Error => match node.children().next()?.kind() {
-                    OpenBrace | OpenBracket => None,
-                    _ => return None,
-                },
-                _ => return None,
-            };
-            Some((node, closer))
-        });
-        let Some((node, closer)) = strategy else {
-            return Some(0);
-        };
-        let after = cx.text_after_pos(position, Assoc::After)?;
-        let from = node.data().range.start;
-        let mut reference = text.line_at(from)?.range.start;
-        loop {
-            let mut at_break = self.node_at(reference, None)?;
-            // Lezer treats nodes with the same start as one when choosing
-            // the reference line, even if a recovered sibling ends here.
-            while let Some(parent) = at_break
-                .parent()
-                .filter(|parent| parent.data().range.start == at_break.data().range.start)
-            {
-                at_break = parent;
-            }
-            let covering = &at_break.data().range;
-            if covering.end > from {
-                // The node covers the opener, so it is an ancestor.
-                break;
-            }
-            reference = text.line_at(covering.start)?.range.start;
-        }
-        let base = cx.line_indent(reference, Assoc::After)?;
-        Some(
-            if closer.is_some_and(|closer| trim_js_space(after).starts_with(closer)) {
-                base
-            } else {
-                base.saturating_add(cx.unit())
-            },
-        )
+        self.indentation_with_state(None, position, settings, options)
+    }
+
+    pub(super) fn indentation_with_state(
+        &self,
+        state: Option<&EditorState>,
+        position: usize,
+        settings: StreamSettings,
+        options: IndentOptions<'_>,
+    ) -> Option<usize> {
+        self.syntax_indentation(state, position, settings, options, Some(0))
+    }
+
+    pub(super) fn syntax_indentation(
+        &self,
+        state: Option<&EditorState>,
+        position: usize,
+        settings: StreamSettings,
+        options: IndentOptions<'_>,
+        fallback: Option<usize>,
+    ) -> Option<usize> {
+        let lines = IndentContext::new(self.syntax_lines(), position, settings, options)?;
+        indent::indentation(LrSyntaxNode::json(self.root()), state, &lines, fallback)
     }
 
     /// The first syntax diagnostic from the local parser, if any. It does not

@@ -4,15 +4,23 @@ use std::{
 };
 
 use crate::{
-    ConfigurationError, EditError, EditorState, Extension, Facet, Range, RangeSet, StateField,
-    language::line_projection::{
-        configured_editor_lines, editor_line_extension, uses_default_editor_lines,
+    Assoc, ConfigurationError, EditError, EditorState, Extension, Facet, Range, RangeSet,
+    StateField,
+    language::{
+        lezer::match_lr_marked,
+        line_projection::{
+            configured_editor_lines, editor_line_extension, splits_crlf, uses_default_editor_lines,
+        },
+        markdown::markdown_snapshot,
     },
-    language_data::{NativeSyntax, attached_language_snapshot},
+    language_data::{NativeSyntax, SupportedDocument, attached_language_snapshot},
     view::MarkDecoration,
 };
 
-use super::{BracketConfig, BracketMatch, bracket_near_with_units};
+use super::{
+    BracketConfig, BracketDirection, BracketMatch, bracket_near_with_units, bracket_pairs,
+    directional_bracket_near, match_in,
+};
 
 /// Native renderer for a single match in the current immutable editor state.
 /// The host draws the resulting marks. The ranges must use document bytes.
@@ -152,13 +160,7 @@ fn matches(
                 range.head(),
                 config,
                 &same_syntax,
-                |chunk| {
-                    if logical && chunk == "\r\n" {
-                        1
-                    } else {
-                        chunk.encode_utf16().count()
-                    }
-                },
+                |chunk| editor_scan_units(logical, chunk),
             )
         })
         .collect())
@@ -179,7 +181,13 @@ fn state_matches(
     let syntax = attached.as_deref().map(|doc| doc.syntax());
     let config = options.config();
     match syntax {
+        Some(NativeSyntax::Cpp(doc)) => Ok(match_carets(state, |head| {
+            doc.bracket_near_with_config(head, config)
+        })),
         Some(NativeSyntax::Go(doc)) => Ok(match_carets(state, |head| {
+            doc.bracket_near_with_config(head, config)
+        })),
+        Some(NativeSyntax::Java(doc)) => Ok(match_carets(state, |head| {
             doc.bracket_near_with_config(head, config)
         })),
         Some(NativeSyntax::Json(doc)) => Ok(match_carets(state, |head| {
@@ -188,10 +196,80 @@ fn state_matches(
         Some(NativeSyntax::LezerGrammar(doc)) => Ok(match_carets(state, |head| {
             doc.bracket_near_with_config(head, config)
         })),
+        Some(NativeSyntax::Rust(doc)) => Ok(match_carets(state, |head| {
+            doc.bracket_near_with_config(head, config)
+        })),
         Some(NativeSyntax::Wast(doc)) => Ok(match_carets(state, |head| {
             doc.bracket_near_with_config(head, config)
         })),
-        _ => matches(state, options, 0..state.text().len(), |_, _| true),
+        _ => {
+            if syntax.is_none()
+                && let Some(markdown) = markdown_snapshot(state)
+                && markdown.has_markdown_lr_mounts()
+            {
+                markdown_matches(state, &markdown, config)
+            } else {
+                matches(state, options, 0..state.text().len(), |_, _| true)
+            }
+        }
+    }
+}
+
+fn markdown_matches(
+    state: &EditorState,
+    markdown: &SupportedDocument,
+    config: BracketConfig<'_>,
+) -> Result<Vec<BracketMatch>, EditError> {
+    let context = state.context();
+    let projection = configured_editor_lines(&context)?;
+    let lines = projection.as_ref().as_ref().unwrap_or(context.text());
+    let logical = uses_default_editor_lines(&context)?;
+    let source = state.text().as_str();
+    let pairs = bracket_pairs(config);
+    Ok(match_carets(state, |head| {
+        directional_bracket_near(source, head, config.after_cursor, |pos, dir| {
+            let side = if dir == BracketDirection::Forward {
+                Assoc::After
+            } else {
+                Assoc::Before
+            };
+            let node = markdown.markdown_lr_bracket_node(pos, side);
+            if let Some(node) = node
+                && let Some(hit) = match_lr_marked(state.text(), node, pos, dir, pairs)
+            {
+                return Some(hit);
+            }
+            let scope = 0..lines.len();
+            match_in(
+                lines,
+                scope,
+                pos,
+                dir,
+                config,
+                |_, at| {
+                    if splits_crlf(source, at) {
+                        return false;
+                    }
+                    match (node, markdown.markdown_lr_bracket_node(at, Assoc::After)) {
+                        (Some(start), Some(next)) => start.same_mounted_bracket_type(next),
+                        (None, None) => true,
+                        _ => false,
+                    }
+                },
+                |chunk| editor_scan_units(logical, chunk),
+            )
+            .filter(|hit| {
+                !splits_crlf(source, hit.start.start) && !splits_crlf(source, hit.start.end)
+            })
+        })
+    }))
+}
+
+fn editor_scan_units(logical: bool, chunk: &str) -> usize {
+    if logical && chunk == "\r\n" {
+        1
+    } else {
+        chunk.encode_utf16().count()
     }
 }
 

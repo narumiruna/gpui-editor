@@ -39,6 +39,15 @@ impl Mode {
             Self::Styles => &STYLES,
         }
     }
+
+    fn fragment_parser(self) -> &'static Parser {
+        static SHEET: LazyLock<Parser> = LazyLock::new(|| Mode::Sheet.parser(color_callback()));
+        static STYLES: LazyLock<Parser> = LazyLock::new(|| Mode::Styles.parser(color_callback()));
+        match self {
+            Self::Sheet => &SHEET,
+            Self::Styles => &STYLES,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -115,13 +124,22 @@ pub(super) fn parse_incremental(
 
 // Recovery parses temporary inputs without reading or collecting checkpoints.
 pub(super) fn parse(source: &str) -> Result<Vec<Node>, ParseError> {
-    static SHEET: LazyLock<Parser> = LazyLock::new(|| Mode::Sheet.parser(color_callback()));
-    parse_with(&SHEET, source)
+    parse_with(Mode::Sheet.fragment_parser(), source)
 }
 
 pub(super) fn parse_styles(source: &str) -> Result<Vec<Node>, ParseError> {
-    static STYLES: LazyLock<Parser> = LazyLock::new(|| Mode::Styles.parser(color_callback()));
-    parse_with(&STYLES, source)
+    parse_with(Mode::Styles.fragment_parser(), source)
+}
+
+pub(super) fn recover(source: &str, mode: Mode) -> Result<Vec<Node>, ParseError> {
+    let input = Input::new(source, false);
+    let tree = mode.fragment_parser().parse_recovering(&input.text)?;
+    Ok(flatten(&tree, &input))
+}
+
+pub(super) fn accepts_strict(source: &str, mode: Mode) -> bool {
+    let input = Input::new(source, false);
+    parse_strict(mode.fragment_parser(), &input.text).is_ok()
 }
 
 fn color_callback() -> Specializer {
@@ -130,11 +148,15 @@ fn color_callback() -> Specializer {
 
 fn parse_with(parser: &Parser, source: &str) -> Result<Vec<Node>, ParseError> {
     let input = Input::new(source, false);
-    let tree = parser.parse(&input.text).or_else(|error| match error {
-        ParseError::Ambiguous { .. } => parser.parse_glr(&input.text),
-        other => Err(other),
-    })?;
+    let tree = parse_strict(parser, &input.text)?;
     Ok(flatten(&tree, &input))
+}
+
+fn parse_strict(parser: &Parser, text: &str) -> Result<SyntaxTree, ParseError> {
+    parser.parse(text).or_else(|error| match error {
+        ParseError::Ambiguous { .. } => parser.parse_glr(text),
+        other => Err(other),
+    })
 }
 
 fn flatten(tree: &SyntaxTree, input: &Input<'_>) -> Vec<Node> {

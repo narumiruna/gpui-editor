@@ -111,7 +111,10 @@ impl Editor {
             return Err(SourceCollabError::EffectsUnsupported);
         }
         let state = self.view.state();
-        let transaction = receive_updates(state, version, updates)?;
+        // The GPUI bridge applies exact, text-only receipts, including empty ones.
+        let transaction = receive_updates(state, version, updates)?
+            .with_add_to_history(false)
+            .without_filtering();
         let session = collab_state(state)
             .map_err(EditError::from)?
             .ok_or(CollabError::NotConfigured)?;

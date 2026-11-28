@@ -1,6 +1,6 @@
 //! Borrow logical lines and line endings without exposing the tree's leaf boundaries.
 
-use std::{iter::FusedIterator, ops::Range};
+use std::{borrow::Cow, iter::FusedIterator, ops::Range};
 
 use super::{Text, tree::Chunk};
 use crate::EditError;
@@ -236,6 +236,113 @@ impl<'a> Iterator for TextCursor<'a> {
         self.advance(self.position)
     }
 }
+
+/// A forward cursor over logical line content, without line endings.
+///
+/// Use [`Text::line_cursor`] or [`Text::line_cursor_range`]. Empty lines
+/// yield `""`. A line within one tree leaf is borrowed. Only a line that
+/// spans leaves is copied.
+pub struct TextLineCursor<'a> {
+    leaf: LeafCursor<'a>,
+    bounds: Option<Range<usize>>,
+    position: usize,
+    state: LineCursorState,
+}
+
+#[derive(PartialEq, Eq)]
+enum LineCursorState {
+    AfterBreak,
+    AfterLine,
+    Done,
+}
+
+impl<'a> TextLineCursor<'a> {
+    pub(super) fn new(text: &'a Text, bounds: Option<Range<usize>>) -> Self {
+        Self {
+            leaf: LeafCursor::new(text),
+            position: bounds.as_ref().map_or(0, |range| range.start),
+            bounds,
+            state: LineCursorState::AfterBreak,
+        }
+    }
+
+    /// Whether the cursor has returned `None`.
+    pub fn done(&self) -> bool {
+        self.state == LineCursorState::Done
+    }
+
+    /// Skip bytes, then return the next line fragment. Count from the start of
+    /// the cursor's range or the end of the last content or ending it read.
+    /// Negative skips rewind. Skips stop at the bounds and count both bytes of
+    /// CRLF. Landing on either byte of CRLF selects that line ending. A ranged
+    /// cursor cannot rewind from its upper bound. Once the cursor returns
+    /// `None`, skips cannot restart it.
+    ///
+    /// # Errors
+    ///
+    /// Return [`EditError::InvalidRange`] without changing the cursor if the
+    /// skip lands inside a UTF-8 scalar value.
+    pub fn next_with_skip(&mut self, skip: isize) -> Result<Option<Cow<'a, str>>, EditError> {
+        if self.done() {
+            return Ok(None);
+        }
+        let bounds = self.bounds.clone().unwrap_or(0..self.leaf.text.len());
+        if self.bounds.is_some() && self.position == bounds.end {
+            return Ok(self.next());
+        }
+        let position = self
+            .position
+            .saturating_add_signed(skip)
+            .clamp(bounds.start, bounds.end);
+        if position != self.position && !self.leaf.text.is_char_boundary(position) {
+            return Err(EditError::InvalidRange);
+        }
+        self.position = position;
+        Ok(self.next())
+    }
+}
+
+impl<'a> Iterator for TextLineCursor<'a> {
+    type Item = Cow<'a, str>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done() {
+            return None;
+        }
+        let end = self
+            .bounds
+            .as_ref()
+            .map_or(self.leaf.text.len(), |range| range.end);
+        while let Some(span) = self.leaf.next_span(self.position..end) {
+            self.position = span.range.end;
+            if span.ending.is_none() {
+                self.state = LineCursorState::AfterLine;
+                if let Some(line) = self.leaf.chunk_slice(span.range.clone()) {
+                    return Some(Cow::Borrowed(line));
+                }
+                // Do not use `LeafCursor::borrow`, which can flatten the snapshot.
+                let mut line = String::with_capacity(span.range.len());
+                for chunk in self.leaf.text.0.tree.chunks(span.range) {
+                    line.push_str(chunk);
+                }
+                return Some(Cow::Owned(line));
+            }
+            if self.state == LineCursorState::AfterBreak {
+                return Some(Cow::Borrowed(""));
+            }
+            self.state = LineCursorState::AfterBreak;
+        }
+        if self.state == LineCursorState::AfterBreak {
+            self.state = LineCursorState::AfterLine;
+            Some(Cow::Borrowed(""))
+        } else {
+            self.state = LineCursorState::Done;
+            None
+        }
+    }
+}
+
+impl FusedIterator for TextLineCursor<'_> {}
 
 pub(super) struct Chunks<'a> {
     front: LeafCursor<'a>,

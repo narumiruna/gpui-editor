@@ -1,0 +1,9 @@
+{"id":"lone-cr","source":"A\rZ","range":[1,2],"markers":[[1,1]]}
+{"id":"lf","source":"A\nZ","range":[1,2],"markers":[[1,1]]}
+{"id":"crlf","source":"🦀\r\nZ","range":[4,6],"markers":[[4,4]]}
+{"id":"mixed","source":"🦀\r\r\n\nZ","range":[4,8],"markers":[[4,4]]}
+{"id":"ends-with-content","source":"A\rZ","range":[1,3],"markers":[[1,3]]}
+{"id":"only-cr","source":"\r","range":[0,1],"markers":[[0,0]]}
+{"id":"at-eof","source":"A\r","range":[1,2],"markers":[[1,1]]}
+{"id":"nine-cr","source":"A\r\r\r\r\r\r\r\r\rZ","range":[1,10],"markers":[[1,1]]}
+{"id":"ten-cr","source":"A\r\r\r\r\r\r\r\r\r\rZ","range":[1,11],"markers":[[1,11]]}

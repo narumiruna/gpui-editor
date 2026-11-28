@@ -12,7 +12,7 @@ use crate::{ChangeSet, EditError, Text, commands::CommentTokens};
 
 use super::{
     HighlightSpan, IndentOptions, LanguageData, StreamSettings,
-    html::HtmlOptions,
+    html::{HtmlNesting, HtmlOptions},
     lezer::{ReuseStats, SyntaxTree},
 };
 
@@ -183,11 +183,32 @@ impl LiquidDocument {
     }
 
     pub fn parse_with_options(text: Text, options: LiquidOptions) -> Self {
-        Self::parse_with_prefix(text, options, None)
+        Self::parse_with_nesting(text, options, HtmlNesting::default())
     }
 
-    /// Apply UTF-8 byte edits and rebuild the HTML projection with the original options.
+    /// Parse the HTML overlay with custom routes before the stock routes.
+    /// Route callbacks receive compact HTML with Liquid gaps removed.
+    pub fn parse_with_nesting(
+        text: Text,
+        options: LiquidOptions,
+        nesting: HtmlNesting<'_>,
+    ) -> Self {
+        Self::parse_with_prefix(text, options, nesting, None)
+    }
+
+    /// Apply UTF-8 byte edits with the original HTML options and stock routes.
+    /// To keep custom routes, use [`Self::reparse_with_nesting`].
     pub fn reparse(&self, changes: &ChangeSet) -> Result<Self, EditError> {
+        self.reparse_with_nesting(changes, HtmlNesting::default())
+    }
+
+    /// Apply UTF-8 byte edits and rebuild the HTML overlay with the supplied routes.
+    /// The document does not retain route callbacks.
+    pub fn reparse_with_nesting(
+        &self,
+        changes: &ChangeSet,
+        nesting: HtmlNesting<'_>,
+    ) -> Result<Self, EditError> {
         let mut text = self.text.clone();
         changes.apply_to(&mut text)?;
         let end = changes
@@ -195,7 +216,7 @@ impl LiquidDocument {
             .next()
             .map_or(text.len(), |(range, _)| range.start);
         let prefix = self.strict.as_deref().map(|tree| (tree, end));
-        Ok(Self::parse_with_prefix(text, self.options, prefix))
+        Ok(Self::parse_with_prefix(text, self.options, nesting, prefix))
     }
 
     /// Report strict LR prefix reuse in logical bytes (CRLF counts as one byte).
@@ -209,11 +230,12 @@ impl LiquidDocument {
     fn parse_with_prefix(
         text: Text,
         options: LiquidOptions,
+        nesting: HtmlNesting<'_>,
         prefix: Option<(&SyntaxTree, usize)>,
     ) -> Self {
         let source = text.as_str();
         let (nodes, strict) = parser::parse(source, prefix);
-        let html = LiquidHtmlMount::new(source, &nodes, options.html);
+        let html = LiquidHtmlMount::new(source, &nodes, options.html, nesting);
         let highlights = highlight::collect(&nodes);
         Self {
             text,

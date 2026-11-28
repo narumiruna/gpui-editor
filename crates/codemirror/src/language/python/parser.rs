@@ -37,6 +37,8 @@ static PARSER: LazyLock<Parser> = LazyLock::new(|| {
 static NAMES: LazyLock<Vec<&str>> = LazyLock::new(|| tables::NODE_NAMES.split(' ').collect());
 const MAX_PARSE_BYTES: usize = 1 << 20;
 const MAX_REPAIR_BYTES: usize = 64 * 1024;
+const PAREN_R: u16 = 23;
+pub(super) const BRACKET_R: u16 = 54;
 
 pub(super) fn name(term: u16) -> &'static str {
     NAMES[usize::from(term)]
@@ -83,7 +85,7 @@ pub(super) fn parse(source: &str, prefix: Option<(&Cache, Option<usize>)>) -> Pa
             Err(error) => error,
         },
     };
-    if let ParseError::UnexpectedToken { offset, .. } = failure
+    if let ParseError::UnexpectedToken { offset, term, .. } = failure
         && text.len() <= MAX_REPAIR_BYTES
     {
         let suffix = fallback::suffix(text);
@@ -93,6 +95,19 @@ pub(super) fn parse(source: &str, prefix: Option<(&Cache, Option<usize>)>) -> Pa
             if let Ok(tree) = parse_tree(&repaired) {
                 return result(Some(&tree), text.len(), source.len(), byte, true);
             }
+        }
+        let recover_closer = term.filter(|&term| {
+            term == BRACKET_R
+                || term == PAREN_R
+                    && text[offset..]
+                        .split_once('\n')
+                        .is_some_and(|(_, later)| !later.trim().is_empty())
+        });
+        if let Some(closer) = recover_closer
+            && let Ok(tree) = PARSER.parse_recovering(text)
+            && is_single_closer_repair(&tree, offset, closer)
+        {
+            return result(Some(&tree), text.len(), source.len(), byte, true);
         }
         let line = text[..offset.min(text.len())]
             .rfind('\n')
@@ -105,6 +120,45 @@ pub(super) fn parse(source: &str, prefix: Option<(&Cache, Option<usize>)>) -> Pa
         }
     }
     result(None, 0, source.len(), byte, true)
+}
+
+// Publish only a stray tuple closer or a single wrong call closer.
+fn is_single_closer_repair(tree: &SyntaxTree, offset: usize, closer: u16) -> bool {
+    let mut stack = vec![tree.root()];
+    let mut found = false;
+    while let Some(parent) = stack.pop() {
+        for node in parent.children() {
+            if !node.is_error() {
+                stack.push(node);
+                continue;
+            }
+            let range = offset..offset + 1;
+            let valid = match closer {
+                PAREN_R => {
+                    parent.term() == tables::TUPLE_EXPRESSION
+                        && parent.range() == range
+                        && parent
+                            .children()
+                            .map(|child| (child.term(), child.range()))
+                            .eq([(0, offset..offset), (PAREN_R, range)])
+                }
+                BRACKET_R => {
+                    parent.term() == tables::ARG_LIST
+                        && node.range() == range
+                        && node
+                            .children()
+                            .map(|child| (child.term(), child.range()))
+                            .eq([(BRACKET_R, range)])
+                }
+                _ => false,
+            };
+            if found || !valid {
+                return false;
+            }
+            found = true;
+        }
+    }
+    found
 }
 
 fn parse_tree(source: &str) -> Result<SyntaxTree, ParseError> {

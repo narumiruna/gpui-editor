@@ -320,24 +320,16 @@ impl<'a> Parser<'a> {
         let tag = self.start(self.parent(), kind);
         self.consume(tag, StartCloseTag, 2);
         self.tag_name(tag);
-        loop {
-            self.pos += lexer::space_len(self.rest());
-            let len = if self.rest().starts_with("/>") {
-                2
-            } else {
-                usize::from(self.rest().starts_with('>'))
-            };
-            if len != 0 {
-                self.consume(tag, EndTag, len);
-                break;
-            }
-            if let Some(ch) = self.rest().chars().next().filter(|&ch| ch != '<') {
-                let len = lexer::prefix(self.rest(), |ch| !matches!(ch, '<' | '>'));
-                self.consume(tag, Error, len.max(ch.len_utf8()));
-            } else {
-                self.leaf(tag, Error, self.pos..self.pos);
-                break;
-            }
+        self.pos += lexer::space_len(self.rest());
+        let len = if self.rest().starts_with("/>") {
+            2
+        } else {
+            usize::from(self.rest().starts_with('>'))
+        };
+        if len == 0 {
+            self.leaf(tag, Error, self.pos..self.pos);
+        } else {
+            self.consume(tag, EndTag, len);
         }
         self.nodes[tag].range.end = self.pos;
         if matched {

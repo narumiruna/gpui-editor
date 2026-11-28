@@ -1,11 +1,16 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Range};
 
 use gpui_editor_codemirror::{
-    Text,
+    Change, ChangeSet, Text,
     commands::CommentTokens,
     language::{
         IndentOptions, StreamSettings, TagModifier,
-        html::HtmlNode,
+        html::{
+            HtmlAttributes, HtmlCustomDocument, HtmlDocument, HtmlEmbeddedDocument,
+            HtmlEmbeddedLanguage, HtmlNestedAttribute, HtmlNestedLanguage, HtmlNestedParser,
+            HtmlNesting, HtmlNode, HtmlNodeKind, HtmlOptions,
+        },
+        json::JsonDocument,
         php::{CloseBrackets, PhpDocument, PhpOptions, indent_on_input, language_data},
     },
 };
@@ -204,6 +209,233 @@ fn metadata_and_parse_options_are_explicit() {
     assert!(template.html().is_some());
     let pure = PhpDocument::parse(Text::new("<?php echo 1;"));
     assert!(pure.html().is_none());
+}
+
+#[test]
+fn stock_html_routes_read_original_php_template_attributes() {
+    fn bounds(range: Range<usize>) -> [usize; 2] {
+        [range.start, range.end]
+    }
+
+    fn snapshot(doc: &PhpDocument) -> Value {
+        assert!(!doc.is_recovered());
+        let outer = doc.html().unwrap();
+        let html = outer.document();
+        let ranges = outer.source_ranges(0..html.text().len()).unwrap();
+        let mounts: Vec<_> = html
+            .mounts()
+            .iter()
+            .map(|mount| {
+                assert_eq!(mount.language(), HtmlEmbeddedLanguage::JavaScript);
+                let pieces: Vec<_> = outer
+                    .source_ranges(mount.range())
+                    .unwrap()
+                    .into_iter()
+                    .map(bounds)
+                    .collect();
+                json!(["JavaScript", pieces])
+            })
+            .collect();
+        let strings: Vec<_> = doc
+            .highlights(0..doc.text().len())
+            .unwrap()
+            .filter(|span| span.tags.iter().any(|tag| tag.name() == "string"))
+            .map(|span| bounds(span.range))
+            .collect();
+        json!({
+            "ranges": ranges.into_iter().map(bounds).collect::<Vec<_>>(),
+            "mounts": mounts,
+            "strings": strings,
+        })
+    }
+
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/php_html_routes.jsonl")).unwrap();
+    let before = PhpDocument::parse(Text::new(fixture["source"].as_str().unwrap()));
+    assert_eq!(snapshot(&before), fixture["before"]);
+
+    let (start, end, insert): (usize, usize, String) =
+        serde_json::from_value(fixture["edit"].clone()).unwrap();
+    let change = ChangeSet::single(Change::new(start..end, insert)).unwrap();
+    let after = before.reparse(&change).unwrap();
+    // The edit changes only the original spelling of the MIME type.
+    assert_eq!(
+        before.html().unwrap().document().text(),
+        after.html().unwrap().document().text(),
+    );
+    assert_eq!(snapshot(&after), fixture["after"]);
+    assert_eq!(
+        snapshot(&PhpDocument::parse(after.text().clone())),
+        fixture["after"]
+    );
+    assert!(after.reuse_stats().nodes_reused > 0);
+}
+
+#[test]
+fn configured_html_routes_match_upstream_after_original_source_edits() {
+    let json = HtmlNestedParser {
+        name: "json",
+        parse: &|text| Box::new(JsonDocument::parse(text)) as Box<dyn HtmlCustomDocument>,
+    };
+    let later = HtmlNestedParser {
+        name: "css",
+        parse: &|_| panic!("the first matching route must win"),
+    };
+    let when_data = |attrs: &HtmlAttributes<'_>| attrs.get("mode") == Some(&"data");
+    let language = |tag, parser| HtmlNestedLanguage {
+        tag,
+        attrs: Some(&when_data),
+        parser,
+    };
+    let onclick = |parser| HtmlNestedAttribute {
+        name: "onclick",
+        tag_name: Some("x-data"),
+        parser,
+    };
+    let nesting = HtmlNesting {
+        nested_languages: &[
+            language("x-data", json),
+            language("script", json),
+            language("script", later),
+        ],
+        nested_attributes: &[
+            onclick(json),
+            onclick(later),
+            HtmlNestedAttribute {
+                name: "data-json",
+                tag_name: None,
+                parser: json,
+            },
+        ],
+    };
+    let dialect = HtmlOptions {
+        match_closing_tags: true,
+        self_closing_tags: true,
+    };
+    let parse = |text, nesting| {
+        PhpDocument::parse_with_html_nesting(text, PhpOptions::default(), dialect, nesting)
+    };
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/php_custom_html.jsonl")).unwrap();
+    let source = fixture["source"].as_str().unwrap();
+    let stock = PhpDocument::parse(Text::new(source));
+    assert_eq!(
+        json!(html_dialect_nodes(stock.html().unwrap().document())),
+        fixture["defaultDialect"],
+    );
+    let mut doc = parse(Text::new(source), nesting);
+    assert_eq!(custom_html_snapshot(&doc), fixture["before"]);
+
+    let inside_emoji = source.find('🦀').unwrap() + 1;
+    let invalid = ChangeSet::single(Change::new(inside_emoji..inside_emoji + 1, "")).unwrap();
+    assert!(doc.reparse_with_html_nesting(&invalid, nesting).is_err());
+    assert_eq!(doc.text().as_str(), source);
+
+    for (index, step) in fixture["steps"].as_array().unwrap().iter().enumerate() {
+        let (start, end, insert): (usize, usize, String) =
+            serde_json::from_value(step["edit"].clone()).unwrap();
+        let edit = ChangeSet::single(Change::new(start..end, insert)).unwrap();
+        let after = doc.reparse_with_html_nesting(&edit, nesting).unwrap();
+        if index == 0 {
+            // The PHP-only edit changes which route wins without changing the projection.
+            assert_eq!(
+                after.html().unwrap().document().text(),
+                doc.html().unwrap().document().text(),
+            );
+            let stock_routes = doc.reparse(&edit).unwrap();
+            assert_eq!(
+                custom_html_snapshot(&stock_routes),
+                custom_html_snapshot(&parse(after.text().clone(), HtmlNesting::default())),
+            );
+        }
+        assert!(after.reuse_stats().resumed_at > 0);
+        assert!(after.reuse_stats().nodes_reused > 0);
+        assert_eq!(custom_html_snapshot(&after), step["after"]);
+        let fresh = parse(after.text().clone(), nesting);
+        assert_eq!(custom_html_snapshot(&fresh), step["after"]);
+        assert!(
+            after
+                .nodes()
+                .map(|node| (node.name(), node.range()))
+                .eq(fresh.nodes().map(|node| (node.name(), node.range())))
+        );
+        doc = after;
+    }
+
+    for options in [
+        PhpOptions {
+            plain: true,
+            html: true,
+        },
+        PhpOptions {
+            plain: false,
+            html: false,
+        },
+    ] {
+        let doc =
+            PhpDocument::parse_with_html_nesting(Text::new(source), options, dialect, nesting);
+        assert!(doc.html().is_none());
+    }
+}
+
+fn html_dialect_nodes(html: &HtmlDocument) -> Vec<&'static str> {
+    html.nodes()
+        .map(|node| node.kind())
+        .filter(|kind| {
+            matches!(
+                kind,
+                HtmlNodeKind::SelfClosingTag | HtmlNodeKind::MismatchedCloseTag
+            )
+        })
+        .map(HtmlNodeKind::name)
+        .collect()
+}
+
+fn custom_html_snapshot(doc: &PhpDocument) -> Value {
+    assert!(!doc.is_recovered());
+    let outer = doc.html().unwrap();
+    let html = outer.document();
+    let bounds = |range: Range<usize>| [range.start, range.end];
+    let pieces = |range| outer.source_ranges(range).unwrap();
+    let mounts: Vec<_> = html
+        .mounts()
+        .iter()
+        .map(|mount| {
+            let (name, text, top) = match (mount.language(), mount.document()) {
+                (HtmlEmbeddedLanguage::Custom("json"), HtmlEmbeddedDocument::Custom(child)) => {
+                    let child = child.downcast_ref::<JsonDocument>().unwrap();
+                    ("json", child.text(), child.root().kind().name())
+                }
+                (HtmlEmbeddedLanguage::JavaScript, HtmlEmbeddedDocument::Javascript(child)) => {
+                    ("JavaScript", child.text(), child.root().kind().name())
+                }
+                _ => panic!("unexpected mount: {:?}", mount.language()),
+            };
+            let ranges = pieces(mount.range());
+            let projected: String = ranges
+                .iter()
+                .map(|range| doc.text().slice(range.clone()).unwrap())
+                .collect();
+            assert_eq!(text.as_str(), projected);
+            json!([
+                name,
+                ranges.into_iter().map(bounds).collect::<Vec<_>>(),
+                top
+            ])
+        })
+        .collect();
+    let strings: Vec<_> = doc
+        .highlights(0..doc.text().len())
+        .unwrap()
+        .filter(|span| span.tags.iter().any(|tag| tag.name() == "string"))
+        .map(|span| bounds(span.range))
+        .collect();
+    json!({
+        "dialect": html_dialect_nodes(html),
+        "ranges": pieces(0..html.text().len()).into_iter().map(bounds).collect::<Vec<_>>(),
+        "mounts": mounts,
+        "strings": strings,
+    })
 }
 
 #[test]

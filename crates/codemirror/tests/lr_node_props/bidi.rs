@@ -1,6 +1,7 @@
 use gpui_editor_codemirror::{
     EditError, Text,
     language::{BidiIsolateOptions, bidi_isolates},
+    language_data::{cpp_language, rust_language},
     view::{Viewport, bidi::Direction},
 };
 
@@ -12,24 +13,38 @@ fn configured_lr_isolation_keeps_nested_ranges_directions_and_retained_snapshots
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert_eq!(profiles.len(), 2);
+    assert_eq!(profiles.len(), 4);
     for row in profiles {
-        let [stock, _] = handles(&row);
         let props = row["props"].as_object().unwrap().clone();
-        let configured = with_props(
-            &stock,
-            &[ISOLATE.add(move |ty| {
-                Some(match props.get(ty.name())? {
-                    Value::Null => None,
-                    value => Some(match value.as_str().unwrap() {
-                        "auto" => Isolation::Auto,
-                        "rtl" => Isolation::Rtl,
-                        "ltr" => Isolation::Ltr,
-                        _ => unreachable!(),
-                    }),
-                })
-            })],
-        );
+        let sources = [ISOLATE.add(move |ty| {
+            Some(match props.get(ty.name())? {
+                Value::Null => None,
+                value => Some(match value.as_str().unwrap() {
+                    "auto" => Isolation::Auto,
+                    "rtl" => Isolation::Rtl,
+                    "ltr" => Isolation::Ltr,
+                    _ => unreachable!(),
+                }),
+            })
+        })];
+        let (stock, configured) = match row["name"].as_str().unwrap() {
+            "rust" => (
+                rust_language().extension(),
+                rust_language().with_node_props(&sources).extension(),
+            ),
+            "cpp" => (
+                cpp_language().extension(),
+                cpp_language().with_node_props(&sources).extension(),
+            ),
+            _ => {
+                let [stock, _] = handles(&row);
+                let configured = with_props(&stock, &sources);
+                (
+                    with_lr!(&stock, handle => handle.extension()),
+                    with_lr!(&configured, handle => handle.extension()),
+                )
+            }
+        };
         let cases = row["cases"].as_array().unwrap();
         assert_eq!(cases.len(), 7);
         for case in cases {
@@ -41,6 +56,8 @@ fn configured_lr_isolation_keeps_nested_ranges_directions_and_retained_snapshots
             };
             let to_marks =
                 |snapshot: &SupportedDocument, viewport: &Viewport| match snapshot.syntax() {
+                    NativeSyntax::Cpp(doc) => doc.bidi_isolate_marks(viewport, options),
+                    NativeSyntax::Rust(doc) => doc.bidi_isolate_marks(viewport, options),
                     NativeSyntax::Json(doc) => doc.bidi_isolate_marks(viewport, options),
                     NativeSyntax::LezerGrammar(doc) => doc.bidi_isolate_marks(viewport, options),
                     _ => unreachable!(),
@@ -63,10 +80,7 @@ fn configured_lr_isolation_keeps_nested_ranges_directions_and_retained_snapshots
             let slot = Compartment::new();
             let mut state = EditorState::with_extensions(
                 input,
-                Extension::group([
-                    slot.of(with_lr!(&stock, handle => handle.extension())),
-                    bidi_isolates(always_isolate),
-                ]),
+                Extension::group([slot.of(stock.clone()), bidi_isolates(always_isolate)]),
             )
             .unwrap();
             let before = attached_language_snapshot(&state).unwrap();
@@ -74,9 +88,9 @@ fn configured_lr_isolation_keeps_nested_ranges_directions_and_retained_snapshots
             let before_marks = records(&before, &whole);
             if case["switched"].as_bool().unwrap() {
                 state
-                    .update(Transaction::default().with_effects([
-                        slot.reconfigure(with_lr!(&configured, handle => handle.extension())),
-                    ]))
+                    .update(
+                        Transaction::default().with_effects([slot.reconfigure(configured.clone())]),
+                    )
                     .unwrap();
             }
             if let Some(edit) = case["edit"].as_array() {

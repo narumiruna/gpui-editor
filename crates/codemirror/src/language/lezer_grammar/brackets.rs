@@ -5,11 +5,13 @@ use crate::{
 };
 
 use super::{
-    super::brackets::{
-        BracketConfig, BracketDirection, BracketDirection::Forward, BracketMatch, BracketMates,
-        bracket_pairs, directional_bracket_near, editor_bracket_index,
-        match_configured_editor_text, match_editor_siblings, match_editor_text,
-        match_named_siblings, named_delimiter, node_delimiter,
+    super::{
+        brackets::{
+            BracketConfig, BracketDirection, BracketDirection::Forward, BracketMatch,
+            bracket_pairs, directional_bracket_near, editor_bracket_index,
+            match_configured_editor_text, match_editor_siblings, match_editor_text,
+        },
+        lezer::{LrSyntaxNode, match_lr_marked},
     },
     LezerDocument, LezerNode, LezerNodeKind,
 };
@@ -97,24 +99,14 @@ impl LezerDocument {
             Assoc::Before
         };
         let node = self.resolve_at(pos, Some(side));
-        let pairs = bracket_pairs(config);
-        for token in std::iter::successors(Some(node), |node| node.parent()) {
-            let range = token.range();
-            let touches = if direction == Forward {
-                range.start <= pos && pos < range.end
-            } else {
-                range.start < pos && pos <= range.end
-            };
-            if touches && let Some(expected) = matching_names(token, direction, pairs) {
-                return Some(match_named_siblings(
-                    range,
-                    direction,
-                    expected,
-                    token.parent().into_iter().flat_map(LezerNode::children),
-                    |sibling| (sibling.range(), sibling.kind().name()),
-                    |sibling, dir| matching_names(sibling, dir, pairs).is_some(),
-                ));
-            }
+        if let Some(hit) = match_lr_marked(
+            &self.text,
+            LrSyntaxNode::lezer(node),
+            pos,
+            direction,
+            bracket_pairs(config),
+        ) {
+            return Some(hit);
         }
         let token = node.data();
         match_configured_editor_text(self.syntax_lines(), pos, direction, config, |at| {
@@ -152,7 +144,7 @@ impl LezerDocument {
         QuoteSyntax { doc: self, origin }
     }
 
-    fn resolve_at(&self, at: usize, side: Option<Assoc>) -> LezerNode<'_> {
+    pub(in crate::language) fn resolve_at(&self, at: usize, side: Option<Assoc>) -> LezerNode<'_> {
         let mut node = self.root();
         loop {
             let children = &node.data().children;
@@ -197,22 +189,6 @@ impl LezerDocument {
             candidate.term == token.term && candidate.kind == token.kind
         })
     }
-}
-
-fn matching_names<'a>(
-    node: LezerNode<'a>,
-    direction: BracketDirection,
-    pairs: &'a str,
-) -> Option<BracketMates<'a>> {
-    if let Some(row) = node.node_type() {
-        return node_delimiter(row, direction, pairs);
-    }
-    // Local fallback nodes have no verified LR terms.
-    let kind = node.kind();
-    if let Some(mate) = kind.matching(direction == Forward) {
-        return Some(BracketMates::Text(Some(mate.name())));
-    }
-    named_delimiter(kind.name(), direction, pairs).map(Into::into)
 }
 
 struct QuoteSyntax<'a> {

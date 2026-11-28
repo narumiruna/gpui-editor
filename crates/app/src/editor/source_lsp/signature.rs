@@ -1,9 +1,18 @@
 //! Read-only signature help for the attached draft.
 
-use std::{cell::Cell, io, rc::Rc};
+use std::{
+    cell::{Cell, Ref, RefCell},
+    io,
+    ops::Range,
+    rc::Rc,
+    time::Duration,
+};
 
-use gpui::{App, Bounds, Context, KeyBinding, Pixels, Window, actions};
+use gpui::{
+    App, AsyncWindowContext, Bounds, Context, KeyBinding, Pixels, Task, WeakEntity, Window, actions,
+};
 use gpui_editor_codemirror::{
+    Assoc, ChangeDesc, MapMode,
     lsp::signature::{
         SignatureEffect, SignaturePlan, SignatureRequest, SignatureTrigger, signature_request,
     },
@@ -29,6 +38,7 @@ pub(in crate::editor) fn bind_keys(cx: &mut App) {
     ]);
 }
 
+const CONTENT_CHANGE_DELAY: Duration = Duration::from_millis(250);
 const MAX_RESPONSE_BYTES: usize = 16 * 1024;
 const MAX_SIGNATURES: usize = 16;
 const MAX_PARAMETERS: usize = 32;
@@ -38,14 +48,58 @@ struct Events {
     selection_epoch: Cell<u64>,
     typed: Cell<Option<char>>,
     inserted: Cell<bool>,
+    shown: RefCell<Option<Shown>>,
+    delayed: Cell<Option<Task<()>>>,
 }
 
-struct EventTracker(Rc<Events>);
+impl Events {
+    fn close(&self) -> bool {
+        self.delayed.take();
+        self.shown.take().is_some()
+    }
+}
+
+#[derive(Clone)]
+pub(in crate::editor) struct SignatureTimer {
+    window: AsyncWindowContext,
+    editor: WeakEntity<Editor>,
+}
+
+impl SignatureTimer {
+    pub(in crate::editor) fn new(window: &Window, cx: &Context<Editor>) -> Self {
+        Self {
+            window: window.to_async(cx),
+            editor: cx.weak_entity(),
+        }
+    }
+
+    fn start(&self) -> Task<()> {
+        let timer = self
+            .window
+            .background_executor()
+            .timer(CONTENT_CHANGE_DELAY);
+        let editor = self.editor.clone();
+        self.window.spawn(async move |cx| {
+            timer.await;
+            let _ = editor.update_in(cx, |editor, window, cx| {
+                editor.retrigger_source_lsp_signature(window);
+                cx.notify();
+            });
+        })
+    }
+}
+
+struct EventTracker {
+    events: Rc<Events>,
+    timer: SignatureTimer,
+}
 
 impl ViewPlugin for EventTracker {
     fn update(&mut self, update: &ViewUpdate<'_>) {
-        let events = &self.0;
-        if update.selection_set || update.focus_changed {
+        let events = &self.events;
+        let invalidated =
+            update.focus_changed || update.start_state.read_only() != update.state.read_only();
+        if update.selection_set || invalidated {
             events
                 .selection_epoch
                 .set(events.selection_epoch.get().wrapping_add(1));
@@ -53,7 +107,7 @@ impl ViewPlugin for EventTracker {
         // Use the accepted changes, not only the text the input handler saw.
         // The caret can be inside a paired insertion such as `()`.
         let head = update.state.selection().main().head();
-        if let Some(typed) = events.typed.get()
+        let trigger_inserted = if let Some(typed) = events.typed.get()
             && update.changes.changed_ranges().any(|(_, inserted)| {
                 inserted.start < head
                     && head <= inserted.end
@@ -63,18 +117,101 @@ impl ViewPlugin for EventTracker {
                         .text()
                         .slice(head - typed.len_utf8()..head)
                         .is_some_and(|text| text.ends_with(typed))
-            })
-        {
+            }) {
             events.inserted.set(true);
+            true
+        } else {
+            false
+        };
+        if invalidated {
+            events.close();
+            return;
         }
+        if !update.doc_changed() && !update.selection_set {
+            return;
+        }
+        let mut shown = events.shown.borrow_mut();
+        let Some(open) = shown.as_mut() else {
+            return;
+        };
+        let same_fence = open.fence.as_mut().is_some_and(|fence| {
+            fence.map(update.changes, &mut open.anchor)
+                && fence.contains(head)
+                && fence.contains(open.anchor)
+        });
+        if !same_fence || !matches!(update.state.selection().ranges(), [range] if range.is_empty())
+        {
+            *shown = None;
+            events.delayed.take();
+        } else if trigger_inserted {
+            events.delayed.take();
+        } else if update.selection_set {
+            // A document change alone maps the tooltip without starting or
+            // resetting the timer. Typing can also set the selection.
+            events.delayed.set(Some(self.timer.start()));
+        }
+    }
+
+    fn destroy(&mut self) {
+        self.events.close();
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
+struct Fence {
+    source: Range<usize>,
+    body: Range<usize>,
+}
+
+impl Fence {
+    fn at(editor: &Editor, offset: usize) -> Option<Self> {
+        let fence = Self {
+            source: editor.active.as_ref()?.source.clone(),
+            body: editor.source_fence()?.body,
+        };
+        fence.contains(offset).then_some(fence)
+    }
+
+    fn contains(&self, offset: usize) -> bool {
+        (self.body.start..=self.body.end).contains(&offset)
+    }
+
+    fn map(&mut self, changes: &ChangeDesc, anchor: &mut usize) -> bool {
+        if !changes
+            .changed_ranges()
+            .all(|(old, _)| self.body.start <= old.start && old.end <= self.body.end)
+        {
+            return false;
+        }
+        let end = |pos| changes.map_pos(pos, Assoc::After, MapMode::Simple);
+        let (Some(mapped), Some(body_end), Some(source_end)) = (
+            changes.map_pos(*anchor, Assoc::Before, MapMode::TrackDel),
+            end(self.body.end),
+            end(self.source.end),
+        ) else {
+            return false;
+        };
+        self.body.end = body_end;
+        self.source.end = source_end;
+        *anchor = mapped;
+        true
+    }
+}
+
+// Requests require an exact revision and selection. Only the open tooltip maps.
+#[derive(Eq, PartialEq)]
 struct Stamp {
     revision: u64,
     selection_epoch: u64,
     offset: usize,
+    fence: Option<Fence>,
+}
+
+struct Shown {
+    // Equal signature labels can keep this anchor while the caret moves.
+    anchor: usize,
+    fence: Option<Fence>,
+    plan: SignaturePlan,
 }
 
 struct Target {
@@ -88,7 +225,6 @@ pub(super) struct SignatureHelp {
     plugin: PluginId,
     wanted: Option<Target>,
     pending: Option<Pending<Target, SignatureRequest>>,
-    shown: Option<(Stamp, SignaturePlan)>,
 }
 
 impl Editor {
@@ -114,14 +250,18 @@ impl Editor {
         }) {
             return false;
         }
-        let Some(stamp) = lsp
-            .signature
-            .stamp(self)
-            .filter(|stamp| self.signature_scope(stamp.offset))
-        else {
+        let Some(stamp) = lsp.signature.stamp(self) else {
             return false;
         };
-        let active = prior.or_else(|| lsp.signature.current(stamp).cloned());
+        let active = prior.or_else(|| {
+            lsp.signature
+                .current(self, &stamp)
+                .map(|open| open.plan.clone())
+        });
+        if trigger == SignatureTrigger::ContentChange && (active.is_none() || stamp.fence.is_none())
+        {
+            return false;
+        }
         let signature = &mut self.source_lsp.as_mut().expect("attached").signature;
         signature.queue(Target {
             stamp,
@@ -131,8 +271,21 @@ impl Editor {
         true
     }
 
+    fn retrigger_source_lsp_signature(&mut self, window: &Window) {
+        if !window.is_window_active()
+            || !self.focus.is_focused(window)
+            || !self.queue_signature_help(SignatureTrigger::ContentChange, None)
+        {
+            self.dismiss_source_lsp_signature();
+        }
+    }
+
     fn signature_scope(&self, offset: usize) -> bool {
         ReferenceScope::new(self).allows(&(offset..offset))
+            && !self
+                .source_fold_ranges()
+                .iter()
+                .any(|fold| fold.start < offset && offset < fold.end)
             && self
                 .layout
                 .as_ref()
@@ -157,8 +310,9 @@ impl Editor {
             }
             let stamp = lsp.signature.stamp(self)?;
             let active = self.layout.as_ref().and_then(|layout| {
-                signature_anchor(layout, self.source(), stamp.offset, self.scroll.bounds())?;
-                lsp.signature.current(stamp).cloned()
+                let open = lsp.signature.current(self, &stamp)?;
+                signature_anchor(layout, self.source(), open.anchor, self.scroll.bounds())?;
+                Some(open.plan.clone())
             });
             let trigger = SignatureTrigger::automatic(
                 [text],
@@ -179,11 +333,13 @@ impl Editor {
     }
 
     pub(in crate::editor) fn dismiss_source_lsp_tooltips(&mut self) -> bool {
-        self.dismiss_source_lsp_hover()
-            | self
-                .source_lsp
-                .as_mut()
-                .is_some_and(|lsp| lsp.signature.dismiss())
+        self.dismiss_source_lsp_hover() | self.dismiss_source_lsp_signature()
+    }
+
+    pub(in crate::editor) fn dismiss_source_lsp_signature(&mut self) -> bool {
+        self.source_lsp
+            .as_mut()
+            .is_some_and(|lsp| lsp.signature.dismiss())
     }
 
     pub(in crate::editor) fn cycle_source_lsp_signature(
@@ -202,14 +358,15 @@ impl Editor {
         {
             return false;
         }
-        let (_, plan) = self
+        let mut shown = self
             .source_lsp
-            .as_mut()
+            .as_ref()
             .unwrap()
             .signature
+            .events
             .shown
-            .as_mut()
-            .unwrap();
+            .borrow_mut();
+        let plan = &mut shown.as_mut().unwrap().plan;
         *plan = if forward {
             plan.next_signature()
         } else {
@@ -225,14 +382,12 @@ impl Editor {
         caret: Option<Bounds<Pixels>>,
     ) -> Option<Overlay> {
         let signature = &self.source_lsp.as_ref()?.signature;
+        signature.events.shown.borrow().as_ref()?;
         let stamp = signature.stamp(self)?;
-        let plan = signature.current(stamp)?;
-        let anchor = signature_anchor(layout, self.source(), stamp.offset, viewport)?;
-        if !self.signature_scope(stamp.offset) {
-            return None;
-        }
+        let shown = signature.current(self, &stamp)?;
+        let anchor = signature_anchor(layout, self.source(), shown.anchor, viewport)?;
         Some(Overlay {
-            text: signature_text(plan)?,
+            text: signature_text(&shown.plan)?,
             anchor: Some(anchor),
             viewport,
             caret,
@@ -242,15 +397,17 @@ impl Editor {
 }
 
 impl SignatureHelp {
-    pub(super) fn attach(view: &mut EditorView<Option<Section>>) -> Self {
+    pub(super) fn attach(view: &mut EditorView<Option<Section>>, timer: SignatureTimer) -> Self {
         let events = Rc::new(Events::default());
-        let plugin = view.add_plugin(EventTracker(events.clone()));
+        let plugin = view.add_plugin(EventTracker {
+            events: events.clone(),
+            timer,
+        });
         Self {
             events,
             plugin,
             wanted: None,
             pending: None,
-            shown: None,
         }
     }
 
@@ -263,23 +420,34 @@ impl SignatureHelp {
         let [range] = selection.ranges() else {
             return None;
         };
+        let offset = range.head();
         (range.is_empty()
             && editor.reference_input_allowed()
             && editor.view.focused()
-            && !editor.selecting)
-            .then(|| Stamp {
-                revision: editor.view.revision(),
-                selection_epoch: self.events.selection_epoch.get(),
-                offset: range.head(),
-            })
+            && !editor.selecting
+            && !editor.is_reviewing_changes()
+            && editor.signature_scope(offset))
+        .then(|| Stamp {
+            revision: editor.view.revision(),
+            selection_epoch: self.events.selection_epoch.get(),
+            offset,
+            fence: Fence::at(editor, offset),
+        })
     }
 
-    fn current(&self, stamp: Stamp) -> Option<&SignaturePlan> {
-        let (at, plan) = self.shown.as_ref()?;
-        (*at == stamp).then_some(plan)
+    fn current(&self, editor: &Editor, stamp: &Stamp) -> Option<Ref<'_, Shown>> {
+        Ref::filter_map(self.events.shown.borrow(), |shown| {
+            shown.as_ref().filter(|open| {
+                open.fence == stamp.fence
+                    && (open.anchor == stamp.offset
+                        || open.fence.is_some() && editor.signature_scope(open.anchor))
+            })
+        })
+        .ok()
     }
 
     fn queue(&mut self, target: Target) {
+        self.events.delayed.take();
         if let Some(pending) = &mut self.pending {
             pending.target = None;
         }
@@ -288,7 +456,7 @@ impl SignatureHelp {
 
     pub(super) fn dismiss(&mut self) -> bool {
         self.wanted.take().is_some()
-            | self.shown.take().is_some()
+            | self.events.close()
             | self
                 .pending
                 .as_mut()
@@ -297,14 +465,25 @@ impl SignatureHelp {
     }
 
     pub(super) fn retain_current(&mut self, editor: &Editor) {
-        let current = self.stamp(editor);
-        self.wanted.take_if(|target| Some(target.stamp) != current);
-        if let Some(pending) = &mut self.pending {
-            pending
-                .target
-                .take_if(|target| Some(target.stamp) != current);
+        if self.wanted.is_none() && self.pending.is_none() && self.events.shown.borrow().is_none() {
+            return;
         }
-        self.shown.take_if(|(stamp, _)| Some(*stamp) != current);
+        let current = self.stamp(editor);
+        let open = current
+            .as_ref()
+            .and_then(|stamp| self.current(editor, stamp))
+            .is_some();
+        if !open {
+            self.events.close();
+        }
+        let stale = |target: &mut Target| {
+            Some(&target.stamp) != current.as_ref()
+                || target.trigger == SignatureTrigger::ContentChange && !open
+        };
+        self.wanted.take_if(stale);
+        if let Some(pending) = &mut self.pending {
+            pending.target.take_if(stale);
+        }
     }
 
     #[cfg(test)]
@@ -343,7 +522,13 @@ impl SignatureHelp {
         self.pending.take_if(|pending| pending.id == id);
     }
 
-    pub(super) fn resolve(&mut self, client: &StdioClient, uri: &str, reply: RpcResolution) {
+    pub(super) fn resolve(
+        &mut self,
+        client: &StdioClient,
+        uri: &str,
+        editor: &Editor,
+        reply: RpcResolution,
+    ) {
         let Some(pending) = self.pending.take() else {
             return;
         };
@@ -356,28 +541,38 @@ impl SignatureHelp {
         if !response_fits(&result) {
             return;
         }
-        let effect = client.with_workspace(|workspace| {
+        let update = client.with_workspace(|workspace| {
             let file = workspace.file(uri)?;
             if file.version() != pending.request.version() || file.has_pending_changes() {
                 return None;
             }
+            let current = self.current(editor, &target.stamp);
             match pending
                 .request
-                .resolve(workspace, &result, self.current(target.stamp))
+                .resolve(workspace, &result, current.as_ref().map(|open| &open.plan))
                 .ok()?
             {
-                SignatureEffect::Show(plan)
-                    if plan.uri() != uri || plan.anchor(workspace).ok()? != target.stamp.offset =>
-                {
-                    None
+                SignatureEffect::Show(plan) => {
+                    let anchor = plan.anchor(workspace).ok()?;
+                    (plan.uri() == uri
+                        && (anchor == target.stamp.offset
+                            || current.as_ref().is_some_and(|open| anchor == open.anchor)))
+                    .then_some(Some(Shown {
+                        anchor,
+                        fence: target.stamp.fence,
+                        plan,
+                    }))
                 }
-                effect => Some(effect),
+                SignatureEffect::Clear => Some(None),
+                SignatureEffect::Keep => None,
             }
         });
-        match effect {
-            Some(SignatureEffect::Show(plan)) => self.shown = Some((target.stamp, plan)),
-            Some(SignatureEffect::Clear) => self.shown = None,
-            Some(SignatureEffect::Keep) | None => {}
+        match update {
+            Some(Some(shown)) => *self.events.shown.borrow_mut() = Some(shown),
+            Some(None) => {
+                self.events.close();
+            }
+            None => {}
         }
     }
 }

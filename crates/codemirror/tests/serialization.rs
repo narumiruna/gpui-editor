@@ -1,9 +1,262 @@
 use gpui_editor_codemirror::{
-    Assoc, Change, ChangeDesc, ChangeSet, ChangeSpec, ConfigurationError, EditError,
-    EditorSelection, EditorState, Extension, MapMode, SelectionRange, SerializationError,
-    StateField, Text, Transaction,
+    ALLOW_MULTIPLE_SELECTIONS, Assoc, Change, ChangeDesc, ChangeSet, ChangeSpec,
+    ConfigurationError, EditError, EditorSelection, EditorState, Extension, History,
+    LINE_SEPARATOR, MapMode, RangeTouch, SelectionRange, SerializationError, StateField, Text,
+    Transaction,
 };
-use serde_json::json;
+use serde_json::{Value, json};
+
+#[test]
+fn utf16_wire_matches_pinned_changes_and_selections_at_scalar_boundaries() {
+    for line in include_str!("fixtures/change_utf16_wire.jsonl").lines() {
+        let row: Value = serde_json::from_str(line).unwrap();
+        let name = &row["name"];
+        let source = Text::new(row["source"].as_str().unwrap());
+        let selection = EditorSelection::from_utf16_json(&row["selected"], &source).unwrap();
+        assert_eq!(selection.to_json(), row["selectionBytes"], "{name}");
+        assert_eq!(
+            selection.to_utf16_json(&source).unwrap(),
+            row["selected"],
+            "{name}"
+        );
+        let input = row.get("input").unwrap_or(&row["wire"]);
+        let set = ChangeSet::from_utf16_json(input, &source).unwrap();
+        assert_eq!(set.to_utf16_json(&source).unwrap(), row["wire"], "{name}");
+        let mut target = source.clone();
+        set.apply_to(&mut target).unwrap();
+        assert_eq!(target.as_str(), row["result"], "{name}");
+        let geometry = set.desc(source.len()).unwrap();
+        assert_eq!(
+            geometry.to_utf16_json(&source, &target).unwrap(),
+            row["desc"],
+            "{name}"
+        );
+        let decoded = ChangeDesc::from_utf16_json(&row["desc"], &source, &target).unwrap();
+        assert_eq!(decoded, geometry, "{name}");
+        let ranges: Vec<_> = decoded
+            .changed_ranges()
+            .map(|(a, b)| [a.start, a.end, b.start, b.end])
+            .collect();
+        assert_eq!(json!(ranges), row["geometry"], "{name}");
+        for probe in row["positions"].as_array().unwrap() {
+            let pos = usize::try_from(probe[0].as_u64().unwrap()).unwrap();
+            let side = if probe[1] == -1 {
+                Assoc::Before
+            } else {
+                Assoc::After
+            };
+            let mode = match probe[2].as_str().unwrap() {
+                "simple" => MapMode::Simple,
+                "delete" => MapMode::TrackDel,
+                "before" => MapMode::TrackBefore,
+                "after" => MapMode::TrackAfter,
+                other => panic!("unknown map mode: {other}"),
+            };
+            assert_eq!(
+                json!(decoded.map_pos(pos, side, mode)),
+                probe[3],
+                "{name}: {probe}"
+            );
+            assert_eq!(
+                json!(set.map_pos_mode(pos, side, mode)),
+                probe[3],
+                "{name}: {probe}"
+            );
+        }
+        if let Some(transforms) = row.get("transforms") {
+            check_marker_transforms(&set, &source, &target, transforms);
+        }
+        let inverse = set.inverted(&source).unwrap();
+        assert_eq!(
+            inverse.to_utf16_json(&target).unwrap(),
+            row["inverse"],
+            "{name}"
+        );
+        inverse.apply_to(&mut target).unwrap();
+        assert_eq!(target, source, "{name}");
+    }
+}
+
+fn check_marker_transforms(set: &ChangeSet, source: &Text, target: &Text, expected: &Value) {
+    let length = source.len();
+    let identity = ChangeSet::default();
+    let over = identity.desc(length).unwrap();
+    let edit = ChangeSet::from_utf16_json(&expected["edit"], target).unwrap();
+    let wrong = identity.desc(length + 1).unwrap();
+    for (name, result) in [
+        ("map", set.map(&over, false)),
+        ("mapDesc", set.map_desc(&over, false)),
+        ("composeBefore", identity.compose(set, length)),
+        ("composeAfter", set.compose(&identity, length)),
+        ("composeEdit", set.compose(&edit, length)),
+    ] {
+        let result = result.unwrap();
+        assert_eq!(result.to_utf16_json(source).unwrap(), expected[name]);
+        assert_eq!(result.desc(length + 1), Err(EditError::MismatchedLength));
+    }
+    assert_eq!(set.map(&wrong, false), Err(EditError::MismatchedLength));
+    assert_eq!(
+        set.map_desc(&wrong, false),
+        Err(EditError::MismatchedLength)
+    );
+    assert_eq!(
+        set.compose(&identity, length + 1),
+        Err(EditError::MismatchedLength)
+    );
+    assert_eq!(set.compose(set, length), Err(EditError::MismatchedLength));
+}
+
+#[test]
+fn utf16_wire_rejects_split_scalars_wrong_lengths_and_unequal_gaps() {
+    let split_scalar = SerializationError::Edit(EditError::InvalidRange);
+    let length = SerializationError::Edit(EditError::MismatchedLength);
+    let invalid = SerializationError::InvalidFormat("change description");
+    let source = Text::new("😀z");
+    let selection = |anchor, head| json!({"ranges":[{"anchor":anchor,"head":head}], "main":0});
+    assert_eq!(
+        EditorSelection::from_utf16_json(&selection(0, 1), &source),
+        Err(split_scalar)
+    );
+    assert_eq!(
+        EditorSelection::from_utf16_json(&selection(4, 0), &source),
+        Err(length)
+    );
+    assert_eq!(
+        EditorSelection::single(0, 1).to_utf16_json(&source),
+        Err(split_scalar)
+    );
+    assert_eq!(
+        ChangeSet::from_utf16_json(&json!([1, [1, "x"], 1]), &source),
+        Err(split_scalar)
+    );
+    assert_eq!(
+        ChangeSet::from_utf16_json(&json!([1, [0], 2]), &source),
+        Err(split_scalar)
+    );
+    assert_eq!(
+        ChangeSet::from_utf16_json(&json!([3, 0]), &source),
+        Err(SerializationError::InvalidFormat("change set"))
+    );
+    assert_eq!(
+        ChangeSet::from_utf16_json(&json!([4]), &source),
+        Err(length)
+    );
+    assert_eq!(
+        ChangeSet::from_utf16_json(&json!([2]), &source),
+        Err(length)
+    );
+    assert!(ChangeSet::from_json(&json!([3]), &source).is_err());
+    assert_eq!(
+        ChangeDesc::from_utf16_json(&json!([1, -1, 2, -1]), &source, &source),
+        Err(split_scalar)
+    );
+    assert_eq!(
+        ChangeDesc::from_utf16_json(&json!([3, -1, 0, -1]), &source, &source),
+        Err(invalid)
+    );
+    let unchanged = json!([3, -1]);
+    let altered = Text::new("🦀z");
+    assert_eq!(
+        ChangeDesc::from_utf16_json(&unchanged, &source, &altered),
+        Err(invalid)
+    );
+    let geometry = ChangeDesc::from_utf16_json(&unchanged, &source, &source).unwrap();
+    assert_eq!(geometry.to_utf16_json(&source, &altered), Err(invalid));
+    assert_eq!(
+        geometry.to_utf16_json(&source, &Text::new("z")),
+        Err(length)
+    );
+    let altered = Text::new("¨z   ");
+    assert_eq!(geometry.to_utf16_json(&source, &altered), Err(length));
+    let partial = ChangeDesc::from_json(&json!([1, -1, 4, -1])).unwrap();
+    assert_eq!(partial.to_utf16_json(&source, &source), Err(split_scalar));
+}
+
+#[test]
+fn utf16_state_json_matches_pinned_separator_selection_and_field_restore() {
+    for line in include_str!("fixtures/state_utf16_wire.jsonl").lines() {
+        let row: Value = serde_json::from_str(line).unwrap();
+        let name = row["name"].as_str().unwrap();
+        let field = StateField::new(
+            |_| Err(ConfigurationError::InvalidFieldData),
+            |value: &Value, _| Ok(value.clone()),
+        );
+        let selection = row["nativeSelection"].clone();
+        let text = row["nativeText"].as_str().unwrap().to_owned();
+        let codec = field.json(
+            "seen",
+            |value, _| Ok(value.clone()),
+            move |value, state| {
+                assert_eq!(state.selection().to_json(), selection);
+                assert_eq!(state.text().as_str(), text);
+                Ok(value.clone())
+            },
+        );
+        let mut extensions = Vec::new();
+        if let Some(separator) = row["separator"].as_str() {
+            extensions.push(LINE_SEPARATOR.of(separator.to_owned()));
+        }
+        if row["multiple"] == true {
+            extensions.push(ALLOW_MULTIPLE_SELECTIONS.of(true));
+        }
+        let codecs = [codec];
+        let state = EditorState::from_utf16_json_with_fields(
+            &row["value"],
+            Extension::group(extensions),
+            &codecs,
+        )
+        .unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert_eq!(state.text().as_str(), row["nativeText"], "{name}");
+        assert_eq!(
+            state.selection().to_json(),
+            row["nativeSelection"],
+            "{name}"
+        );
+        assert_eq!(
+            state.to_utf16_json_with_fields(&codecs).unwrap(),
+            row["output"],
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn utf16_state_json_projects_raw_line_breaks_but_rejects_interior_endpoints() {
+    let mut state = EditorState::new("a\r\n😀z");
+    let select =
+        |anchor, head| Transaction::default().with_selection(EditorSelection::single(anchor, head));
+    state.update(select(7, 3)).unwrap();
+    let encoded = json!({"doc":"a\n😀z","selection":{"ranges":[{"anchor":4,"head":2}],"main":0}});
+    assert_eq!(state.to_utf16_json().unwrap(), encoded);
+    let restored = EditorState::from_utf16_json(&encoded).unwrap();
+    assert_eq!(restored.text().as_str(), "a\n😀z");
+    assert_eq!(restored.selection().main(), SelectionRange::new(6, 2));
+    assert_eq!(restored.to_utf16_json().unwrap(), encoded);
+    state.update(select(2, 2)).unwrap();
+    let split = SerializationError::Edit(EditError::InvalidRange);
+    assert_eq!(state.to_utf16_json(), Err(split));
+    let mut invalid = encoded.clone();
+    invalid["selection"]["ranges"][0]["head"] = json!(3);
+    assert_eq!(EditorState::from_utf16_json(&invalid).unwrap_err(), split);
+    let unmatched_lf =
+        json!({"doc":"a\nb||c","selection":{"ranges":[{"anchor":2,"head":2}],"main":0}});
+    assert_eq!(
+        EditorState::from_utf16_json_with_fields(
+            &unmatched_lf,
+            LINE_SEPARATOR.of("||".into()),
+            &[]
+        )
+        .unwrap_err(),
+        SerializationError::InvalidFormat("editor state")
+    );
+    let field = StateField::new(|_| Ok(0), |value, _| Ok(*value));
+    let reserved = field.json("doc", |v, _| Ok(json!(v)), |_, _| Ok(0));
+    assert_eq!(
+        EditorState::from_utf16_json_with_fields(&encoded, Extension::default(), &[reserved])
+            .unwrap_err(),
+        SerializationError::InvalidFormat("state field names")
+    );
+}
 
 #[test]
 fn pinned_state_field_json_round_trip_uses_configured_dependencies() {
@@ -245,6 +498,36 @@ fn native_wire_keeps_utf8_offsets_and_original_line_endings() {
 }
 
 #[test]
+fn native_wire_preserves_empty_replacement_markers() {
+    let mut source = Text::new("");
+    let desc = ChangeDesc::from_json(&json!([0, 0])).unwrap();
+    assert!(!desc.is_empty());
+    assert_eq!(desc.touches_range(0..0), RangeTouch::Touch);
+    assert_eq!(desc.touches_range(1..1), RangeTouch::None);
+    assert_eq!(desc.inverted().to_json(), json!([0, 0]));
+    for wire in [json!([[0]]), json!([[0, ""]])] {
+        let set = ChangeSet::from_json(&wire, &source).unwrap();
+        assert!(!set.is_empty());
+        assert_eq!(set.desc(0).unwrap(), desc);
+        assert_eq!(set.to_json(0).unwrap(), json!([[0]]));
+        assert_eq!(set.inverted(&source).unwrap(), set);
+        set.apply_to(&mut source).unwrap();
+        assert_eq!(source.as_str(), "");
+
+        let state = EditorState::new("");
+        let spec = state.changes_from_specs(&[ChangeSpec::Set(&set)]).unwrap();
+        assert_eq!(spec, set);
+        let mut history = History::new(state);
+        history
+            .update(Transaction::new(set), (), |_| (None, ()))
+            .unwrap();
+        assert!(!history.can_undo());
+    }
+    assert!(ChangeSet::single(Change::new(0..0, "")).unwrap().is_empty());
+    assert!(ChangeDesc::new(0, vec![(0..0, 0)]).unwrap().is_empty());
+}
+
+#[test]
 fn rejects_invalid_change_sets_before_application() {
     let text = Text::new("é!");
     for bad in [
@@ -254,8 +537,7 @@ fn rejects_invalid_change_sets_before_application() {
         json!([3.0]),
         json!([[]]),
         json!([0, 3]),
-        json!([[0], 3]),
-        json!([[0, ""], 3]),
+        json!([3, 0]),
         json!([[3, 1]]),
         json!([[3, "X\nY"]]),
     ] {
@@ -274,7 +556,12 @@ fn rejects_invalid_change_sets_before_application() {
             "{bad}"
         );
     }
-    for bad in [json!([1, 2]), json!([[1], 2]), json!([1, [0, "z"], 2])] {
+    for bad in [
+        json!([1, 2]),
+        json!([[1], 2]),
+        json!([1, [0], 2]),
+        json!([1, [0, "z"], 2]),
+    ] {
         assert_eq!(
             ChangeSet::from_json(&bad, &text),
             Err(EditError::InvalidRange.into()),
@@ -378,7 +665,6 @@ fn rejects_invalid_and_overflowing_change_descriptions() {
         json!([1.0, -1]),
         json!([1, "2"]),
         json!([0, -1]),
-        json!([0, 0]),
     ] {
         assert!(
             matches!(

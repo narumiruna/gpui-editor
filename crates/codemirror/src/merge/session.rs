@@ -1,6 +1,7 @@
 use std::{
     ops::Range,
     sync::{Arc, LazyLock},
+    time::Duration,
 };
 
 use crate::{
@@ -9,7 +10,7 @@ use crate::{
 };
 
 use super::{
-    Chunk, CollapseConfig, DiffConfig, Side,
+    Chunk, CollapseConfig, DiffConfig, DiffOverride, SessionDiff, Side,
     projection::{build_collapsed_ranges, update_collapsed_range},
 };
 
@@ -49,6 +50,7 @@ pub struct UnifiedMerge {
     original: Text,
     chunks: Arc<[Chunk]>,
     config: DiffConfig,
+    diff: SessionDiff,
     merge_controls: bool,
     collapsed: Arc<[Range<usize>]>,
 }
@@ -107,30 +109,32 @@ impl UnifiedMerge {
             }
             next.original = edit.after.clone();
             if !edit.changes.is_empty() {
-                next.chunks = Chunk::update(
-                    &next.chunks,
-                    &next.original,
-                    update.start().text(),
-                    Side::A,
-                    &edit.changes,
-                    self.config,
-                )
-                .into();
+                next.update_chunks(update.start().text(), Side::A, &edit.changes)?;
             }
         }
         if !update.changes().is_empty() {
-            next.chunks = Chunk::update(
-                &next.chunks,
-                &next.original,
-                update.state().text(),
-                Side::B,
-                update.changes(),
-                self.config,
-            )
-            .into();
+            next.update_chunks(update.state().text(), Side::B, update.changes())?;
         }
         next.update_collapsed_ranges(self, update);
         Ok(next)
+    }
+
+    fn update_chunks(
+        &mut self,
+        editor: &Text,
+        edited: Side,
+        changes: &ChangeDesc,
+    ) -> Result<(), ConfigurationError> {
+        self.chunks = Chunk::update_for_session(
+            &self.chunks,
+            &self.original,
+            editor,
+            edited,
+            changes,
+            self.config,
+            &self.diff,
+        )?;
+        Ok(())
     }
 
     fn update_collapsed_ranges(&mut self, previous: &Self, update: &StateUpdate<'_>) {
@@ -192,9 +196,41 @@ static UNIFIED_MERGE: LazyLock<StateField<UnifiedMerge>> = LazyLock::new(|| {
 /// Installing a new extension rebuilds the collapsed ranges. Edits can remove
 /// ranges but do not add them back, and keeping the same extension preserves expansions.
 pub fn unified_merge_view(config: UnifiedMergeConfig) -> Extension {
+    unified_merge_extension(config, SessionDiff::default())
+}
+
+/// Install unified merge state with an advisory time limit per diff or rebuilt
+/// window. Zero disables the timeout. The original updates before the editor.
+pub fn unified_merge_view_with_timeout(config: UnifiedMergeConfig, timeout: Duration) -> Extension {
+    unified_merge_extension(
+        config,
+        SessionDiff {
+            timeout,
+            ..SessionDiff::default()
+        },
+    )
+}
+
+/// Install unified merge state with the checked diff override. The original
+/// document (A) updates before the editor document (B). An invalid result
+/// rejects installation or updates with [`ConfigurationError::InvalidFieldData`].
+pub fn unified_merge_view_with_override(
+    config: UnifiedMergeConfig,
+    diff_override: DiffOverride,
+) -> Extension {
+    unified_merge_extension(
+        config,
+        SessionDiff {
+            diff_override: Some(diff_override),
+            ..SessionDiff::default()
+        },
+    )
+}
+
+fn unified_merge_extension(config: UnifiedMergeConfig, diff: SessionDiff) -> Extension {
     UNIFIED_MERGE.init(move |state| {
-        let chunks: Arc<_> =
-            Chunk::build_with_config(&config.original, state.text(), config.diff_config).into();
+        let chunks =
+            Chunk::build_for_session(&config.original, state.text(), config.diff_config, &diff)?;
         let collapsed = config
             .collapse_unchanged
             .map_or_else(Arc::default, |collapse| {
@@ -204,6 +240,7 @@ pub fn unified_merge_view(config: UnifiedMergeConfig) -> Extension {
             original: config.original.clone(),
             chunks,
             config: config.diff_config,
+            diff: diff.clone(),
             merge_controls: config.merge_controls,
             collapsed,
         })

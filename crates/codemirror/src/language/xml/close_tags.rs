@@ -4,8 +4,8 @@
 use std::ops::Range;
 
 use crate::{
-    Assoc, Change, ChangeSet, EditError, EditorState, RangeEdit, SelectionRange, Transaction,
-    TransactionCoordinates,
+    Assoc, Change, ChangeSet, EditError, EditorSelection, EditorState, RangeEdit, SelectionRange,
+    Transaction, TransactionCoordinates, language::html::is_void_tag_name,
 };
 
 use super::{Side, XmlDocument, XmlNode, XmlNodeKind::*};
@@ -59,11 +59,9 @@ pub fn auto_close_tags_in(
             .slice_owned(scope.start..end)
             .expect("mapped XML scope is valid"),
     );
-    let complete =
-        post.change_by_range(|selection| close_tag(&doc, scope.start, typed, selection))?;
-    if complete.changes().is_empty() {
+    let Some(complete) = close_tags_after(&post, &doc, scope.start, typed, None)? else {
         return Ok(None);
-    }
+    };
     Ok(Some(
         base.merge(
             complete
@@ -75,11 +73,24 @@ pub fn auto_close_tags_in(
     ))
 }
 
+pub(crate) fn close_tags_after(
+    state: &EditorState,
+    doc: &XmlDocument,
+    offset: usize,
+    typed: &str,
+    slash_assoc: Option<Assoc>,
+) -> Result<Option<Transaction>, EditError> {
+    let complete =
+        state.change_by_range(|selection| close_tag(doc, offset, typed, selection, slash_assoc))?;
+    Ok((!complete.changes().is_empty()).then_some(complete))
+}
+
 fn close_tag(
     doc: &XmlDocument,
     offset: usize,
     typed: &str,
     selection: SelectionRange,
+    slash_assoc: Option<Assoc>,
 ) -> Result<RangeEdit, EditError> {
     let mut edit = RangeEdit {
         changes: ChangeSet::default(),
@@ -121,13 +132,37 @@ fn close_tag(
     let insert = if typed == "/" {
         let insert = format!("{name}>");
         let end = start + insert.len();
-        edit.selection = SelectionRange::new(end, end);
+        edit.selection = EditorSelection::cursor(end, slash_assoc, None, None);
         insert
     } else {
         format!("</{name}>")
     };
     edit.changes = ChangeSet::single(Change::new(start..end, insert))?;
     Ok(edit)
+}
+
+/// Inspect the XML tree with the HTML handler's void and ancestor checks.
+pub(crate) fn html_policy_end_tag_name(doc: &XmlDocument, head: usize) -> Option<&str> {
+    let node = doc.path(head, Side::Left).last()?;
+    if node.kind() != EndTag {
+        return None;
+    }
+    let source = doc.text().as_str();
+    let mut element = node.parent()?.parent()?;
+    let name = element_name(source, element, head)?;
+    if is_void_tag_name(name) {
+        return None;
+    }
+    while element
+        .children()
+        .next_back()
+        .is_some_and(|node| node.kind() == CloseTag)
+    {
+        element = element
+            .parent()
+            .filter(|&parent| element_name(source, parent, source.len()) == Some(name))?;
+    }
+    Some(name)
 }
 
 fn element_name<'s>(source: &'s str, candidate: XmlNode<'_>, end: usize) -> Option<&'s str> {

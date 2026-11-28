@@ -7,9 +7,9 @@ use std::{
 };
 
 use gpui::{
-    App, Bounds, Context, Edges, FontStyle, FontWeight, Pixels, Point, RenderImage, ShapedLine,
-    SharedString, StrikethroughStyle, TextRun, UnderlineStyle, Window, fill, point, px, quad, rgba,
-    size,
+    App, Bounds, ContentMask, Context, Edges, FontStyle, FontWeight, PaintQuad, Pixels, Point,
+    RenderImage, ShapedLine, SharedString, StrikethroughStyle, TextRun, UnderlineStyle, Window,
+    fill, point, px, quad, rgba, size,
 };
 #[cfg(target_os = "macos")]
 use gpui_editor_codemirror::view::bidi::BidiIsolate;
@@ -46,12 +46,14 @@ mod blocks;
 mod gutter;
 #[cfg(target_os = "macos")]
 mod isolation;
+#[cfg(test)]
+mod source_frame_tests;
 #[cfg(target_os = "macos")]
 mod textkit;
 
 use bidi::BidiRow;
 use blocks::BlockLayout;
-use gutter::SourceGutter;
+use gutter::{SourceGutter, StandaloneGutter};
 #[cfg(target_os = "macos")]
 use isolation::{BodyCache, CachedBody, IsolatedRow};
 #[cfg(not(target_os = "macos"))]
@@ -105,6 +107,7 @@ pub(super) struct Layout {
     pub(super) origin: Point<Pixels>,
     pub(super) rows: Vec<Row>,
     pub(super) source_frame: Option<SourceFrame>,
+    standalone_gutter: Option<StandaloneGutter>,
     // Paint only. This list does not take part in source geometry or hit testing.
     placeholders: Vec<Placeholder>,
     #[cfg(test)]
@@ -117,15 +120,50 @@ pub(super) struct Layout {
     pub(super) painted_bracket_quads: Vec<gpui::PaintQuad>,
     #[cfg(test)]
     pub(super) painted_active_lines: PaintedActiveLines,
+    #[cfg(test)]
+    pub(super) painted_layer_order: PaintedLayerOrder,
 }
 
 #[cfg(test)]
 #[derive(Default)]
 pub(super) struct PaintedActiveLines {
-    content: Vec<gpui::PaintQuad>,
-    gutter: Vec<gpui::PaintQuad>,
+    pub(super) content: Vec<gpui::PaintQuad>,
+    pub(super) gutter: Vec<gpui::PaintQuad>,
     pub(super) ordinary_gutter: Vec<gpui::PaintQuad>,
     pub(super) gutter_labels: Vec<ShapedLine>,
+    pub(super) standalone_fold_labels: Vec<ShapedLine>,
+    standalone_gutter_border: Option<gpui::PaintQuad>,
+}
+
+#[cfg(test)]
+pub(super) enum ContentPaintLayer {
+    SelectionAndFind,
+    ActiveLine,
+    Brackets,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+pub(super) struct PaintedLayerOrder {
+    pub(super) quads: Vec<gpui::PaintQuad>,
+    pub(super) standalone_text_after_quads: Vec<usize>,
+    selection_and_find: usize,
+    active_line: usize,
+    brackets: usize,
+}
+
+#[cfg(test)]
+impl PaintedLayerOrder {
+    // Copy only new submissions from the painter that just ran.
+    pub(super) fn record(&mut self, layer: ContentPaintLayer, quads: &[gpui::PaintQuad]) {
+        let offset = match layer {
+            ContentPaintLayer::SelectionAndFind => &mut self.selection_and_find,
+            ContentPaintLayer::ActiveLine => &mut self.active_line,
+            ContentPaintLayer::Brackets => &mut self.brackets,
+        };
+        self.quads.extend_from_slice(&quads[*offset..]);
+        *offset = quads.len();
+    }
 }
 
 #[derive(Default)]
@@ -235,20 +273,19 @@ impl SourceFrame {
         }
     }
 
+    pub(super) fn contains_row(&self, row: &Row) -> bool {
+        (self.content.start..=self.content.end).contains(&row.start)
+            && row.y >= self.bounds.top() + SOURCE_HEADER
+            && row.y + row.height <= self.bounds.bottom()
+    }
+
     pub(super) fn active_line_bounds(
         &self,
         origin: Point<Pixels>,
         row: &Row,
         lines: &[Range<usize>],
     ) -> Option<Bounds<Pixels>> {
-        let next = lines.partition_point(|line| line.start <= row.start);
-        let line = lines.get(next.checked_sub(1)?)?;
-        if row.start > line.end
-            || row.start < self.content.start
-            || row.start > self.content.end
-            || row.y < self.bounds.top() + SOURCE_HEADER
-            || row.y + row.height > self.bounds.bottom()
-        {
+        if !active_block_contains_row(lines, row) || !self.contains_row(row) {
             return None;
         }
         let side = px(1.);
@@ -256,6 +293,42 @@ impl SourceFrame {
             origin + point(self.bounds.left() + side, row.y),
             size((self.bounds.size.width - side * 2.).max(px(0.)), row.height),
         ))
+    }
+
+    fn background_quads(
+        bounds: Bounds<Pixels>,
+        theme: Theme,
+    ) -> impl Iterator<Item = (Option<ContentMask<Pixels>>, PaintQuad)> {
+        let chrome = quad(
+            bounds,
+            px(6.),
+            theme.preview,
+            Edges::all(px(1.)),
+            theme.border,
+            Default::default(),
+        );
+        let (header, body) = if theme.source_body_inherits_surface {
+            let body_top = bounds.top() + SOURCE_HEADER;
+            let mask = |top, bottom| {
+                Some(ContentMask {
+                    bounds: Bounds::from_corners(
+                        point(bounds.left(), top),
+                        point(bounds.right(), bottom),
+                    ),
+                })
+            };
+            // Keep the rounded border, but let the root paint the body only once.
+            (
+                mask(bounds.top(), body_top),
+                Some((
+                    mask(body_top, bounds.bottom()),
+                    chrome.clone().background(rgba(0)),
+                )),
+            )
+        } else {
+            (None, None)
+        };
+        std::iter::once((header, chrome)).chain(body)
     }
 
     pub(super) fn paint(
@@ -269,14 +342,9 @@ impl SourceFrame {
         if !window.content_mask().bounds.intersects(&bounds) {
             return;
         }
-        window.paint_quad(quad(
-            bounds,
-            px(6.),
-            theme.preview,
-            Edges::all(px(1.)),
-            theme.border,
-            Default::default(),
-        ));
+        for (mask, quad) in Self::background_quads(bounds, theme) {
+            window.with_content_mask(mask, |window| window.paint_quad(quad));
+        }
         let _ = self.label.paint(
             bounds.origin + point(SOURCE_PADDING, SOURCE_MARGIN),
             SOURCE_HEADER - SOURCE_MARGIN,
@@ -521,11 +589,13 @@ impl Item {
 
 impl Layout {
     pub(super) fn paint_placeholders(&mut self, window: &mut Window, cx: &mut App) {
+        // The canvas paints both noninteractive adornments after the text rows.
+        self.paint_standalone_gutter(window, cx);
         if self.placeholders.is_empty() {
             return;
         }
         let row = &self.rows[0];
-        let mut origin = self.origin + point(px(1.), row.y);
+        let mut origin = self.origin + point(row.width + px(1.), row.y);
         let clip = window.content_mask().bounds;
         for placeholder in &mut self.placeholders {
             let bounds = Bounds::new(origin, size(placeholder.line.width, row.height));
@@ -916,7 +986,10 @@ impl Layout {
         if line || gutter {
             return ActiveSourceHighlights {
                 content: if line {
-                    self.active_content_blocks(state)
+                    self.source_frame
+                        .as_ref()
+                        .and_then(|frame| frame.editable.as_ref())
+                        .map_or_else(Vec::new, |scope| self.active_content_blocks(state, scope))
                 } else {
                     Vec::new()
                 },
@@ -940,14 +1013,40 @@ impl Layout {
         ActiveSourceHighlights::default()
     }
 
-    fn active_content_blocks(&self, state: &EditorState) -> Vec<Range<usize>> {
-        let Some(scope) = self
-            .source_frame
-            .as_ref()
-            .and_then(|frame| frame.editable.as_ref())
-        else {
+    pub(super) fn standalone_active_lines(&self, state: &EditorState) -> Vec<Range<usize>> {
+        // Unlike the framed source, a standalone file has no legacy active line.
+        if self.theme.view.is_none() || !ViewHighlight::ActiveLine.enabled(state) {
             return Vec::new();
-        };
+        }
+        self.active_content_blocks(state, &(0..state.text().len()))
+    }
+
+    pub(super) fn standalone_active_line_quad(
+        &self,
+        row: &Row,
+        width: Pixels,
+        lines: &[Range<usize>],
+    ) -> Option<PaintQuad> {
+        if !active_block_contains_row(lines, row) {
+            return None;
+        }
+        let color = self.theme.view?.active_line.rgba32();
+        let inset = self
+            .standalone_gutter
+            .as_ref()
+            .map_or(px(0.), StandaloneGutter::inset);
+        let bounds = Bounds::new(
+            self.origin + point(inset, row.y),
+            size((width - inset).max(px(0.)), row.height),
+        );
+        Some(fill(bounds, rgba(color)))
+    }
+
+    fn active_content_blocks(
+        &self,
+        state: &EditorState,
+        scope: &Range<usize>,
+    ) -> Vec<Range<usize>> {
         let text = state.text().as_str().as_bytes();
         let blocks = state.selection().ranges().iter().filter_map(|range| {
             let head = range.head();
@@ -1067,6 +1166,7 @@ struct LayoutBuilder<'a> {
     wrap_width: Pixels,
     inset: Pixels,
     source_frame: Option<SourceFrame>,
+    standalone_gutter: Option<StandaloneGutter>,
     marked: Option<Range<usize>>,
     #[cfg(target_os = "macos")]
     isolation_cache: Option<BodyCache>,
@@ -1088,6 +1188,7 @@ impl<'a> LayoutBuilder<'a> {
             wrap_width,
             inset: px(0.),
             source_frame: None,
+            standalone_gutter: None,
             marked,
             #[cfg(target_os = "macos")]
             isolation_cache: None,
@@ -1197,17 +1298,13 @@ impl<'a> LayoutBuilder<'a> {
                 .as_deref()
                 .is_some_and(|marks| self.add_isolated(source, body.clone(), marks).is_some());
         if !isolated {
-            let mut start = body.start;
-            for fold in &projection.folds {
-                self.add_text_at(
-                    &body_text[start - body.start..fold.start - body.start],
-                    start,
-                    Face::default(),
-                );
-                self.fold_placeholder(state, fold.clone());
-                start = fold.end;
-            }
-            self.add_text_at(&body_text[start - body.start..], start, Face::default());
+            self.add_folded_text(
+                state,
+                body_text,
+                body.start,
+                &projection.folds,
+                Face::default(),
+            );
         }
         self.inset = SOURCE_PADDING;
         self.wrap_width = source_width;
@@ -1274,6 +1371,23 @@ impl<'a> LayoutBuilder<'a> {
             label,
             gutter,
         });
+    }
+
+    fn add_folded_text(
+        &mut self,
+        state: &EditorState,
+        text: &str,
+        origin: usize,
+        folds: &[Range<usize>],
+        face: Face,
+    ) {
+        let mut start = origin;
+        for fold in folds {
+            self.add_text_at(&text[start - origin..fold.start - origin], start, face);
+            self.fold_placeholder(state, fold.clone());
+            start = fold.end;
+        }
+        self.add_text_at(&text[start - origin..], start, face);
     }
 
     fn fold_placeholder(&mut self, state: &EditorState, source: Range<usize>) {
@@ -1550,6 +1664,7 @@ impl<'a> LayoutBuilder<'a> {
             origin: point(px(0.), px(0.)),
             rows: self.rows,
             source_frame: self.source_frame,
+            standalone_gutter: self.standalone_gutter,
             placeholders,
             #[cfg(test)]
             painted_drop_cursor: None,
@@ -1561,8 +1676,16 @@ impl<'a> LayoutBuilder<'a> {
             painted_bracket_quads: Vec::new(),
             #[cfg(test)]
             painted_active_lines: PaintedActiveLines::default(),
+            #[cfg(test)]
+            painted_layer_order: PaintedLayerOrder::default(),
         }
     }
+}
+
+fn active_block_contains_row(lines: &[Range<usize>], row: &Row) -> bool {
+    let next = lines.partition_point(|line| line.start <= row.start);
+    next.checked_sub(1)
+        .is_some_and(|index| row.start <= lines[index].end)
 }
 
 fn distinct_line_blocks(blocks: impl Iterator<Item = Range<usize>>) -> Vec<Range<usize>> {
@@ -1603,7 +1726,7 @@ fn code_highlights<'a>(
     highlights
 }
 
-fn apply_highlight(run: &mut TextRun, style: HighlightProperties) {
+pub(super) fn apply_highlight(run: &mut TextRun, style: HighlightProperties) {
     if let Some(color) = style.foreground {
         run.color = rgba(color.rgba32()).into();
     }
@@ -1811,16 +1934,57 @@ impl Editor {
         for_paint: bool,
     ) -> (Layout, Option<BodyCache>) {
         if !self.is_markdown() {
-            self.request_highlighting(cx);
+            let (layers, appearance) = highlight_configuration(self.view.state());
+            let theme = Theme::for_editor(window, self.view.state());
+            let bracket_syntax = for_paint
+                && theme.view.is_some()
+                && self.focus.is_focused(window)
+                && self.standalone_bracket_options().is_some()
+                && self.has_standalone_bracket_syntax();
+            if bracket_syntax || !layers.is_empty() {
+                self.request_native_highlighting(cx);
+            }
+            let native = if layers.is_empty() {
+                None
+            } else {
+                self.current_native_document().and_then(|document| {
+                    let spans = highlight::verified_native_spans(document)?;
+                    let mut styles = code_highlights(document, spans, |tags, scope| {
+                        highlighting_for_context(&layers, tags, scope, appearance)
+                    });
+                    styles.retain(|(_, style)| *style != HighlightProperties::default());
+                    (!styles.is_empty()).then_some(styles)
+                })
+            };
+            // Select the fallback for the whole file, never for individual native gaps.
+            let highlights = native.unwrap_or_else(|| {
+                self.request_highlighting(cx);
+                plain_text_highlights(self.highlighting.spans(), theme)
+            });
             let state = self.view.state();
             let source = state.text().as_str();
-            let theme = Theme::for_editor(window, state);
-            let highlights = plain_text_highlights(self.highlighting.spans(), theme);
+            let standalone = self.standalone_folds();
+            let folds = standalone
+                .as_ref()
+                .map_or_else(Vec::new, |folds| folds.ranges());
             let mut builder = LayoutBuilder::new(window, theme, self.marked.clone(), width);
+            builder.standalone_gutter = StandaloneGutter::new(
+                state,
+                standalone.map(|folds| folds.config),
+                self.input_enabled && !self.is_composing(),
+                theme,
+                window,
+            );
+            if let Some(gutter) = &builder.standalone_gutter {
+                builder.inset = gutter.inset();
+                builder.row.width = builder.inset;
+            }
             builder.highlights = &highlights;
-            builder.add_text(
+            builder.add_folded_text(
+                state,
                 source,
-                0..source.len(),
+                0,
+                &folds,
                 Face {
                     code: true,
                     ..Face::default()
@@ -2208,6 +2372,7 @@ impl Projection<'_> {
                         if let Some(preview) = &section.preview {
                             let block = BlockLayout::new(
                                 preview,
+                                &section.source,
                                 self.state,
                                 builder.theme,
                                 builder.window,

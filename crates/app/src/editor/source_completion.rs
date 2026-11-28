@@ -10,7 +10,7 @@ use std::{
 
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, Context, KeyBinding, KeyDownEvent, MouseButton,
-    Pixels, Task, Window, actions, div, point, prelude::*, px, rgba, size,
+    Pixels, Task, Window, actions, canvas, div, point, prelude::*, px, rgba, size,
 };
 use gpui_editor_codemirror::{
     Assoc, ChangeDesc, EditorState, MapMode,
@@ -24,6 +24,7 @@ use gpui_editor_codemirror::{
         start_snippet,
     },
     language::{
+        css::CssPropertySnapshot,
         markdown::{
             MarkdownCompletionSource, MarkdownDialect, MarkdownDocument, MarkdownOverlay,
             markdown_completion_source, markdown_completion_start, markdown_completions,
@@ -65,6 +66,21 @@ pub(super) fn bind_keys(cx: &mut App) {
 const SOURCE: SourceId = SourceId(0);
 const SECOND_SOURCE: SourceId = SourceId(1);
 const MAX_VISIBLE: usize = 6;
+const MAX_INFO_BYTES: usize = 512;
+
+pub(super) struct PrepaintedCompletion {
+    menu: AnyElement,
+    info: Option<AnyElement>,
+}
+
+impl PrepaintedCompletion {
+    pub(super) fn paint(&mut self, window: &mut Window, cx: &mut App) {
+        self.menu.paint(window, cx);
+        if let Some(info) = &mut self.info {
+            info.paint(window, cx);
+        }
+    }
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum SourceLanguage {
@@ -75,17 +91,22 @@ enum SourceLanguage {
 #[derive(Clone)]
 enum SourceSchema {
     Stock,
+    Css(Arc<CssPropertySnapshot>),
     Sql(Arc<SqlSchemaCompletionSource>),
     Xml(Arc<NativeXmlSchemaExtension>),
 }
 
 impl SourceSchema {
     fn for_language(language: SourceLanguage, state: &EditorState) -> Self {
+        use NativeLanguage::*;
         let registered = match language {
-            SourceLanguage::Fence(NativeLanguage::Sql(dialect)) => {
+            SourceLanguage::Fence(
+                Css | Less | Sass(_) | Html | Angular | Vue | Jinja | Liquid | Php | Markdown,
+            ) => CssPropertySnapshot::source_for(state).map(Self::Css),
+            SourceLanguage::Fence(Sql(dialect)) => {
                 NativeSqlSchemaExtension::source_for(state, dialect).map(Self::Sql)
             }
-            SourceLanguage::Fence(NativeLanguage::Xml) => {
+            SourceLanguage::Fence(Xml) => {
                 NativeXmlSchemaExtension::source_for(state).map(Self::Xml)
             }
             _ => None,
@@ -95,6 +116,7 @@ impl SourceSchema {
 
     fn same_as(&self, other: &Self) -> bool {
         match (self, other) {
+            (Self::Css(first), Self::Css(second)) => Arc::ptr_eq(first, second),
             (Self::Sql(first), Self::Sql(second)) => Arc::ptr_eq(first, second),
             (Self::Xml(first), Self::Xml(second)) => Arc::ptr_eq(first, second),
             (Self::Stock, Self::Stock) => true,
@@ -492,14 +514,16 @@ impl Editor {
         let language = current.language;
         let apply = |state: &EditorState, choice: SessionOption<'_>| {
             let insert = choice.item.insert.as_deref().unwrap_or(&choice.item.label);
+            let host_insertion = matches!(current.schema, SourceSchema::Xml(_))
+                || (matches!(current.schema, SourceSchema::Css(_))
+                    && choice.item.kind.as_deref() == Some("property"));
             if !current
                 .schema
                 .valid_boundary(state.text().as_str(), choice.range.start)
                 || !current
                     .schema
                     .valid_boundary(state.text().as_str(), choice.range.end)
-                || matches!(current.schema, SourceSchema::Xml(_))
-                    && !self.preserves_completion_fence(&scope, &choice.range, insert)
+                || host_insertion && !self.preserves_completion_fence(&scope, &choice.range, insert)
             {
                 return Err(gpui_editor_codemirror::EditError::InvalidRange);
             }
@@ -611,7 +635,7 @@ impl Editor {
         viewport: Bounds<Pixels>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    ) -> Option<PrepaintedCompletion> {
         let current = self.current_source_completion()?;
         if !self.focus.is_focused(window) {
             return None;
@@ -630,9 +654,13 @@ impl Editor {
             return None;
         }
         let selected = current.session.selected();
-        let first = selected
-            .and_then(|id| options.iter().position(|option| option.id == id))
-            .map_or(0, |index| (index + 1).saturating_sub(MAX_VISIBLE));
+        let selected_index =
+            selected.and_then(|id| options.iter().position(|option| option.id == id));
+        let first = selected_index.map_or(0, |index| (index + 1).saturating_sub(MAX_VISIBLE));
+        let info = selected_index
+            .and_then(|index| options[index].item.info.as_deref())
+            .filter(|text| valid_completion_info(text));
+        let selected_bounds = info.map(|_| Rc::new(Cell::new(None)));
         let theme = Theme::for_editor(window, self.view.state());
         let surface = theme.view.map_or(theme.preview, |style| {
             rgba(style.tooltip.background.rgba32())
@@ -704,6 +732,18 @@ impl Editor {
                     .when_some(option.item.detail.clone(), |row, detail| {
                         row.child(div().text_xs().child(detail))
                     });
+                let row = row.when_some(
+                    selected_bounds.as_ref().filter(|_| Some(id) == selected),
+                    |row, bounds| {
+                        let bounds = Rc::clone(bounds);
+                        // Measure the selected row without adding to the list layout.
+                        row.child(
+                            canvas(move |row, _, _| bounds.set(Some(row)), |_, (), _, _| {})
+                                .absolute()
+                                .inset_0(),
+                        )
+                    },
+                );
                 #[cfg(test)]
                 let row = row.children(super::one_dark_tests::overlay_text_probe(
                     if Some(id) == selected {
@@ -750,8 +790,116 @@ impl Editor {
             ),
         );
         popup.prepaint_at(origin, window, cx);
-        Some(popup)
+        let menu = Bounds::new(origin, size);
+        let info = info
+            .zip(selected_bounds.and_then(|bounds| bounds.get()))
+            .and_then(|(text, row)| {
+                prepaint_completion_info(text, row, menu, viewport, self.view.state(), window, cx)
+            });
+        Some(PrepaintedCompletion { menu: popup, info })
     }
+}
+
+fn valid_completion_info(text: &str) -> bool {
+    text.len() <= MAX_INFO_BYTES
+        && !text.trim().is_empty()
+        && !text
+            .chars()
+            .any(|c| c.is_control() && !matches!(c, '\n' | '\t'))
+}
+
+fn prepaint_completion_info(
+    text: &str,
+    row: Bounds<Pixels>,
+    menu: Bounds<Pixels>,
+    viewport: Bounds<Pixels>,
+    state: &EditorState,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    if !menu.intersects(&row) {
+        return None;
+    }
+    let theme = Theme::for_editor(window, state);
+    let (background, border) = view_style(state).map_or_else(
+        || {
+            (
+                theme.tooltip,
+                (!Theme::is_system_dark(window)).then_some((px(1.), theme.border)),
+            )
+        },
+        |style| {
+            (
+                rgba(style.tooltip.background.rgba32()),
+                style
+                    .tooltip
+                    .border
+                    .map(|stroke| (px(f32::from(stroke.width_px)), rgba(stroke.color.rgba32()))),
+            )
+        },
+    );
+    let measure = |height: Pixels, window: &mut Window, cx: &mut App| {
+        let body = div()
+            .max_w(viewport.size.width.min(px(400.)))
+            .max_h(height.min(px(160.)))
+            .overflow_hidden()
+            .px(px(9.))
+            .py(px(3.))
+            .text_sm()
+            .whitespace_normal()
+            .bg(background)
+            .text_color(theme.on_tooltip)
+            .when_some(border, |body, (width, color)| {
+                body.border(width).border_color(color)
+            })
+            .child(text.to_owned());
+        #[cfg(test)]
+        let body = info_tests::probe(body, text);
+        let mut body = body.into_any_element();
+        let measured = body.layout_as_root(
+            size(AvailableSpace::MaxContent, AvailableSpace::MaxContent),
+            window,
+            cx,
+        );
+        (body, measured)
+    };
+    let (mut body, mut measured) = measure(viewport.size.height, window, cx);
+    let side_x = if measured.width <= viewport.right() - menu.right() {
+        Some(menu.right())
+    } else if measured.width <= menu.left() - viewport.left() {
+        Some(menu.left() - measured.width)
+    } else {
+        None
+    };
+    let origin = if let Some(x) = side_x {
+        point(
+            x,
+            row.top()
+                .min(viewport.bottom() - measured.height)
+                .max(viewport.top()),
+        )
+    } else {
+        // Keep the list usable when neither side has enough space.
+        let above = menu.top() - viewport.top();
+        let below = viewport.bottom() - menu.bottom();
+        let room = above.max(below);
+        if room < px(32.) {
+            return None;
+        }
+        if measured.height > room {
+            (body, measured) = measure(room, window, cx);
+        }
+        point(
+            menu.left().min(viewport.right() - measured.width),
+            if below >= above {
+                menu.bottom()
+            } else {
+                menu.top() - measured.height
+            },
+        )
+    };
+    body.prepaint_at(origin, window, cx);
+    Some(body)
 }
 
 fn source_options(
@@ -822,8 +970,16 @@ fn completion_results(
                 });
                 return Some([schema, keywords]);
             }
+            let properties = match schema {
+                SourceSchema::Css(snapshot) => Some(snapshot.as_ref()),
+                _ => None,
+            };
             let mut results = [None, None];
-            for (slot, result) in document.indexed_completions(position, query.explicit) {
+            for (slot, result) in document.indexed_completions_with_css_properties(
+                position,
+                query.explicit,
+                properties,
+            ) {
                 results[slot] = Some(result);
             }
             Some(results)
@@ -863,6 +1019,10 @@ fn valid_schema_result(
         && schema.valid_boundary(source, to)
 }
 
+#[cfg(test)]
+mod css_properties_tests;
+#[cfg(test)]
+mod info_tests;
 #[cfg(test)]
 mod sql_tests;
 #[cfg(test)]

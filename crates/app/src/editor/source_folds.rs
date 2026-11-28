@@ -2,16 +2,17 @@ use std::{ops::Range, sync::Arc};
 
 use gpui::{Context, actions};
 use gpui_editor_codemirror::{
-    EditError, EditorSelection, EditorState, StateEffect, Text, Transaction,
+    Assoc, EditError, EditorSelection, EditorState, StateEffect, Text, Transaction,
     language::{
         StreamSettings,
         fold::{
             FoldGutterClick, FoldGutterConfig, FoldGutterMarker, FoldGutterState, announce_fold,
             fold_effect, foldable, folded_ranges, unfold_effect,
         },
+        javascript::JavascriptOptions,
         markdown::MarkdownCodeParser,
     },
-    language_data::{NativeLanguage, NativeSyntax},
+    language_data::{NativeLanguage, NativeSyntax, SupportedDocument, attached_language_snapshot},
     view::{SCROLL_SNAPSHOT, ScrollSnapshot},
 };
 
@@ -24,6 +25,53 @@ pub(super) struct SourceFoldQuery<'a> {
     syntax: Option<&'a NativeSyntax>,
     configured_fold: bool,
     state: EditorState,
+    standalone_ranges: Option<&'a [Range<usize>]>,
+}
+
+#[derive(Clone)]
+pub(super) struct StandaloneFoldMarker {
+    pub(super) kind: FoldGutterState,
+    pub(super) text: String,
+    range: Range<usize>,
+}
+
+pub(super) struct StandaloneFolds {
+    pub(super) config: Arc<FoldGutterConfig>,
+    document: Arc<SupportedDocument>,
+    state: EditorState,
+}
+
+impl StandaloneFolds {
+    pub(super) fn ranges(&self) -> Vec<Range<usize>> {
+        let mut ranges: Vec<Range<usize>> = Vec::new();
+        for fold in folded_ranges(&self.state).iter(0) {
+            let range = fold.from..fold.to;
+            if !valid_standalone_range(&self.state, &range) || hides_endpoint(&self.state, &range) {
+                continue;
+            }
+            if let Some(last) = ranges.last_mut()
+                && range.start < last.end
+            {
+                // Only the outer fold is displayed. Do not project a crossing range.
+                if last.start == range.start {
+                    last.end = last.end.max(range.end);
+                }
+                continue;
+            }
+            ranges.push(range);
+        }
+        ranges
+    }
+
+    pub(super) fn query<'a>(&'a self, ranges: &'a [Range<usize>]) -> SourceFoldQuery<'a> {
+        SourceFoldQuery {
+            body: 0..self.state.text().len(),
+            syntax: Some(self.document.syntax()),
+            configured_fold: matches!(self.document.syntax(), NativeSyntax::Json(_)),
+            state: self.state.clone(),
+            standalone_ranges: Some(ranges),
+        }
+    }
 }
 
 impl SourceFoldQuery<'_> {
@@ -38,6 +86,32 @@ impl SourceFoldQuery<'_> {
             |_, from, to| self.syntax_fold(from, to),
             |kind, range| self.accepts(&line, kind, range),
         )
+    }
+
+    pub(super) fn standalone_marker(
+        &self,
+        config: &FoldGutterConfig,
+        line: Range<usize>,
+    ) -> Option<StandaloneFoldMarker> {
+        let mut candidate = None;
+        let marker = config.marker_if(
+            &self.state,
+            line.clone(),
+            |_, from, to| self.syntax_fold(from, to),
+            |kind, range| {
+                if !self.accepts(&line, kind, range) {
+                    return false;
+                }
+                candidate = Some(range.clone());
+                true
+            },
+        )?;
+        let text = marker.marker.content?;
+        (!text.trim().is_empty()).then(|| StandaloneFoldMarker {
+            kind: marker.state,
+            text,
+            range: candidate.expect("accepted marker range"),
+        })
     }
 
     fn click(
@@ -87,16 +161,19 @@ impl SourceFoldQuery<'_> {
     }
 
     fn accepts(&self, line: &Range<usize>, kind: FoldGutterState, range: &Range<usize>) -> bool {
-        let text = self.state.text().as_str();
-        if range.is_empty()
-            || !inside(&self.body, range)
+        if !inside(&self.body, range)
             || !(line.start..=line.end).contains(&range.start)
-            || text.get(range.clone()).is_none()
-            || [range.start, range.end]
-                .into_iter()
-                .any(|at| at > 0 && text.get(at - 1..at + 1) == Some("\r\n"))
+            || !valid_source_range(self.state.text(), range)
         {
             return false;
+        }
+        if let Some(displayed) = self.standalone_ranges {
+            if kind == FoldGutterState::Closed {
+                return displayed.contains(range);
+            }
+            if !valid_standalone_range(&self.state, range) || hides_endpoint(&self.state, range) {
+                return false;
+            }
         }
         let folds = folded_ranges(&self.state);
         let mut nearby = folds
@@ -116,7 +193,10 @@ impl SourceFoldQuery<'_> {
 fn has_fold_props(parser: &MarkdownCodeParser) -> bool {
     matches!(
         parser,
-        MarkdownCodeParser::Wast(_) | MarkdownCodeParser::Json(_) | MarkdownCodeParser::Lezer(_)
+        MarkdownCodeParser::Wast(_)
+            | MarkdownCodeParser::Json(_)
+            | MarkdownCodeParser::Lezer(_)
+            | MarkdownCodeParser::Rust(_)
     )
 }
 
@@ -169,7 +249,76 @@ impl Editor {
             syntax,
             configured_fold,
             state,
+            standalone_ranges: None,
         })
+    }
+
+    pub(super) fn standalone_folds(&self) -> Option<StandaloneFolds> {
+        let extension = self.path.as_deref()?.extension()?;
+        let state = self.view.state();
+        let config = FoldGutterConfig::configured(state)?;
+        if config.render_marker.is_some() {
+            return None;
+        }
+        let document = attached_language_snapshot(state)?;
+        let syntax = document.syntax();
+        let matches_file = match syntax {
+            NativeSyntax::Json(_) => extension.eq_ignore_ascii_case("json"),
+            NativeSyntax::Javascript(_) => {
+                let (typescript, jsx) = match extension.to_ascii_lowercase().to_str()? {
+                    "js" | "mjs" | "cjs" => (false, false),
+                    "ts" | "mts" | "cts" => (true, false),
+                    "jsx" => (false, true),
+                    "tsx" => (true, true),
+                    _ => return None,
+                };
+                document.language_at(0, Assoc::After)
+                    == Some(NativeLanguage::Javascript(JavascriptOptions {
+                        typescript,
+                        jsx,
+                    }))
+            }
+            _ => false,
+        };
+        (matches_file && document.text() == state.text() && syntax.projected_lines().is_none())
+            .then(|| StandaloneFolds {
+                config,
+                document,
+                state: state.clone(),
+            })
+    }
+
+    pub(super) fn standalone_fold_input_enabled(&self) -> bool {
+        self.input_enabled && !self.is_composing() && !self.view.state().read_only()
+    }
+
+    pub(super) fn click_standalone_fold_gutter(
+        &mut self,
+        line: Range<usize>,
+        config: &Arc<FoldGutterConfig>,
+        painted: &StandaloneFoldMarker,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.standalone_fold_input_enabled() {
+            return;
+        }
+        let Some(folds) = self.standalone_folds() else {
+            return;
+        };
+        if !Arc::ptr_eq(&folds.config, config) {
+            return;
+        }
+        let ranges = folds.ranges();
+        let query = folds.query(&ranges);
+        if query.line_at(line.start).as_ref() != Some(&line) {
+            return;
+        }
+        let Some((kind, range, transaction)) = query.click(config, line) else {
+            return;
+        };
+        if kind == painted.kind && range == painted.range {
+            self.apply_checked_fold_effects(transaction, cx);
+        }
     }
 
     pub(super) fn click_source_fold_gutter(
@@ -194,36 +343,9 @@ impl Editor {
         if !inside(body, &line) || query.line_at(line.start).as_ref() != Some(&line) {
             return;
         }
-        let Some((kind, range, transaction)) = query.click(&current, line) else {
-            return;
-        };
-        let effect = match kind {
-            FoldGutterState::Open => fold_effect(),
-            FoldGutterState::Closed => unfold_effect(),
-        };
-        self.apply_source_fold_change(
-            transaction,
-            None,
-            |accepted, snapshot| {
-                let effects = accepted.effects();
-                accepted.changes().is_empty()
-                    && accepted.selection().is_none()
-                    && !accepted.add_to_history()
-                    && !accepted.scroll_into_view()
-                    && effects.len() == 1 + usize::from(snapshot.is_some())
-                    && effects
-                        .iter()
-                        .filter(|e| e.get(effect) == Some(&range))
-                        .count()
-                        == 1
-                    && snapshot.is_none_or(|snapshot| {
-                        effects
-                            .iter()
-                            .any(|e| e.get(&SCROLL_SNAPSHOT) == Some(&snapshot))
-                    })
-            },
-            cx,
-        );
+        if let Some((_, _, transaction)) = query.click(&current, line) {
+            self.apply_checked_fold_effects(transaction, cx);
+        }
     }
 
     pub(super) fn can_toggle_source_fold(&self) -> bool {
@@ -333,6 +455,11 @@ impl Editor {
     }
 
     pub(super) fn source_fold_ranges(&self) -> Vec<Range<usize>> {
+        if !self.is_markdown() {
+            return self
+                .standalone_folds()
+                .map_or_else(Vec::new, |folds| folds.ranges());
+        }
         let folds = folded_ranges(self.view.state());
         if folds.is_empty() {
             return Vec::new();
@@ -367,10 +494,31 @@ impl Editor {
         {
             return false;
         }
-        self.change_source_folds([unfold_effect().of(range)], None, cx)
+        if self.is_markdown() {
+            self.change_source_folds([unfold_effect().of(range)], None, cx)
+        } else {
+            self.standalone_fold_input_enabled() && self.unfold_standalone([range], cx)
+        }
     }
 
     pub(super) fn reveal_folded_range(&mut self, revealed: &Range<usize>, cx: &mut Context<Self>) {
+        if !self.is_markdown() {
+            if self.standalone_fold_input_enabled() && self.standalone_folds().is_some() {
+                let state = self.view.state();
+                // Find can set the selection before revealing. Include stored folds
+                // that the new selection already prevents us from displaying.
+                let ranges: Vec<_> = folded_ranges(state)
+                    .iter(revealed.start)
+                    .take_while(|fold| fold.from < revealed.end)
+                    .map(|fold| fold.from..fold.to)
+                    .filter(|range| {
+                        revealed.start < range.end && valid_standalone_range(state, range)
+                    })
+                    .collect();
+                self.unfold_standalone(ranges, cx);
+            }
+            return;
+        }
         let Some(fence) = self
             .source_fence()
             .filter(|fence| inside(&fence.body, revealed))
@@ -396,10 +544,16 @@ impl Editor {
         if !self.selection().is_empty() {
             return false;
         }
-        self.source_fold_ranges()
+        let Some(range) = self
+            .source_fold_ranges()
             .into_iter()
             .find(|range| self.cursor() == if right { range.start } else { range.end })
-            .is_some_and(|range| self.open_source_fold(range, cx))
+        else {
+            return false;
+        };
+        let opened = self.open_source_fold(range, cx);
+        // If a filter rejects the unfold, do not delete the hidden text instead.
+        opened || !self.is_markdown()
     }
 
     pub(super) fn unfold_before_source_deletion(
@@ -440,6 +594,59 @@ impl Editor {
         )
     }
 
+    fn unfold_standalone(
+        &mut self,
+        ranges: impl IntoIterator<Item = Range<usize>>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let transaction = Transaction::default()
+            .with_effects(ranges.into_iter().map(|range| unfold_effect().of(range)));
+        !transaction.effects().is_empty() && self.apply_checked_fold_effects(transaction, cx)
+    }
+
+    fn apply_checked_fold_effects(
+        &mut self,
+        transaction: Transaction,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        fn action(effect: &StateEffect) -> Option<(bool, &Range<usize>)> {
+            effect
+                .get(fold_effect())
+                .map(|range| (true, range))
+                .or_else(|| effect.get(unfold_effect()).map(|range| (false, range)))
+        }
+        let standalone = !self.is_markdown();
+        let expected: Vec<_> = transaction
+            .effects()
+            .iter()
+            .filter_map(action)
+            .map(|(fold, range)| (fold, range.clone()))
+            .collect();
+        self.apply_source_fold_change(
+            transaction,
+            None,
+            |accepted, snapshot| {
+                let effects = accepted.effects();
+                accepted.changes().is_empty()
+                    && accepted.selection().is_none()
+                    && !accepted.add_to_history()
+                    && !accepted.scroll_into_view()
+                    && (!standalone || accepted.history_isolation().is_none())
+                    && effects.len() == expected.len() + usize::from(snapshot.is_some())
+                    && effects
+                        .iter()
+                        .filter_map(action)
+                        .eq(expected.iter().map(|(fold, range)| (*fold, range)))
+                    && snapshot.is_none_or(|snapshot| {
+                        effects
+                            .iter()
+                            .any(|e| e.get(&SCROLL_SNAPSHOT) == Some(&snapshot))
+                    })
+            },
+            cx,
+        )
+    }
+
     fn apply_source_fold_change(
         &mut self,
         transaction: Transaction,
@@ -474,7 +681,11 @@ impl Editor {
         {
             return false;
         }
-        self.invalidate_edit_layout();
+        if self.is_markdown() {
+            self.invalidate_edit_layout();
+        } else {
+            self.layout = None;
+        }
         self.reveal_caret = collapse_to.is_some();
         cx.notify();
         true
@@ -494,6 +705,31 @@ fn fold_notice(
         .number;
     let to = lines.line_at(range.end - origin).expect("fold end").number;
     announce_fold(state, from..=to, folding)
+}
+
+fn valid_source_range(text: &Text, range: &Range<usize>) -> bool {
+    let text = text.as_str();
+    !range.is_empty()
+        && text.get(range.clone()).is_some()
+        && [range.start, range.end]
+            .into_iter()
+            .all(|at| at == 0 || text.get(at - 1..at + 1) != Some("\r\n"))
+}
+
+fn valid_standalone_range(state: &EditorState, range: &Range<usize>) -> bool {
+    let text = state.text();
+    valid_source_range(text, range)
+        && text
+            .line_at(range.start)
+            .is_some_and(|line| line.range.end < range.end)
+}
+
+fn hides_endpoint(state: &EditorState, range: &Range<usize>) -> bool {
+    state.selection().ranges().iter().any(|selection| {
+        [selection.anchor(), selection.head()]
+            .into_iter()
+            .any(|at| range.start < at && at < range.end)
+    })
 }
 
 fn inside(bounds: &Range<usize>, range: &Range<usize>) -> bool {

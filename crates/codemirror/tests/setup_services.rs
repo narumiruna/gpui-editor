@@ -8,8 +8,12 @@ use std::{
 
 use gpui_editor_codemirror::{
     ALLOW_MULTIPLE_SELECTIONS, Assoc, Compartment, ConfigurationError, EditorSelection,
-    EditorState, Extension, SelectionRange, StateField, Transaction,
-    language_data::{NativeLanguage, json_extension},
+    EditorState, Extension, SelectionRange, StateField, Text, Transaction,
+    language::lezer::{LANGUAGE_DATA, LanguageFacet},
+    language_data::{
+        JavaTop, NativeLanguage, NativeSyntax, attached_language_snapshot, java_language,
+        json_extension,
+    },
     setup::{
         SetupEditor, SetupKeyContext, SetupKeyResult, basic_setup, basic_setup_with_language,
         minimal_setup, try_minimal_setup,
@@ -377,6 +381,65 @@ fn setup_tracks_installed_json_for_input_indentation_and_history() {
             );
         };
         let result = row["result"].as_str().unwrap();
+        check(&editor, "applied", result);
+        assert_eq!(editor.view_mut().undo(), Some(()));
+        check(&editor, "undone", source);
+        assert_eq!(editor.view_mut().redo(), Some(()));
+        check(&editor, "redone", result);
+    }
+}
+
+#[test]
+fn setup_uses_the_current_java_root_and_starting_data_for_input_indentation() {
+    let stock = java_language();
+    let members = stock.configure(Some(JavaTop::ClassContent), None, None);
+    let empty = LanguageFacet::new(None);
+    let disabled = members.with_node_props(&[
+        LANGUAGE_DATA.add(move |row| row.is("ClassContent").then(|| Some(empty.clone())))
+    ]);
+    let parser = |mode: &serde_json::Value| match mode.as_str().unwrap() {
+        "program" => stock.extension(),
+        "members" => members.extension(),
+        "disabled" => disabled.extension(),
+        mode => panic!("unexpected Java mode {mode}"),
+    };
+    for line in include_str!("fixtures/setup_java_indent.jsonl").lines() {
+        let row: serde_json::Value = serde_json::from_str(line).unwrap();
+        let source = row["source"].as_str().unwrap();
+        let result = row["result"].as_str().unwrap();
+        let slot = Compartment::new();
+        let state = EditorState::create_from_text(
+            Text::new(source),
+            Some(EditorSelection::single(source.len(), source.len())),
+            slot.of(parser(&row["initial"])),
+        )
+        .unwrap();
+        let mut editor = basic_setup::<()>(state, KeyPlatform::Linux).unwrap();
+        let mut input = editor
+            .view()
+            .state()
+            .replace_selection("}")
+            .unwrap()
+            .with_user_event(row["event"].as_str().unwrap());
+        if row["next"].is_string() {
+            input = input.with_effects([slot.reconfigure(parser(&row["next"]))]);
+        }
+        editor.view_mut().update(input, (), |_| (None, ())).unwrap();
+        let check = |editor: &SetupEditor<()>, step: &str, text: &str| {
+            let view = editor.view();
+            let state = view.state();
+            let snapshot = attached_language_snapshot(state).unwrap();
+            let NativeSyntax::Java(doc) = snapshot.syntax() else {
+                panic!("expected a Java attachment");
+            };
+            assert_eq!(state.text().as_str(), text, "{line}: {step}");
+            assert_eq!(
+                serde_json::json!({"head": state.selection().main().head(),
+                    "root": doc.root().name(), "history": [view.undo_depth(), view.redo_depth()]}),
+                row[step],
+                "{line}: {step}",
+            );
+        };
         check(&editor, "applied", result);
         assert_eq!(editor.view_mut().undo(), Some(()));
         check(&editor, "undone", source);

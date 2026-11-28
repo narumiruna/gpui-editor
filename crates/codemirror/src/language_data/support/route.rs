@@ -4,7 +4,10 @@ use crate::{
     Assoc,
     language::{
         css::CssDocument,
-        html::{HtmlDocument, HtmlEmbeddedDocument, HtmlEmbeddedLanguage},
+        html::{
+            HtmlDocument, HtmlEmbeddedDocument, HtmlEmbeddedLanguage, HtmlMount, HtmlNode,
+            HtmlNodeKind,
+        },
         javascript::{JavascriptDocument, JavascriptOptions},
         line_projection::splits_crlf,
         liquid,
@@ -13,7 +16,7 @@ use crate::{
     },
 };
 
-use super::{NativeLanguage, NativeSyntax, SupportedDocument};
+use super::{NativeLanguage, NativeSyntax, SupportedDocument, projection::HtmlProjection};
 
 pub(super) enum Grammar<'a> {
     Native(&'a NativeSyntax),
@@ -83,6 +86,10 @@ impl Query {
         if !self.inside(&region) {
             return None;
         }
+        self.project(region, parsed_start)
+    }
+
+    fn project(&self, region: Range<usize>, parsed_start: usize) -> Option<Self> {
         let start = self.local.start.max(region.start);
         let end = self.local.end.min(region.end);
         let original = self.source(start)?;
@@ -250,6 +257,218 @@ fn native(language: NativeLanguage, syntax: &NativeSyntax, query: Query) -> Site
         html_host: HtmlHost::Plain,
         markdown_mount: None,
     }
+}
+
+/// Route stock HTML-family facets without changing the syntax-service routes.
+/// The template roots replace the whole HTML node, even outside their JS child.
+pub(super) enum HtmlDataSite<'a> {
+    Host {
+        document: &'a HtmlDocument,
+        query: Query,
+        projection: Option<HtmlProjection<'a>>,
+    },
+    Template,
+    Mount(&'a HtmlMount, Query),
+    Script(&'a JavascriptDocument, Query),
+    JinjaLiquidRoot(NativeLanguage),
+    MarkdownRoot,
+    PhpRoot,
+    Invalid,
+}
+
+fn html_family_site<'a>(
+    document: &'a HtmlDocument,
+    query: Query,
+    projection: Option<HtmlProjection<'a>>,
+) -> HtmlDataSite<'a> {
+    let source = document.text().as_str();
+    let at = query.at;
+    for mount in document.mounts() {
+        if !mount.data_contains(source, at, query.side) {
+            continue;
+        }
+        let range = mount.range();
+        // A nonempty raw body after a gap does not own the preceding `>`.
+        // Keep both raw end brackets, empty bodies, and quoted endpoints.
+        if projection.is_some()
+            && at == query.local.end
+            && at == range.start
+            && !range.is_empty()
+            && source[..at].ends_with('>')
+        {
+            continue;
+        }
+        if let Some(nested) = query.project(range, 0) {
+            return HtmlDataSite::Mount(mount, nested);
+        }
+    }
+    HtmlDataSite::Host {
+        document,
+        query,
+        projection,
+    }
+}
+
+pub(super) fn html_host(syntax: &NativeSyntax) -> Option<&HtmlDocument> {
+    match syntax {
+        NativeSyntax::Html(doc) => Some(doc),
+        NativeSyntax::Vue(doc) => Some(doc.host()),
+        NativeSyntax::Angular(doc) => Some(doc.html()),
+        _ => None,
+    }
+}
+
+pub(super) fn markdown_html_projection(
+    active: &SupportedDocument,
+    at: usize,
+    side: Assoc,
+) -> Option<HtmlProjection<'_>> {
+    let text = active.text();
+    if !matches!(active.syntax(), NativeSyntax::Markdown(_))
+        || !text.is_char_boundary(at)
+        || splits_crlf(text.as_str(), at)
+    {
+        return None;
+    }
+    active.markdown_mounts.iter().find_map(|mount| {
+        mount.source_map().segment_at(at, side)?;
+        HtmlProjection::from_markdown(mount)
+    })
+}
+
+fn projected_html_site(projection: HtmlProjection<'_>, query: Query) -> Option<HtmlDataSite<'_>> {
+    let (segment, _) = projection.at(query.at, query.side)?;
+    let query = query.project(segment.source.clone(), segment.html.start)?;
+    Some(html_family_site(
+        projection.document,
+        query,
+        Some(projection),
+    ))
+}
+
+pub(super) fn html_data_site(
+    active: &SupportedDocument,
+    at: usize,
+    side: Assoc,
+) -> Option<HtmlDataSite<'_>> {
+    let syntax = active.syntax();
+    if matches!(syntax, NativeSyntax::Markdown(_)) {
+        let text = active.text();
+        if !text.is_char_boundary(at) || splits_crlf(text.as_str(), at) {
+            return Some(HtmlDataSite::Invalid);
+        }
+        return Some(
+            markdown_html_projection(active, at, side)
+                .and_then(|map| projected_html_site(map, Query::new(at, side, text.len())))
+                .unwrap_or(HtmlDataSite::MarkdownRoot),
+        );
+    }
+    let projected_root = match syntax {
+        NativeSyntax::Jinja(_) => Some(HtmlDataSite::JinjaLiquidRoot(NativeLanguage::Jinja)),
+        NativeSyntax::Liquid(_) => Some(HtmlDataSite::JinjaLiquidRoot(NativeLanguage::Liquid)),
+        NativeSyntax::Php(_) => Some(HtmlDataSite::PhpRoot),
+        _ => None,
+    };
+    if let Some(root) = projected_root {
+        let text = syntax.text();
+        if !text.is_char_boundary(at) || splits_crlf(text.as_str(), at) {
+            return Some(HtmlDataSite::Invalid);
+        }
+        if let NativeSyntax::Liquid(doc) = syntax
+            && side == Assoc::Before
+            && liquid::has_recovered_end_tag_name(doc, at)
+        {
+            return Some(root);
+        }
+        return Some(
+            HtmlProjection::new(syntax)
+                .and_then(|map| projected_html_site(map, Query::new(at, side, text.len())))
+                .unwrap_or(root),
+        );
+    }
+    let html = html_host(syntax)?;
+    if !html.text().is_char_boundary(at) {
+        return None;
+    }
+    let query = Query::new(at, side, html.text().len());
+    let ends_before = |range: Range<usize>| match side {
+        Assoc::Before => range.end < at,
+        Assoc::After => range.end <= at,
+    };
+    match syntax {
+        NativeSyntax::Vue(doc) => {
+            let node = html_node_at(html, &query, |node| {
+                matches!(node.kind(), HtmlNodeKind::Text | HtmlNodeKind::Attribute)
+            });
+            if node.kind() == HtmlNodeKind::Text
+                || node.kind() == HtmlNodeKind::Attribute
+                    && vue_attribute(&html.text().as_str()[node.range()])
+            {
+                let expressions = doc.expressions();
+                let index = expressions.partition_point(|expr| ends_before(expr.range()));
+                return Some(
+                    expressions
+                        .get(index)
+                        .and_then(|expr| {
+                            query
+                                .enter(expr.range(), 0)
+                                .map(|nested| HtmlDataSite::Script(expr.document(), nested))
+                        })
+                        .unwrap_or(HtmlDataSite::Template),
+                );
+            }
+        }
+        NativeSyntax::Angular(doc) => {
+            let regions = doc.regions();
+            let index = regions.partition_point(|region| ends_before(region.root().range()));
+            if let Some(region) = regions
+                .get(index)
+                .filter(|region| query.inside(&region.root().range()))
+            {
+                let scripts = region.scripts();
+                let index = scripts.partition_point(|script| ends_before(script.range()));
+                return Some(
+                    scripts
+                        .get(index)
+                        .and_then(|script| {
+                            query
+                                .enter(script.range(), 0)
+                                .map(|nested| HtmlDataSite::Script(script.document(), nested))
+                        })
+                        .unwrap_or(HtmlDataSite::Template),
+                );
+            }
+        }
+        _ => {}
+    }
+    Some(html_family_site(html, query, None))
+}
+
+pub(super) fn vue_attribute(source: &str) -> bool {
+    source.starts_with(['@', ':']) || source.starts_with("v-")
+}
+
+pub(super) fn html_left_node(doc: &HtmlDocument, at: usize) -> HtmlNode<'_> {
+    html_node_at(
+        doc,
+        &Query::new(at, Assoc::Before, doc.text().len()),
+        |_| false,
+    )
+}
+
+fn html_node_at<'a>(
+    doc: &'a HtmlDocument,
+    query: &Query,
+    stop: impl Fn(HtmlNode<'_>) -> bool,
+) -> HtmlNode<'a> {
+    let mut node = doc.root();
+    while !stop(node) {
+        let Some(child) = node.children().find(|child| query.inside(&child.range())) else {
+            break;
+        };
+        node = child;
+    }
+    node
 }
 
 fn html<'a>(

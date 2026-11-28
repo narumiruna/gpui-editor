@@ -1,5 +1,5 @@
 // Verify css_recovery.json with Node 22.14+ and headless Chromium:
-// node crates/codemirror/tests/fixtures/css_recovery.mjs <archive-root> <chromium-executable>
+// node crates/codemirror/tests/fixtures/css_recovery.mjs <archive-root> <chromium-executable> [--emit]
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync} from 'node:fs';
@@ -73,8 +73,12 @@ document.body.textContent = btoa(String.fromCharCode(...encoder.encode(JSON.stri
     const encoded = html.match(/<body>([A-Za-z0-9+/=]+)<\/body>/)?.[1];
     assert.ok(encoded, 'missing browser output');
     const actual = JSON.parse(Buffer.from(encoded, 'base64'));
-    assert.deepEqual(actual, expected);
-    console.log(`${actual.length} pinned CSS cases matched`);
+    if (process.argv[4] === '--emit') {
+        console.log('[\n' + actual.map(row => '  ' + JSON.stringify(row)).join(',\n') + '\n]');
+    } else {
+        assert.deepEqual(actual, expected);
+        console.log(`${actual.length} pinned CSS cases matched`);
+    }
 } finally {
     rmSync(root, {recursive: true, force: true});
 }

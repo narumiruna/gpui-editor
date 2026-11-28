@@ -8,3 +8,4 @@
 {"step":"close","placement":null,"events":[["destroy","a1"]]}
 {"step":"reopen_b","placement":"top","events":[["create","b2","dog"],["mount","b2"]]}
 {"step":"destroy_view","placement":null,"events":[["destroy","b2"]]}
+{"step":"factory_config","duplicate":false,"conflict":true}

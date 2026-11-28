@@ -8,7 +8,10 @@ use std::{
 
 use regex::Regex;
 
-use crate::autocomplete::session::{CompletionItem, SourceResult};
+use crate::{
+    EditorState, Extension, Facet,
+    autocomplete::session::{CompletionItem, SourceResult},
+};
 
 use super::{CssDocument, CssNode, CssNodeKind::*};
 
@@ -18,8 +21,77 @@ static IDENTIFIER: LazyLock<Regex> =
 static VARIABLE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\A-(?:-[A-Za-z0-9_-]*)?\z").unwrap());
 
-static PROPERTIES: LazyLock<Arc<[CompletionItem]>> =
-    LazyLock::new(|| items(PROPERTY_NAMES, "property").collect());
+type PropertiesFacet = Facet<Arc<CssPropertySnapshot>, Option<Arc<CssPropertySnapshot>>>;
+static PROPERTIES: LazyLock<PropertiesFacet> = LazyLock::new(|| {
+    Facet::new(|inputs: &[&Arc<CssPropertySnapshot>]| inputs.first().copied().cloned())
+});
+
+/// An immutable set of property options shared by the CSS-family sources.
+#[derive(Debug)]
+pub struct CssPropertySnapshot {
+    options: Arc<[CompletionItem]>,
+}
+
+impl CssPropertySnapshot {
+    /// Copy the enumerable keys whose values the host observed to be strings.
+    /// Include inherited enumerable keys if present. No style values are read here.
+    /// An empty input makes an empty snapshot, not the stock list.
+    pub fn from_style_keys(keys: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
+        let mut names: Vec<_> = keys
+            .into_iter()
+            .filter_map(|key| {
+                let key = key.as_ref();
+                if matches!(key, "cssText" | "cssFloat") {
+                    return None;
+                }
+                let mut name = String::with_capacity(key.len());
+                for ch in key.chars() {
+                    if ch.is_ascii_uppercase() {
+                        name.push('-');
+                        name.push(ch.to_ascii_lowercase());
+                    } else {
+                        name.push(ch);
+                    }
+                }
+                Some(name)
+            })
+            .collect();
+        names.sort_unstable_by(|left, right| left.encode_utf16().cmp(right.encode_utf16()));
+        names.dedup();
+        Self {
+            options: names.iter().map(|label| item(label, "property")).collect(),
+        }
+    }
+
+    /// Install this snapshot for state-aware callers. The first in extension
+    /// precedence order wins, even if it has no property names.
+    pub fn extension(self) -> Extension {
+        PROPERTIES.of(Arc::new(self))
+    }
+
+    /// Read the installed snapshot. Compare its `Arc` identity to detect a
+    /// different snapshot. `None` means callers should use the stock names.
+    pub fn source_for(state: &EditorState) -> Option<Arc<Self>> {
+        state
+            .context()
+            .facet(&PROPERTIES)
+            .expect("typed CSS property facet")
+            .as_ref()
+            .clone()
+    }
+
+    pub(crate) fn stock() -> &'static Self {
+        static STOCK: LazyLock<CssPropertySnapshot> = LazyLock::new(|| CssPropertySnapshot {
+            options: items(PROPERTY_NAMES, "property").collect(),
+        });
+        &STOCK
+    }
+
+    pub(in crate::language) fn result(&self, from: usize) -> SourceResult {
+        fixed(from, &self.options)
+    }
+}
+
 static VALUES: LazyLock<Arc<[CompletionItem]>> = LazyLock::new(|| {
     items(VALUE_KEYWORDS, "keyword")
         .chain(items(VALUE_CONSTANTS, "constant"))
@@ -31,17 +103,47 @@ static TAGS: LazyLock<Arc<[CompletionItem]>> = LazyLock::new(|| items(TAG_NAMES,
 static AT_RULES: LazyLock<Arc<[CompletionItem]>> =
     LazyLock::new(|| items(AT_RULE_NAMES, "keyword").collect());
 
+pub(in crate::language) enum FixedOptions {
+    Values,
+    Pseudos,
+    Tags,
+    AtRules,
+}
+
+impl FixedOptions {
+    pub(in crate::language) fn result(self, from: usize) -> SourceResult {
+        fixed(
+            from,
+            match self {
+                Self::Values => &VALUES,
+                Self::Pseudos => &PSEUDOS,
+                Self::Tags => &TAGS,
+                Self::AtRules => &AT_RULES,
+            },
+        )
+    }
+}
+
 /// Return unfiltered CSS syntax completions at a UTF-8 byte position.
 ///
 /// The result uses the query position as its replacement end. Property options
-/// use a fixed browser snapshot, not the CSS properties of a live host.
-/// Incomplete syntax can produce different results from Lezer recovery.
+/// use the pinned stock list. Incomplete syntax can differ from Lezer recovery.
 pub fn css_completion_source(
     doc: &CssDocument,
     position: usize,
     explicit: bool,
 ) -> Option<SourceResult> {
-    complete(doc, position, explicit, true, |node| {
+    css_completion_source_with_properties(doc, position, explicit, CssPropertySnapshot::stock())
+}
+
+/// Run the CSS source with these property options in place of the stock names.
+pub fn css_completion_source_with_properties(
+    doc: &CssDocument,
+    position: usize,
+    explicit: bool,
+    properties: &CssPropertySnapshot,
+) -> Option<SourceResult> {
+    complete(doc, position, explicit, properties, true, |node| {
         node.kind() == VariableName
     })
 }
@@ -52,13 +154,24 @@ pub fn css_completion_source(
 pub fn define_css_completion_source(
     is_variable: impl Fn(CssNode<'_>) -> bool,
 ) -> impl Fn(&CssDocument, usize, bool) -> Option<SourceResult> {
-    move |doc, position, explicit| complete(doc, position, explicit, false, &is_variable)
+    define_css_completion_source_with_properties(is_variable, CssPropertySnapshot::stock())
+}
+
+/// Build a source with a custom variable predicate and property snapshot.
+pub fn define_css_completion_source_with_properties(
+    is_variable: impl Fn(CssNode<'_>) -> bool,
+    properties: &CssPropertySnapshot,
+) -> impl Fn(&CssDocument, usize, bool) -> Option<SourceResult> {
+    move |doc, position, explicit| {
+        complete(doc, position, explicit, properties, false, &is_variable)
+    }
 }
 
 fn complete(
     doc: &CssDocument,
     position: usize,
     explicit: bool,
+    properties: &CssPropertySnapshot,
     recover_custom_properties: bool,
     is_variable: impl Fn(CssNode<'_>) -> bool,
 ) -> Option<SourceResult> {
@@ -75,13 +188,13 @@ fn complete(
         || (is_dash || kind == TagName && !custom_property)
             && matches!(resolve(node, range.end, false).kind(), Block | Styles)
     {
-        return Some(fixed(from, &PROPERTIES));
+        return Some(properties.result(from));
     }
     if kind == ValueName {
-        return Some(fixed(from, &VALUES));
+        return Some(FixedOptions::Values.result(from));
     }
     if kind == PseudoClassName {
-        return Some(fixed(from, &PSEUDOS));
+        return Some(FixedOptions::Pseudos.result(from));
     }
     let variable = custom_property || is_variable(node);
     if variable || (explicit || is_dash) && is_var_arg(doc, node) {
@@ -98,11 +211,15 @@ fn complete(
     if kind == TagName {
         let in_block = std::iter::successors(node.parent(), |node| node.parent())
             .any(|node| node.kind() == Block);
-        return Some(fixed(from, if in_block { &PROPERTIES } else { &TAGS }));
+        return Some(if in_block {
+            properties.result(from)
+        } else {
+            FixedOptions::Tags.result(from)
+        });
     }
     // Local recovery can emit AtKeyword for a bare @. Lezer reports an error.
     if kind == AtKeyword && text.slice(range) != Some("@") {
-        return Some(fixed(from, &AT_RULES));
+        return Some(FixedOptions::AtRules.result(from));
     }
     if !explicit {
         return None;
@@ -113,15 +230,15 @@ fn complete(
         .rfind(|child| child.range().start < position);
     let follows_colon = before.is_some_and(|child| child.kind() == Colon);
     match above.kind() {
-        PseudoClassSelector if follows_colon => Some(fixed(position, &PSEUDOS)),
+        PseudoClassSelector if follows_colon => Some(FixedOptions::Pseudos.result(position)),
         RuleSet
             if before.is_some_and(|node| follows_recovered_pseudo(doc, above, node, position)) =>
         {
-            Some(fixed(position, &PSEUDOS))
+            Some(FixedOptions::Pseudos.result(position))
         }
-        Declaration if follows_colon => Some(fixed(position, &VALUES)),
-        ArgList => Some(fixed(position, &VALUES)),
-        Block | Styles => Some(fixed(position, &PROPERTIES)),
+        Declaration if follows_colon => Some(FixedOptions::Values.result(position)),
+        ArgList => Some(FixedOptions::Values.result(position)),
+        Block | Styles => Some(properties.result(position)),
         _ => None,
     }
 }

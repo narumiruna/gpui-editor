@@ -3,7 +3,8 @@
 //!
 //! Angular regions use the published grammar and mount JavaScript expressions
 //! and statements. The outer HTML parser supplies existing HTML services.
-//! Malformed regions use local repair rather than Lezer's recovery search.
+//! Malformed regions use local repair or bounded LR recovery for a missing
+//! binding name closer.
 
 use std::ops::Range;
 
@@ -11,7 +12,7 @@ use crate::{Assoc, ChangeSet, EditError, Text};
 
 use super::{
     HighlightSpan, IndentContext, IndentOptions, LanguageData, StreamSettings,
-    html::{self, HtmlDocument, HtmlNodeKind, HtmlOptions},
+    html::{self, HtmlDocument, HtmlMount, HtmlNesting, HtmlNodeKind, HtmlOptions},
     javascript::{JavascriptDocument, JavascriptOptions},
     lezer::ReuseStats,
 };
@@ -161,13 +162,32 @@ impl AngularDocument {
 
     /// Configure the base HTML provider. Without options, Angular allows XML-style self-closing tags.
     pub fn parse_with_options(text: Text, options: HtmlOptions) -> Self {
-        Self::from_html(HtmlDocument::parse_with_options(text, options))
+        Self::parse_with_nesting(text, options, HtmlNesting::default())
     }
 
-    /// Apply byte edits using the same HTML dialect. Reuse strict host
-    /// checkpoints where possible, then rebuild the Angular regions and scripts.
+    /// Parse with extra HTML body and attribute routes. An HTML body mount
+    /// hides Angular syntax inside it. An Angular attribute that replaces the
+    /// HTML attribute takes precedence over its HTML value mount.
+    pub fn parse_with_nesting(text: Text, options: HtmlOptions, nesting: HtmlNesting<'_>) -> Self {
+        Self::from_html(HtmlDocument::parse_with_nesting(text, options, nesting))
+    }
+
+    /// Apply byte edits with the same HTML dialect and stock routes. To keep
+    /// custom routes, use [`Self::reparse_with_nesting`].
     pub fn reparse(&self, changes: &ChangeSet) -> Result<Self, EditError> {
-        Ok(Self::from_html(self.html.reparse(changes)?))
+        self.reparse_with_nesting(changes, HtmlNesting::default())
+    }
+
+    /// Apply byte edits and rebuild mounts with the supplied routes. Supply
+    /// custom routes on each call. Reuse strict host checkpoints where possible.
+    pub fn reparse_with_nesting(
+        &self,
+        changes: &ChangeSet,
+        nesting: HtmlNesting<'_>,
+    ) -> Result<Self, EditError> {
+        Ok(Self::from_html(
+            self.html.reparse_with_nesting(changes, nesting)?,
+        ))
     }
 
     /// Strict HTML host checkpoint reuse. This does not count mounted trees.
@@ -191,6 +211,13 @@ impl AngularDocument {
                     }
                     _ => return None,
                 };
+                // A body mount covers the start of the node. A value mount
+                // starts after the attribute name, so it cannot hide the attribute.
+                if mount_at_or_after(&html, range.start)
+                    .is_some_and(|mount| mount.range().contains(&range.start))
+                {
+                    return None;
+                }
                 let (nodes, recovered) = parser::parse(source, range, kind);
                 let scripts = nodes
                     .iter()
@@ -230,8 +257,19 @@ impl AngularDocument {
         self.html.text()
     }
 
+    /// The base HTML document, before Angular replaces its text and attributes.
+    /// Use [`Self::mounts`] for the HTML mounts that remain active.
     pub fn html(&self) -> &HtmlDocument {
         &self.html
+    }
+
+    /// The active HTML mounts in source order. Angular JavaScript mounts are
+    /// available on their respective [`AngularRegion`]s.
+    pub fn mounts(&self) -> impl Iterator<Item = &HtmlMount> {
+        self.html
+            .mounts()
+            .iter()
+            .filter(|mount| !self.replaces_mount(mount))
     }
 
     pub fn regions(&self) -> &[AngularRegion] {
@@ -249,14 +287,19 @@ impl AngularDocument {
 
     pub fn foldable(&self, line_start: usize, line_end: usize) -> Option<Range<usize>> {
         self.text().slice(line_start..line_end)?;
-        self.html.foldable(line_start, line_end).or_else(|| {
-            let script = self.script_at(line_end)?;
-            let offset = script.range.start;
-            let fold = script
-                .document
-                .foldable(line_start.saturating_sub(offset), line_end - offset)?;
-            Some(offset + fold.start..offset + fold.end)
-        })
+        // Still allow an outer HTML fold, but do not ask the replaced mount.
+        let host_end = self.replaced_value_start(line_end).unwrap_or(line_end);
+        self.html
+            .foldable(line_start, host_end)
+            .filter(|fold| fold.end > line_end)
+            .or_else(|| {
+                let script = self.script_at(line_end)?;
+                let offset = script.range.start;
+                let fold = script
+                    .document
+                    .foldable(line_start.saturating_sub(offset), line_end - offset)?;
+                Some(offset + fold.start..offset + fold.end)
+            })
     }
 
     pub fn indentation(
@@ -268,7 +311,12 @@ impl AngularDocument {
         let cx = IndentContext::new(self.text(), position, settings, options)?;
         let fallback = || {
             self.interpolation_indent(position, &cx, options)
-                .or_else(|| self.html.indentation(position, settings, options))
+                .or_else(|| {
+                    // At the value start, HTML uses the opening tag's rule,
+                    // not the replaced attribute mount.
+                    let at = self.replaced_value_start(position).unwrap_or(position);
+                    self.html.indentation(at, settings, options)
+                })
         };
         let Some(script) = self.script_at(position) else {
             return fallback();
@@ -351,6 +399,17 @@ impl AngularDocument {
             .filter(|region| region.root().range().contains(&position))
     }
 
+    fn replaces_mount(&self, mount: &HtmlMount) -> bool {
+        self.region_at(mount.range().start).is_some_and(|region| {
+            region.kind() == AngularRegionKind::Attribute && region.replaces_html()
+        })
+    }
+
+    fn replaced_value_start(&self, position: usize) -> Option<usize> {
+        let mount = mount_at_or_after(&self.html, position)?;
+        (mount.range().start < position && self.replaces_mount(mount)).then(|| mount.range().start)
+    }
+
     fn script_at(&self, position: usize) -> Option<&AngularScript> {
         let region = self.region_at(position)?;
         let at = region
@@ -361,4 +420,10 @@ impl AngularDocument {
             .get(at)
             .filter(|script| script.range.start < position)
     }
+}
+
+fn mount_at_or_after(html: &HtmlDocument, position: usize) -> Option<&HtmlMount> {
+    let mounts = html.mounts();
+    let i = mounts.partition_point(|mount| mount.range().end <= position);
+    mounts.get(i)
 }

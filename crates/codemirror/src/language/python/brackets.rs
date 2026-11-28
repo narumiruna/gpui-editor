@@ -45,7 +45,7 @@ impl PythonDocument {
                 } else {
                     Assoc::Before
                 };
-                let node = self.resolve_at(pos, Some(side))?;
+                let node = self.resolve_bracket_at(pos, side)?;
                 for token in std::iter::successors(Some(node), |node| node.parent()) {
                     if !token.data().range.is_empty()
                         && let Some(expected) = matching_name(token.data().term, direction, pairs)
@@ -61,7 +61,7 @@ impl PythonDocument {
                     }
                 }
                 match_configured_editor_text(lines, pos, direction, config, |at| {
-                    self.resolve_at(at, Some(Assoc::After))
+                    self.resolve_bracket_at(at, Assoc::After)
                         .is_some_and(|candidate| candidate.data().term == node.data().term)
                 })
             },
@@ -74,7 +74,7 @@ impl PythonDocument {
         } else {
             (at + 1, Assoc::Before)
         };
-        let node = self.resolve_at(position, Some(side))?;
+        let node = self.resolve_bracket_at(position, side)?;
         let term = node.data().term;
         if delimiter_index(term) == Some(index) {
             let siblings = node.parent()?.children().filter_map(|sibling| {
@@ -84,7 +84,7 @@ impl PythonDocument {
         }
         let lines = self.editor_lines.as_ref().unwrap_or(&self.text);
         match_editor_text(lines, at..at + 1, index, |other| {
-            self.resolve_at(other, Some(Assoc::After))
+            self.resolve_bracket_at(other, Assoc::After)
                 .is_some_and(|candidate| candidate.data().term == term)
         })
     }

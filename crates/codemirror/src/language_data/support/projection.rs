@@ -1,6 +1,9 @@
 use std::ops::Range;
 
-use crate::{Assoc, language::html::HtmlDocument};
+use crate::{
+    Assoc,
+    language::{html::HtmlDocument, markdown::MarkdownMount},
+};
 
 use super::NativeSyntax;
 
@@ -12,7 +15,7 @@ pub(super) struct HtmlProjection<'a> {
 
 pub(super) struct Segment {
     pub source: Range<usize>,
-    html: Range<usize>,
+    pub html: Range<usize>,
 }
 
 impl<'a> HtmlProjection<'a> {
@@ -44,6 +47,20 @@ impl<'a> HtmlProjection<'a> {
             }
             _ => return None,
         };
+        Some(Self::from_ranges(document, ranges))
+    }
+
+    pub fn from_markdown(mount: &'a MarkdownMount) -> Option<Self> {
+        let NativeSyntax::Html(document) = mount.syntax() else {
+            return None;
+        };
+        Some(Self::from_ranges(document, mount.source_ranges()))
+    }
+
+    fn from_ranges(
+        document: &'a HtmlDocument,
+        ranges: impl IntoIterator<Item = Range<usize>>,
+    ) -> Self {
         let mut segments: Vec<Segment> = Vec::new();
         let mut end = 0;
         for source in ranges {
@@ -62,7 +79,7 @@ impl<'a> HtmlProjection<'a> {
                 });
             }
         }
-        Some(Self { document, segments })
+        Self { document, segments }
     }
 
     pub fn at(&self, position: usize, side: Assoc) -> Option<(&Segment, usize)> {

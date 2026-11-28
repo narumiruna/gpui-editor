@@ -4,6 +4,7 @@
 //! `@codemirror/language` 6.13.1. See `docs/codemirror-upstream.json`.
 //! Tree and highlight positions map directly from UTF-16 to UTF-8 bytes.
 //! Indent and fold queries use LF-normalized CodeMirror logical lines.
+//! Regenerate the fixture with `fixtures/xml_parser.mjs`.
 
 use gpui_editor_codemirror::{
     Change, ChangeSet, EditError, Text,
@@ -195,23 +196,34 @@ fn recovery_drops_the_checkpoint_and_invalid_edits_leave_the_input_unchanged() {
 #[test]
 fn eof_self_close_recovery_follows_edits_without_keeping_checkpoints() {
     let prefix = "<葉 a=\"😀\"/>\r\n".repeat(40);
-    let source = format!("{prefix}<漢😀 x=\r\n\"()\"/>");
+    let source = format!("{prefix}<漢😀 x=\"()\"/>");
     let value = source.rfind("\"()\"").unwrap();
     let start = prefix.len();
     let doc = parse(&source);
-    let broken = update(
+    let adjacent = update(
         &doc,
         &ChangeSet::single(Change::new(value..value + 4, "()")).unwrap(),
     );
-    let end = broken.text().len();
-    assert_eq!(broken.reuse_stats(), ReuseStats::default());
-    let hit = broken.bracket_near(start).unwrap();
-    assert_eq!(hit.start, start..start + 1);
-    assert_eq!(hit.end, Some(end - 2..end));
-    assert!(hit.matched);
+    let spaced = update(
+        &adjacent,
+        &ChangeSet::single(Change::new(value + 1..value + 1, "\r\n\t")).unwrap(),
+    );
+    let number = update(
+        &spaced,
+        &ChangeSet::single(Change::new(value..value + 1, "1")).unwrap(),
+    );
+    for broken in [&adjacent, &spaced, &number] {
+        let end = broken.text().len();
+        assert_eq!(broken.reuse_stats(), ReuseStats::default());
+        let hit = broken.bracket_near(start).unwrap();
+        assert_eq!(hit.start, start..start + 1);
+        assert_eq!(hit.end, Some(end - 2..end));
+        assert!(hit.matched);
+    }
 
+    let end = spaced.text().len();
     let extended = update(
-        &broken,
+        &spaced,
         &ChangeSet::single(Change::new(end..end, "\r\n")).unwrap(),
     );
     assert_eq!(extended.reuse_stats(), ReuseStats::default());
@@ -221,7 +233,7 @@ fn eof_self_close_recovery_follows_edits_without_keeping_checkpoints() {
     let fixed = update(
         &extended,
         &ChangeSet::new(vec![
-            Change::new(value..value + 2, "\"()\""),
+            Change::new(value..end - 2, "\"()\""),
             Change::new(end..end + 2, ""),
         ])
         .unwrap(),

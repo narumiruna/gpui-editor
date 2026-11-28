@@ -111,7 +111,26 @@ macro_rules! custom_document {
     )+};
 }
 
-custom_document!(CssDocument, JavascriptDocument, JsonDocument);
+custom_document!(CssDocument, JavascriptDocument);
+
+impl HtmlCustomDocument for JsonDocument {
+    fn highlights(&self, range: Range<usize>) -> Vec<HighlightSpan<'_>> {
+        self.highlights(range).into_iter().flatten().collect()
+    }
+
+    fn foldable(&self, line_start: usize, line_end: usize) -> Option<Range<usize>> {
+        self.foldable(line_start, line_end)
+    }
+
+    fn indentation(
+        &self,
+        position: usize,
+        settings: StreamSettings,
+        options: IndentOptions<'_>,
+    ) -> Option<usize> {
+        self.syntax_indentation(None, position, settings, options, None)
+    }
+}
 
 /// The embedded language selected by the default or custom routing rules.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -140,6 +159,14 @@ pub struct HtmlMount {
     range: Range<usize>,
     language: HtmlEmbeddedLanguage,
     document: HtmlEmbeddedDocument,
+    kind: MountKind,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum MountKind {
+    Raw,
+    Quoted { closed: bool },
+    Overlay,
 }
 
 impl HtmlMount {
@@ -155,11 +182,54 @@ impl HtmlMount {
     pub fn document(&self) -> &HtmlEmbeddedDocument {
         &self.document
     }
+
+    /// Like Lezer's EnterBracketed mode. This does not grant edit ownership.
+    pub(crate) fn data_contains(&self, source: &str, at: usize, side: Assoc) -> bool {
+        let range = &self.range;
+        match self.kind {
+            MountKind::Raw => {
+                (range.start..=range.end).contains(&at)
+                    && !(side == Assoc::After && at == source.len())
+            }
+            MountKind::Quoted { .. } => {
+                self.quoted_bounds(source).is_some_and(|(end, inclusive)| {
+                    range.start <= at && (at < end || inclusive && at == end)
+                })
+            }
+            MountKind::Overlay => match side {
+                Assoc::Before => range.start < at && at <= range.end,
+                Assoc::After => range.start <= at && at < range.end,
+            },
+        }
+    }
+
+    fn quoted_bounds(&self, source: &str) -> Option<(usize, bool)> {
+        if matches!(self.kind, MountKind::Quoted { closed: true }) {
+            return Some((self.range.end, true));
+        }
+        // The upstream overlay can drop one UTF-16 unit from an unterminated
+        // value. If that splits a scalar, use an exclusive upper byte bound.
+        let last = source[self.range.clone()].chars().next_back()?;
+        if last.len_utf16() == 2 {
+            Some((self.range.end, false))
+        } else {
+            let end = self.range.end - last.len_utf8();
+            (end > self.range.start).then_some((end, true))
+        }
+    }
 }
 
-pub(super) fn collect(doc: &HtmlDocument, nesting: HtmlNesting<'_>) -> Vec<HtmlMount> {
+type RangeProjection<'a> = &'a dyn Fn(Range<usize>) -> Option<Range<usize>>;
+pub(in crate::language) type OriginalSource<'a> = (&'a str, RangeProjection<'a>);
+
+pub(super) fn collect(
+    doc: &HtmlDocument,
+    nesting: HtmlNesting<'_>,
+    original: Option<OriginalSource<'_>>,
+) -> Vec<HtmlMount> {
     let mut mounts = Vec::new();
     let source = doc.text().as_str();
+    let input = RouteInput { source, original };
     let mut overlay = None::<Range<usize>>;
     for node in doc.nodes() {
         let range = node.range();
@@ -176,18 +246,18 @@ pub(super) fn collect(doc: &HtmlDocument, nesting: HtmlNesting<'_>) -> Vec<HtmlM
                 let Some(open) = node.children().next() else {
                     continue;
                 };
-                let Some(name) = tag_name(open, source).filter(|name| !is_raw_tag(name)) else {
+                let Some(name) = input.tag_name(open).filter(|name| !is_raw_tag(name)) else {
                     continue;
                 };
-                let Some(parser) = custom_language(nesting, name, open, source) else {
+                let Some(parser) = custom_language(nesting, name, open, input) else {
                     continue;
                 };
-                let range = body_range(node, open, name, source);
+                let range = body_range(node, open, source);
                 if range.is_empty() {
                     continue;
                 }
                 overlay = Some(range.clone());
-                Route::Custom(parser).mount(source, range)
+                Route::Custom(parser).mount(source, range, MountKind::Overlay)
             }
             ScriptText | StyleText | TextareaText => {
                 let Some(open) = node.parent().and_then(|parent| parent.child(OpenTag)) else {
@@ -198,23 +268,25 @@ pub(super) fn collect(doc: &HtmlDocument, nesting: HtmlNesting<'_>) -> Vec<HtmlM
                     StyleText => "style",
                     _ => "textarea",
                 };
-                let route = custom_language(nesting, name, open, source)
+                let route = custom_language(nesting, name, open, input)
                     .map(Route::Custom)
                     .or_else(|| {
                         let language = match node.kind() {
-                            ScriptText => script_language(open, source),
-                            StyleText => {
-                                style_language(open, source).then_some(HtmlEmbeddedLanguage::Css)
-                            }
+                            ScriptText => script_language(input.type_and_lang(open)),
+                            StyleText => style_language(input.type_and_lang(open))
+                                .then_some(HtmlEmbeddedLanguage::Css),
                             _ => None,
                         };
                         language.map(Route::Stock)
                     });
                 let Some(route) = route else { continue };
-                route.mount(source, range)
+                route.mount(source, range, MountKind::Raw)
             }
             Attribute => {
-                let Some(name) = node.child(AttributeName).map(|name| &source[name.range()]) else {
+                let Some(name) = node
+                    .child(AttributeName)
+                    .map(|node| input.read(node.range()))
+                else {
                     continue;
                 };
                 let route = nesting
@@ -224,7 +296,7 @@ pub(super) fn collect(doc: &HtmlDocument, nesting: HtmlNesting<'_>) -> Vec<HtmlM
                         name == rule.name
                             && rule.tag_name.is_none_or(|name| {
                                 name.is_empty()
-                                    || node.parent().and_then(|tag| tag_name(tag, source))
+                                    || node.parent().and_then(|tag| input.tag_name(tag))
                                         == Some(name)
                             })
                     })
@@ -237,11 +309,12 @@ pub(super) fn collect(doc: &HtmlDocument, nesting: HtmlNesting<'_>) -> Vec<HtmlM
                         _ => None,
                     });
                 let Some(route) = route else { continue };
-                let Some(range) = value_range(node, source).filter(|range| !range.is_empty())
+                let Some((range, kind)) =
+                    attribute_value(node, source).filter(|(r, _)| !r.is_empty())
                 else {
                     continue;
                 };
-                route.mount(source, range)
+                route.mount(source, range, kind)
             }
             _ => continue,
         };
@@ -253,16 +326,64 @@ pub(super) fn collect(doc: &HtmlDocument, nesting: HtmlNesting<'_>) -> Vec<HtmlM
     mounts
 }
 
-fn tag_name<'a>(node: HtmlNode<'_>, source: &'a str) -> Option<&'a str> {
-    node.child(TagName).map(|name| &source[name.range()])
+#[derive(Clone, Copy)]
+struct RouteInput<'a> {
+    source: &'a str,
+    original: Option<OriginalSource<'a>>,
+}
+
+impl<'a> RouteInput<'a> {
+    fn read(self, range: Range<usize>) -> &'a str {
+        self.original
+            .and_then(|(text, project)| text.get(project(range.clone())?))
+            .unwrap_or_else(|| &self.source[range])
+    }
+
+    fn tag_name(self, node: HtmlNode<'_>) -> Option<&'a str> {
+        node.child(TagName).map(|name| self.read(name.range()))
+    }
+
+    fn attributes(self, node: HtmlNode<'_>) -> impl Iterator<Item = (&'a str, &'a str)> {
+        node.children()
+            .filter(|child| child.kind() == Attribute)
+            .filter_map(move |attr| {
+                let name = self.read(attr.child(AttributeName)?.range());
+                let value = value_range(attr, self.source).map_or("", |contents| {
+                    let whole = attr.children().next_back().expect("value node").range();
+                    let trim_start = contents.start - whole.start;
+                    let trim_end = whole.end - contents.end;
+                    let value = self.read(whole);
+                    value
+                        .get(trim_start..value.len().saturating_sub(trim_end))
+                        .unwrap_or_else(|| &self.source[contents])
+                });
+                Some((name, value))
+            })
+    }
+
+    fn type_and_lang(self, node: HtmlNode<'_>) -> (&'a str, &'a str) {
+        let (mut type_, mut lang) = ("", "");
+        for (name, value) in self.attributes(node) {
+            match name {
+                "type" => type_ = value,
+                "lang" => lang = value,
+                _ => {}
+            }
+        }
+        (type_, lang)
+    }
 }
 
 fn is_raw_tag(name: &str) -> bool {
     matches!(name, "script" | "style" | "textarea")
 }
 
-fn body_range(node: HtmlNode<'_>, open: HtmlNode<'_>, name: &str, source: &str) -> Range<usize> {
-    let context = lexer::context_name(name);
+fn body_range(node: HtmlNode<'_>, open: HtmlNode<'_>, source: &str) -> Range<usize> {
+    let input = RouteInput {
+        source,
+        original: None,
+    };
+    let context = lexer::context_name(input.tag_name(open).unwrap_or(""));
     let end = node
         .children()
         .next_back()
@@ -271,7 +392,9 @@ fn body_range(node: HtmlNode<'_>, open: HtmlNode<'_>, name: &str, source: &str) 
             // CloseTag, but upstream only ends an overlay at the ordinary term.
             last.kind() == CloseTag
                 && !is_raw_tag(&context)
-                && tag_name(*last, source).is_some_and(|name| lexer::context_name(name) == context)
+                && input
+                    .tag_name(*last)
+                    .is_some_and(|name| lexer::context_name(name) == context)
         })
         .map_or_else(|| node.range().end, |close| close.range().start);
     open.range().end..end
@@ -281,7 +404,7 @@ fn custom_language<'a>(
     nesting: HtmlNesting<'a>,
     name: &str,
     open: HtmlNode<'_>,
-    source: &str,
+    input: RouteInput<'_>,
 ) -> Option<HtmlNestedParser<'a>> {
     let mut attrs = None;
     nesting
@@ -290,21 +413,10 @@ fn custom_language<'a>(
         .find(|rule| {
             rule.tag == name
                 && rule.attrs.is_none_or(|accept| {
-                    accept(attrs.get_or_insert_with(|| attributes(open, source)))
+                    accept(attrs.get_or_insert_with(|| input.attributes(open).collect()))
                 })
         })
         .map(|rule| rule.parser)
-}
-
-fn attributes<'a>(node: HtmlNode<'_>, source: &'a str) -> HtmlAttributes<'a> {
-    node.children()
-        .filter(|child| child.kind() == Attribute)
-        .filter_map(|attr| {
-            let name = attr.child(AttributeName)?;
-            let value = value_range(attr, source).map_or("", |range| &source[range]);
-            Some((&source[name.range()], value))
-        })
-        .collect()
 }
 
 enum Route<'a> {
@@ -313,7 +425,7 @@ enum Route<'a> {
 }
 
 impl Route<'_> {
-    fn mount(self, source: &str, range: Range<usize>) -> HtmlMount {
+    fn mount(self, source: &str, range: Range<usize>, kind: MountKind) -> HtmlMount {
         use HtmlEmbeddedLanguage::*;
         let text = Text::new(&source[range.clone()]);
         let (language, document) = match self {
@@ -347,11 +459,16 @@ impl Route<'_> {
             range,
             language,
             document,
+            kind,
         }
     }
 }
 
 fn value_range(node: HtmlNode<'_>, source: &str) -> Option<Range<usize>> {
+    attribute_value(node, source).map(|(range, _)| range)
+}
+
+fn attribute_value(node: HtmlNode<'_>, source: &str) -> Option<(Range<usize>, MountKind)> {
     let value = node.children().next_back()?;
     let range = value.range();
     match value.kind() {
@@ -362,32 +479,18 @@ fn value_range(node: HtmlNode<'_>, source: &str) -> Option<Range<usize>> {
                     .children()
                     .next_back()
                     .is_some_and(|last| last.kind() == Error);
-            Some(range.start + 1..range.end - usize::from(has_close))
+            Some((
+                range.start + 1..range.end - usize::from(has_close),
+                MountKind::Quoted { closed: has_close },
+            ))
         }
-        UnquotedAttributeValue => Some(range),
+        UnquotedAttributeValue => Some((range, MountKind::Overlay)),
         _ => None,
     }
 }
 
-fn attribute_values<'a>(node: HtmlNode<'_>, source: &'a str) -> (&'a str, &'a str) {
-    let (mut type_, mut lang) = ("", "");
-    for attr in node.children().filter(|child| child.kind() == Attribute) {
-        let Some(name) = attr.child(AttributeName).map(|name| &source[name.range()]) else {
-            continue;
-        };
-        let result = match name {
-            "type" => &mut type_,
-            "lang" => &mut lang,
-            _ => continue,
-        };
-        *result = value_range(attr, source).map_or("", |range| &source[range]);
-    }
-    (type_, lang)
-}
-
-fn script_language(node: HtmlNode<'_>, source: &str) -> Option<HtmlEmbeddedLanguage> {
+fn script_language((type_, lang): (&str, &str)) -> Option<HtmlEmbeddedLanguage> {
     use HtmlEmbeddedLanguage::*;
-    let (type_, lang) = attribute_values(node, source);
     if type_ == "text/typescript" || lang == "ts" {
         return Some(TypeScript);
     }
@@ -419,8 +522,7 @@ fn script_language(node: HtmlNode<'_>, source: &str) -> Option<HtmlEmbeddedLangu
     .then_some(JavaScript)
 }
 
-fn style_language(node: HtmlNode<'_>, source: &str) -> bool {
-    let (type_, lang) = attribute_values(node, source);
+fn style_language((type_, lang): (&str, &str)) -> bool {
     if !lang.is_empty() && lang != "css" {
         return false;
     }

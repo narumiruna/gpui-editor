@@ -50,6 +50,90 @@ fn cursor_steps_match_the_pinned_iterator_on_corresponding_offsets() {
     }
 }
 
+fn line_cursor_rows() -> impl Iterator<Item = Value> {
+    include_str!("fixtures/text_line_cursor.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+}
+
+#[test]
+fn signed_line_cursor_matches_the_pinned_iterator() {
+    fn require_fused(_: &impl std::iter::FusedIterator) {}
+
+    for row in line_cursor_rows().filter(|row| row["steps"].is_array()) {
+        let id = row["id"].as_str().unwrap();
+        let source = row["source"].as_str().unwrap();
+        let text = Text::new(source);
+        let mut cursor = if let Some(bounds) = row["bounds"].as_array() {
+            text.line_cursor_range(offset(&bounds[0]).unwrap()..offset(&bounds[1]).unwrap())
+                .unwrap()
+        } else {
+            text.line_cursor()
+        };
+        require_fused(&cursor);
+        assert!(!cursor.done());
+        for (index, step) in row["steps"].as_array().unwrap().iter().enumerate() {
+            let skip = isize::try_from(step[0].as_i64().unwrap()).unwrap();
+            let line = if skip == 0 {
+                cursor.next()
+            } else {
+                cursor.next_with_skip(skip).unwrap()
+            };
+            let done = step[4].as_bool().unwrap();
+            // The pinned cursor can update its value after completion. Its `done`
+            // remains true, so that value is not an iterator item.
+            assert_eq!(
+                line.as_deref(),
+                (!done).then(|| step[2].as_str().unwrap()),
+                "{id} step {index}"
+            );
+            assert_eq!(cursor.done(), done, "{id} step {index}");
+            assert_eq!(step[3], false, "{id} step {index}");
+        }
+        assert_eq!(text.to_string(), source, "{id}");
+    }
+}
+
+#[test]
+fn ranged_line_cursor_validates_bounds() {
+    let text = Text::new("hide\nα💡\r\nb\nlast");
+    assert!(text.line_cursor_range(0..1).is_none());
+    assert!(text.line_cursor_range(5..5).is_none());
+    assert!(text.line_cursor_range(2..6).is_none());
+    let descending = Range { start: 3, end: 2 };
+    assert!(text.line_cursor_range(descending).is_none());
+    let mut cursor = text.line_cursor_range(2..4).unwrap();
+    assert_eq!(cursor.next_with_skip(3), Err(EditError::InvalidRange));
+    assert_eq!(
+        cursor.next_with_skip(isize::MIN).unwrap().as_deref(),
+        Some("α💡")
+    );
+    assert_eq!(cursor.next().as_deref(), Some("b"));
+    assert_eq!(cursor.next_with_skip(isize::MIN), Ok(None));
+}
+
+#[test]
+fn signed_line_cursor_rejects_scalar_splits_without_advancing() {
+    let row = line_cursor_rows()
+        .find(|row| row["id"] == "invalid-scalar-boundary")
+        .unwrap();
+    assert_eq!(row["initial"], json!([0xdca1]));
+    assert_eq!(row["rewind"], json!([0xdca1]));
+
+    let text = Text::new(row["source"].as_str().unwrap());
+    let mut cursor = text.line_cursor();
+    assert_eq!(cursor.next_with_skip(2), Err(EditError::InvalidRange));
+    assert!(!cursor.done());
+    assert_eq!(cursor.next_with_skip(1).unwrap().as_deref(), Some("💡"));
+    assert_eq!(cursor.next_with_skip(-3), Err(EditError::InvalidRange));
+    assert!(!cursor.done());
+    assert_eq!(cursor.next_with_skip(-4).unwrap().as_deref(), Some("💡"));
+    assert_eq!(cursor.next().as_deref(), Some("é"));
+    assert_eq!(cursor.next(), None);
+    assert_eq!(cursor.next_with_skip(isize::MIN), Ok(None));
+    assert!(cursor.done());
+}
+
 #[test]
 fn line_ranges_match_pinned_nonempty_ranges_with_checked_native_bounds() {
     for row in rows("lines") {

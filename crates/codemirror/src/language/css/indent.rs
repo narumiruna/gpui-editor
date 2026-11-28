@@ -78,16 +78,20 @@ fn enter_unfinished(mut node: CssNode<'_>, position: usize) -> CssNode<'_> {
 }
 
 fn alignment(node: CssNode<'_>, open: CssNode<'_>, cx: &IndentContext<'_>) -> Option<usize> {
+    // Recovery can omit the missing attribute name entirely. Its lone closer
+    // is not an alignment anchor for that incomplete selector.
+    if node.kind() == AttributeSelector && node.children().len() == 2 {
+        return None;
+    }
     let range = &open.data().range;
     let line = cx.text().line_at(range.start)?;
     let line_end = cx
         .simulated_break()
         .filter(|&at| at > line.range.start)
         .map_or(line.range.end, |at| at.min(line.range.end));
-    let mut interior = node.children();
-    interior.next();
-    interior.next_back();
-    let next = interior.find(|next| next.data().range.end > range.end && next.kind() != Comment)?;
+    let next = node.children().skip(1).find(|next| {
+        next.data().range.end > range.end && !matches!(next.kind(), Comment | Error)
+    })?;
     if next.data().range.start >= line_end {
         return None;
     }

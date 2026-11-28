@@ -303,10 +303,11 @@ pub fn select_all(state: &EditorState) -> CommandResult {
 
 /// Keep only the main range, or collapse a single nonempty range to its head.
 pub fn simplify_selection(state: &EditorState) -> CommandResult {
-    let main = state.selection().main();
-    let selection = if state.selection().ranges().len() > 1 {
-        EditorSelection::single(main.anchor(), main.head())
-    } else if !main.range().is_empty() {
+    let selection = state.selection();
+    let main = selection.main();
+    let selection = if selection.ranges().len() > 1 {
+        selection.as_single()
+    } else if !main.is_empty() {
         EditorSelection::single(main.head(), main.head())
     } else {
         return Ok(None);

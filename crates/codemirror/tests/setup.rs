@@ -1,10 +1,11 @@
 use std::time::Duration;
 
 use gpui_editor_codemirror::{
-    Compartment, EditorSelection, EditorState, Extension, READ_ONLY, Transaction,
-    autocomplete::brackets::close_brackets,
+    Compartment, EditorSelection, EditorState, Extension, READ_ONLY, Text, Transaction,
+    autocomplete::brackets::{close_brackets, insert_bracket},
     commands::bindings::TabFocusMode,
     language::{HighlightTag, HighlightTheme, highlighting_for},
+    language_data::{cpp_extension, java_extension, rust_extension},
     setup::{SetupEditor, basic_setup, minimal_setup},
     view::keymap::{KeyEvent, KeyModifiers, KeyPlatform},
 };
@@ -69,6 +70,48 @@ fn basic_installs_bracket_pair_precedence_and_minimal_does_not() {
     assert_eq!(basic.view().state().selection().main().head(), 2);
     minimal.insert_text("[", at(1000), ()).unwrap();
     assert_eq!(minimal.view().state().text().as_str(), "[)");
+}
+
+#[test]
+fn preset_quotes_use_cpp_java_and_rust_syntax() {
+    let mut differences = Vec::new();
+    for (extension, fixture) in [
+        (cpp_extension(), include_str!("fixtures/cpp_quotes.jsonl")),
+        (java_extension(), include_str!("fixtures/java_quotes.jsonl")),
+        (rust_extension(), include_str!("fixtures/rust_quotes.jsonl")),
+    ] {
+        for line in fixture.lines() {
+            let row: serde_json::Value = serde_json::from_str(line).unwrap();
+            let source = row["source"].as_str().unwrap();
+            let input = row["key"].as_str().unwrap();
+            let name = row["name"].as_str().unwrap();
+            let head = row["head"].as_u64().unwrap().try_into().unwrap();
+            let state = EditorState::create_from_text(
+                Text::new(source),
+                Some(EditorSelection::single(head, head)),
+                extension.clone(),
+            )
+            .unwrap();
+            let mut editor = basic_setup::<()>(state, KeyPlatform::Linux).unwrap();
+            let handled = insert_bracket(editor.view().state(), input)
+                .unwrap()
+                .is_some();
+            assert!(editor.insert_text(input, at(1000), ()).unwrap(), "{name}");
+            let state = editor.view().state();
+            let after = state.text().as_str();
+            let at = state.selection().main().head();
+            if serde_json::json!([handled, after, at])
+                != serde_json::json!([row["handled"], row["after"], row["position"]])
+            {
+                differences.push(format!(
+                    "{name}: handled={handled}, text={after:?}, byte={at}"
+                ));
+            }
+            assert_eq!(editor.view_mut().undo(), Some(()), "{name}");
+            assert_eq!(editor.view().state().text().as_str(), source);
+        }
+    }
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
 }
 
 #[test]

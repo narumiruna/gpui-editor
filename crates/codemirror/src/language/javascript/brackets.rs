@@ -128,7 +128,7 @@ impl JavascriptDocument {
 
 fn match_bracket(nodes: &[Node], lines: &Text, at: usize, byte: u8) -> Option<BracketMatch> {
     let resolve = |byte| {
-        path(nodes, byte, Some(Assoc::After))
+        path(nodes, lines, byte, Some(Assoc::After))
             .last()
             .expect("JavaScript root")
     };
@@ -154,7 +154,11 @@ fn match_configured_bracket(
 ) -> Option<BracketMatch> {
     let forward = direction == Forward;
     let side = if forward { Assoc::After } else { Assoc::Before };
-    let resolve = |at, side| path(nodes, at, Some(side)).last().expect("JavaScript root");
+    let resolve = |at, side| {
+        path(nodes, lines, at, Some(side))
+            .last()
+            .expect("JavaScript root")
+    };
     let start = resolve(pos, side);
     let pairs = bracket_pairs(config);
     for node in std::iter::successors(Some(start), |node| node.parent()) {

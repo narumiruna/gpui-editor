@@ -1,4 +1,4 @@
-use std::{ops::Range, sync::Arc};
+use std::{collections::HashMap, fmt, ops::Range, sync::Arc};
 
 use crate::{
     Assoc, Text,
@@ -9,12 +9,13 @@ use crate::{
         wast::WastDocument,
     },
     language_data::{
-        JsonLanguage, LanguageDescription, LezerLanguage, NativeLanguage, NativeSyntax,
-        SupportedDocument, SyntaxUpdateError, WastLanguage,
+        JsonLanguage, LanguageDescription, LezerLanguage, NativeAsyncLanguageLoad, NativeLanguage,
+        NativeLanguageSupport, NativeSyntax, RustLanguage, SupportedDocument, SyntaxUpdateError,
+        UnavailableLanguage, WastLanguage,
     },
 };
 
-use super::{MarkdownDialect, MarkdownDocument, MarkdownOverlay};
+use super::{MarkdownDialect, MarkdownDocument, MarkdownNodeKind, MarkdownOverlay};
 
 /// Parser choices for the native Markdown language extension.
 #[derive(Clone, Default)]
@@ -35,6 +36,7 @@ pub enum MarkdownCodeParser {
     Native(NativeLanguage),
     Json(JsonLanguage),
     Lezer(LezerLanguage),
+    Rust(RustLanguage),
     Wast(WastLanguage),
 }
 
@@ -57,6 +59,9 @@ impl MarkdownCodeParser {
             Self::Lezer(language) => language
                 .parse_for_editor(text, settings)
                 .map_err(SyntaxUpdateError::StrictSyntax),
+            Self::Rust(language) => language
+                .parse_for_editor(text, settings)
+                .map_err(SyntaxUpdateError::StrictSyntax),
             Self::Wast(language) => language
                 .parse_for_editor(text, settings)
                 .map_err(SyntaxUpdateError::StrictSyntax),
@@ -68,6 +73,7 @@ impl MarkdownCodeParser {
             Self::Native(language) => *language,
             Self::Json(_) => NativeLanguage::Json,
             Self::Lezer(_) => NativeLanguage::LezerGrammar,
+            Self::Rust(_) => NativeLanguage::Rust,
             Self::Wast(_) => NativeLanguage::Wast,
         }
     }
@@ -75,6 +81,27 @@ impl MarkdownCodeParser {
 
 /// Find a parser without discarding its configuration.
 pub type MarkdownCodeParserResolver = dyn Fn(&str) -> Option<MarkdownCodeParser> + Send + Sync;
+
+/// A shared load for a Markdown fence. The host owns and polls its attempt.
+pub type MarkdownCodeLoad =
+    NativeAsyncLanguageLoad<'static, NativeLanguageSupport, UnavailableLanguage>;
+
+/// A selected fence parser or an async handle for one. Neither uses the fallback.
+#[derive(Clone)]
+pub enum MarkdownCodeSelection {
+    Ready(MarkdownCodeParser),
+    Load(Arc<MarkdownCodeLoad>),
+}
+
+/// Select a parser or load handle by the first word of the code info string.
+/// Return `None` for no match. Reuse the same handle for the same description.
+pub type MarkdownCodeSelectionResolver =
+    dyn Fn(&str) -> Option<MarkdownCodeSelection> + Send + Sync;
+
+fn loaded_parser(load: &MarkdownCodeLoad) -> Option<MarkdownCodeParser> {
+    load.support()
+        .map(|support| MarkdownCodeParser::Native(support.language()))
+}
 
 /// Resolve the first word of a fenced code block's info string.
 #[derive(Clone)]
@@ -89,6 +116,12 @@ pub enum MarkdownCodeLanguages {
         resolve: Arc<MarkdownCodeParserResolver>,
         fallback: Option<MarkdownCodeParser>,
     },
+    /// Allow a named language to load on demand. Use `fallback` only when no
+    /// language matches, not when a selected load has no support yet.
+    Deferred {
+        resolve: Arc<MarkdownCodeSelectionResolver>,
+        fallback: Option<MarkdownCodeParser>,
+    },
 }
 
 impl MarkdownParserConfig {
@@ -99,34 +132,66 @@ impl MarkdownParserConfig {
     }
 
     /// Resolve the named parser before either fallback. An empty info string
-    /// bypasses named selection.
+    /// bypasses named selection. A selected load without support returns
+    /// `None`, not the fallback. This query does not start an attempt.
     pub fn code_parser(&self, info: &str) -> Option<MarkdownCodeParser> {
+        match self.code_selection(info)? {
+            MarkdownCodeSelection::Ready(parser) => Some(parser),
+            MarkdownCodeSelection::Load(load) => loaded_parser(&load),
+        }
+    }
+
+    fn code_selection(&self, info: &str) -> Option<MarkdownCodeSelection> {
+        use MarkdownCodeSelection::Ready;
+        let native = |language| Ready(MarkdownCodeParser::Native(language));
         let name = (!info.is_empty()).then(|| {
             info.split_once(|ch: char| (ch.is_whitespace() && ch != '\u{85}') || ch == '\u{feff}')
                 .map_or(info, |(name, _)| name)
         });
-        let parser = match &self.code_languages {
+        let selected = match &self.code_languages {
             Some(MarkdownCodeLanguages::Catalog(catalog)) => name
                 .and_then(|name| LanguageDescription::match_name(catalog, name, true))
                 .and_then(LanguageDescription::built_in)
-                .map(MarkdownCodeParser::Native),
-            Some(MarkdownCodeLanguages::Resolve(resolve)) => name
-                .and_then(|name| resolve(name))
-                .map(MarkdownCodeParser::Native),
+                .map(native),
+            Some(MarkdownCodeLanguages::Resolve(resolve)) => {
+                name.and_then(|name| resolve(name)).map(native)
+            }
             Some(MarkdownCodeLanguages::Configured { resolve, fallback }) => name
                 .and_then(|name| resolve(name))
-                .or_else(|| fallback.clone()),
+                .or_else(|| fallback.clone())
+                .map(Ready),
+            Some(MarkdownCodeLanguages::Deferred { resolve, fallback }) => name
+                .and_then(|name| resolve(name))
+                .or_else(|| fallback.clone().map(Ready)),
             None => None,
         };
-        parser.or(self.default_code_language.map(MarkdownCodeParser::Native))
+        selected.or(self.default_code_language.map(native))
     }
 }
 
 /// An embedded parser result and its source map into the Markdown document.
-pub struct MarkdownMount {
+#[derive(Clone)]
+pub struct MarkdownMount(Arc<MountedSyntax>);
+
+struct MountedSyntax {
     code_parser: Option<MarkdownCodeParser>,
     syntax: NativeSyntax,
     segments: Vec<Segment>,
+}
+
+#[derive(Clone)]
+pub(super) struct PendingCodeMount {
+    load: Arc<MarkdownCodeLoad>,
+    ranges: Vec<Range<usize>>,
+}
+
+impl fmt::Debug for PendingCodeMount {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PendingCodeMount")
+            .field("language", &self.load.description().name)
+            .field("ranges", &self.ranges)
+            .finish()
+    }
 }
 
 #[derive(Debug)]
@@ -186,49 +251,6 @@ impl MarkdownSourceMap<'_> {
     }
 }
 
-/// Changes in the difference between original bytes and default CodeMirror
-/// UTF-16 positions. Store only the ends of characters and line endings that
-/// change the difference. A snapshot builds this index only for a predicate.
-#[derive(Debug)]
-pub(super) struct EditorOffsets(Box<[(usize, usize)]>);
-
-impl EditorOffsets {
-    pub(super) fn new(source: &str) -> Self {
-        let mut offsets = Vec::new();
-        let mut delta = 0;
-        for (at, ch) in source.char_indices() {
-            let width = ch.len_utf8();
-            let crlf = usize::from(ch == '\r' && source.as_bytes().get(at + 1) == Some(&b'\n'));
-            let removed = width - ch.len_utf16() + crlf;
-            if removed > 0 {
-                delta += removed;
-                let end = at + width + crlf;
-                offsets.push((end, end - delta));
-            }
-        }
-        Self(offsets.into_boxed_slice())
-    }
-
-    pub(super) fn editor(&self, byte: usize) -> usize {
-        let i = self.0.partition_point(|&(end, _)| end <= byte);
-        byte - self.delta(i)
-    }
-
-    pub(super) fn source(&self, editor: usize) -> usize {
-        let i = self.0.partition_point(|&(_, end)| end <= editor);
-        // Between two surrogates this yields a byte inside the scalar. Only
-        // compare that byte to node bounds; never use it to slice the text.
-        editor + self.delta(i)
-    }
-
-    fn delta(&self, i: usize) -> usize {
-        i.checked_sub(1).map_or(0, |i| {
-            let (byte, editor) = self.0[i];
-            byte - editor
-        })
-    }
-}
-
 impl MarkdownDocument {
     /// Parse the HTML and code overlays. The resolver receives the first
     /// word of the code info string, or an empty string if none was given.
@@ -238,7 +260,7 @@ impl MarkdownDocument {
         resolve: impl Fn(&str) -> Option<NativeLanguage> + 'a,
     ) -> impl Iterator<Item = MarkdownMount> + 'a {
         self.mounts_with_settings(
-            move |info| {
+            move |info, _| {
                 resolve(info.split_whitespace().next().unwrap_or(""))
                     .map(MarkdownCodeParser::Native)
             },
@@ -247,92 +269,214 @@ impl MarkdownDocument {
         .filter_map(Result::ok)
     }
 
-    pub(crate) fn mounts_with_settings<'a>(
+    // A host section can include the line break after the code block.
+    // No other difference in the block bounds identifies the same source.
+    pub(crate) fn code_block_ranges(
+        &self,
+        block: &Range<usize>,
+    ) -> Option<impl Iterator<Item = Range<usize>> + Clone + '_> {
+        use MarkdownNodeKind::{CodeBlock, CodeText, FencedCode};
+
+        self.text().slice(block.clone())?;
+        let (node, _) = self.path(block.start, false).find(|(node, _)| {
+            matches!(node.kind, CodeBlock | FencedCode)
+                && node.range.start == block.start
+                && matches!(
+                    self.text().slice(node.range.end..block.end),
+                    Some("" | "\n" | "\r\n" | "\r")
+                )
+        })?;
+        Some(
+            node.children
+                .iter()
+                .filter(|child| child.kind == CodeText && !child.range.is_empty())
+                .map(|child| child.range.clone()),
+        )
+    }
+
+    pub(crate) fn configure_mounts(
+        &mut self,
+        config: &MarkdownParserConfig,
+        settings: StreamSettings,
+    ) -> Result<Vec<MarkdownMount>, ParseError> {
+        let mut pending = Vec::new();
+        let mounts = self
+            .mounts_with_settings(
+                |info, ranges| match config.code_selection(info)? {
+                    MarkdownCodeSelection::Ready(parser) => Some(parser),
+                    MarkdownCodeSelection::Load(load) => {
+                        let parser = loaded_parser(&load);
+                        if parser.is_none() {
+                            // Start or join even for an empty body. The handle retains the
+                            // attempt; parsing does not poll it.
+                            drop(load.load());
+                            let ranges: Vec<_> = ranges
+                                .iter()
+                                .filter(|range| !range.is_empty())
+                                .cloned()
+                                .collect();
+                            if !ranges.is_empty() {
+                                pending.push(PendingCodeMount { load, ranges });
+                            }
+                        }
+                        parser
+                    }
+                },
+                settings,
+            )
+            .collect::<Result<_, _>>()?;
+        self.pending_code = pending.into();
+        Ok(mounts)
+    }
+
+    /// Source segments covered by placeholders, not by child syntax.
+    pub(crate) fn pending_code_ranges(&self) -> Option<impl Iterator<Item = Range<usize>> + '_> {
+        (!self.pending_code.is_empty()).then(|| {
+            self.pending_code
+                .iter()
+                .flat_map(|fence| fence.ranges.iter().cloned())
+        })
+    }
+
+    pub(crate) fn refresh_mounts(
+        &self,
+        settings: StreamSettings,
+    ) -> Result<Option<(Self, Vec<MarkdownMount>)>, ParseError> {
+        let mut support = HashMap::new();
+        let mut mounts = Vec::new();
+        let mut pending = Vec::new();
+        for fence in &*self.pending_code {
+            // Fences that share a handle use the same readiness result.
+            let parser = support
+                .entry(Arc::as_ptr(&fence.load))
+                .or_insert_with(|| loaded_parser(&fence.load));
+            if let Some(parser) = parser
+                && let Some(mount) = self
+                    .mount_with_settings(Some(parser.clone()), &fence.ranges, settings)
+                    .transpose()?
+            {
+                mounts.push(mount);
+            } else {
+                pending.push(fence);
+            }
+        }
+        if mounts.is_empty() {
+            return Ok(None);
+        }
+        let mut doc = self.clone();
+        doc.pending_code = pending.into_iter().cloned().collect();
+        doc.parsed_bytes = 0;
+        doc.reused_blocks = self.root().children.len();
+        Ok(Some((doc, mounts)))
+    }
+
+    fn mounts_with_settings<'a>(
         &'a self,
-        resolve: impl Fn(&str) -> Option<MarkdownCodeParser> + 'a,
+        mut resolve: impl FnMut(&str, &[Range<usize>]) -> Option<MarkdownCodeParser> + 'a,
         settings: StreamSettings,
     ) -> impl Iterator<Item = Result<MarkdownMount, ParseError>> + 'a {
         self.overlays().filter_map(move |overlay| {
             let (language, ranges) = match overlay {
-                MarkdownOverlay::Code { info, ranges } => (Some(resolve(info)?), ranges),
+                MarkdownOverlay::Code { info, ranges } => (Some(resolve(info, &ranges)?), ranges),
                 MarkdownOverlay::Html { ranges } => (None, ranges),
             };
-            let mut input = String::new();
-            let mut segments = Vec::with_capacity(ranges.len());
-            for source in ranges.into_iter().filter(|range| !range.is_empty()) {
-                let start = input.len();
-                input.push_str(self.text().slice(source.clone())?);
-                segments.push(Segment { source, start });
-            }
-            if segments.is_empty() {
-                return None;
-            }
-            let text = Text::new(input);
-            let syntax = match &language {
-                Some(MarkdownCodeParser::Native(language)) => {
-                    language.parse_with_stream_settings(text, settings).ok()?
-                }
-                Some(parser) => match parser.parse(text, settings) {
-                    Ok(document) => document.into_syntax(),
-                    Err(SyntaxUpdateError::StrictSyntax(error)) => {
-                        return Some(Err(error.map_offset(|offset| {
-                            MarkdownSourceMap(&segments).source_offset(offset)
-                        })));
-                    }
-                    Err(_) => return None,
-                },
-                None => NativeSyntax::Html(HtmlDocument::parse_with_options(
-                    text,
-                    HtmlOptions {
-                        match_closing_tags: false,
-                        ..HtmlOptions::default()
-                    },
-                )),
-            };
-            Some(Ok(MarkdownMount {
-                code_parser: language,
-                syntax,
-                segments,
-            }))
+            self.mount_with_settings(language, &ranges, settings)
         })
+    }
+
+    fn mount_with_settings(
+        &self,
+        language: Option<MarkdownCodeParser>,
+        ranges: &[Range<usize>],
+        settings: StreamSettings,
+    ) -> Option<Result<MarkdownMount, ParseError>> {
+        let mut input = String::new();
+        let mut segments = Vec::with_capacity(ranges.len());
+        for source in ranges.iter().filter(|range| !range.is_empty()) {
+            let start = input.len();
+            input.push_str(self.text().slice(source.clone())?);
+            segments.push(Segment {
+                source: source.clone(),
+                start,
+            });
+        }
+        if segments.is_empty() {
+            return None;
+        }
+        let text = Text::new(input);
+        let syntax = match &language {
+            Some(MarkdownCodeParser::Native(language)) => {
+                language.parse_with_stream_settings(text, settings).ok()?
+            }
+            Some(parser) => match parser.parse(text, settings) {
+                Ok(document) => document.into_syntax(),
+                Err(SyntaxUpdateError::StrictSyntax(error)) => {
+                    return Some(Err(error.map_offset(|offset| {
+                        MarkdownSourceMap(&segments).source_offset(offset)
+                    })));
+                }
+                Err(_) => return None,
+            },
+            None => NativeSyntax::Html(HtmlDocument::parse_with_options(
+                text,
+                HtmlOptions {
+                    match_closing_tags: false,
+                    ..HtmlOptions::default()
+                },
+            )),
+        };
+        Some(Ok(MarkdownMount(Arc::new(MountedSyntax {
+            code_parser: language,
+            syntax,
+            segments,
+        }))))
     }
 }
 
 impl MarkdownMount {
     pub fn language(&self) -> NativeLanguage {
-        self.code_parser
+        self.0
+            .code_parser
             .as_ref()
             .map_or(NativeLanguage::Html, MarkdownCodeParser::language)
     }
 
-    pub(crate) fn uses_wast_parser(&self, expected: &WastLanguage) -> bool {
-        matches!(&self.code_parser, Some(MarkdownCodeParser::Wast(parser)) if parser == expected)
+    pub(crate) fn code_parser(&self) -> Option<&MarkdownCodeParser> {
+        self.0.code_parser.as_ref()
+    }
+
+    pub(crate) fn uses_parser(&self, expected: &MarkdownCodeParser) -> bool {
+        self.code_parser() == Some(expected)
     }
 
     pub(crate) fn has_configured_folds(&self) -> bool {
         self.wast().is_some()
             || matches!(
-                &self.code_parser,
-                Some(MarkdownCodeParser::Json(_) | MarkdownCodeParser::Lezer(_))
+                &self.0.code_parser,
+                Some(
+                    MarkdownCodeParser::Json(_)
+                        | MarkdownCodeParser::Lezer(_)
+                        | MarkdownCodeParser::Rust(_)
+                )
             )
     }
 
     /// Syntax positions are relative to the concatenated embedded source.
     pub fn syntax(&self) -> &NativeSyntax {
-        &self.syntax
+        &self.0.syntax
     }
 
     /// The Markdown byte ranges consumed by this parser, in input order.
     pub fn source_ranges(&self) -> impl ExactSizeIterator<Item = Range<usize>> + '_ {
-        self.segments.iter().map(|segment| segment.source.clone())
+        self.0.segments.iter().map(|segment| segment.source.clone())
     }
 
     pub(crate) fn source_map(&self) -> MarkdownSourceMap<'_> {
-        MarkdownSourceMap(&self.segments)
+        MarkdownSourceMap(&self.0.segments)
     }
 
     pub(crate) fn wast(&self) -> Option<&WastDocument> {
-        match &self.syntax {
+        match self.syntax() {
             NativeSyntax::Wast(doc) => Some(doc),
             _ => None,
         }
@@ -341,15 +485,16 @@ impl MarkdownMount {
     /// Project embedded highlights into the original Markdown. If a token
     /// crosses excluded markup, split its span at that markup.
     pub fn highlights(&self) -> impl Iterator<Item = HighlightSpan<'_>> {
-        self.syntax
-            .highlights(0..self.syntax.text().len())
+        let syntax = self.syntax();
+        let segments = &self.0.segments;
+        syntax
+            .highlights(0..syntax.text().len())
             .into_iter()
             .flatten()
             .flat_map(|span| {
-                let start = self
-                    .segments
-                    .partition_point(|segment| segment.parsed_end() <= span.range.start);
-                self.segments[start..]
+                let start =
+                    segments.partition_point(|segment| segment.parsed_end() <= span.range.start);
+                segments[start..]
                     .iter()
                     .take_while(move |segment| segment.start < span.range.end)
                     .map(move |segment| HighlightSpan {

@@ -3,7 +3,7 @@ use std::{collections::VecDeque, iter::FusedIterator, ops::Range, str::CharIndic
 use unicode_normalization::UnicodeNormalization;
 
 use super::{CursorOptions, SearchError, SearchMatch, check_range, filter::MatchFilter};
-use crate::{Text, language::line_projection::splits_crlf};
+use crate::{Text, TextCursor, language::line_projection::splits_crlf};
 
 #[derive(Clone, Debug)]
 pub(super) struct LiteralPattern {
@@ -50,9 +50,28 @@ pub struct SearchCursor<'a> {
     chars: CharIndices<'a>,
     pattern: LiteralPattern,
     filter: MatchFilter,
+    fragments: Option<Fragments<'a>>,
     logical_lines: bool,
     matched: usize,
     starts: VecDeque<(usize, bool)>,
+}
+
+struct Fragments<'a> {
+    cursor: TextCursor<'a>,
+    current: Range<usize>,
+}
+
+impl Fragments<'_> {
+    fn ending_at(&mut self, end: usize) -> Range<usize> {
+        // The completing scalar belongs to this fragment even if it ends
+        // exactly at the fragment's right edge.
+        while self.current.end < end {
+            let start = self.current.end;
+            let chunk = self.cursor.next().expect("match within scan range");
+            self.current = start..start + chunk.len();
+        }
+        self.current.clone()
+    }
 }
 
 impl<'a> SearchCursor<'a> {
@@ -98,12 +117,19 @@ impl<'a> SearchCursor<'a> {
     ) -> Self {
         let base = range.start;
         let source = text.as_str();
+        let fragments = filter.has_whole_word().then(|| Fragments {
+            cursor: text
+                .cursor_range(base, range.end)
+                .expect("valid scan range"),
+            current: base..base,
+        });
         Self {
             source,
             base,
             chars: source[range].char_indices(),
             pattern,
             filter,
+            fragments,
             logical_lines: false,
             matched: 0,
             starts: VecDeque::new(),
@@ -205,7 +231,13 @@ impl<'a> SearchCursor<'a> {
         self.matched = fallback[self.matched - 1];
         let &(start, precise_start) = self.starts.front()?;
         let range = start..range.end;
-        if !self.filter.matches_word(self.source, range.clone()) {
+        if let Some(fragments) = self.fragments.as_mut()
+            && !self.filter.matches_literal_word(
+                self.source,
+                range.clone(),
+                fragments.ending_at(range.end),
+            )
+        {
             return None;
         }
         let found = SearchMatch {

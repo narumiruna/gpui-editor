@@ -179,6 +179,77 @@ fn external_runtime_pins_do_not_change_migration_package_counts() {
 }
 
 #[test]
+fn migration_totals_count_each_pinned_package_once() {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Coverage {
+        Full,
+        Partial,
+        Missing,
+    }
+
+    let report = include_str!("../../../docs/codemirror-migration-coverage.md");
+    let mut coverage = HashMap::new();
+    for row in report.lines().filter_map(|line| line.strip_prefix("| `")) {
+        let (name, rest) = row.split_once('`').unwrap();
+        let (_, detail) = rest.split_once(" | ").unwrap();
+        let status = match detail.split_once(".**").unwrap().0 {
+            "**Fully ported" => Coverage::Full,
+            "**Ported subset" => Coverage::Partial,
+            "**Not ported" => Coverage::Missing,
+            _ => panic!("missing migration status: {name}"),
+        };
+        coverage
+            .entry(name)
+            .and_modify(|previous| {
+                if *previous != status {
+                    *previous = Coverage::Partial;
+                }
+            })
+            .or_insert(status);
+    }
+
+    let pins: Value =
+        serde_json::from_str(include_str!("../../../docs/codemirror-upstream.json")).unwrap();
+    let packages = pins["packages"].as_array().unwrap();
+    let mut core = [0; 3];
+    let mut all = [0; 3];
+    for pin in packages {
+        let name = pin["name"].as_str().unwrap().rsplit('/').next().unwrap();
+        let status = coverage
+            .remove(name)
+            .unwrap_or_else(|| panic!("missing coverage for {name}"));
+        let index = match status {
+            Coverage::Full => 0,
+            Coverage::Partial => 1,
+            Coverage::Missing => 2,
+        };
+        all[index] += 1;
+        if pin["group"] == "core" {
+            core[index] += 1;
+        }
+    }
+    assert!(coverage.is_empty(), "unlisted package in report");
+
+    for (label, expected) in [("Core packages", core), ("All listed packages", all)] {
+        let prefix = format!("| {label} | ");
+        let row = report
+            .lines()
+            .find_map(|line| line.strip_prefix(&prefix))
+            .unwrap();
+        let cells: Vec<_> = row.trim_end_matches(" |").split(" | ").collect();
+        assert_eq!(cells.len(), expected.len(), "{label}");
+        let denominator = expected.iter().sum::<usize>();
+        for (cell, count) in cells.into_iter().zip(expected) {
+            let (fraction, percentage) = cell.split_once(" (").unwrap();
+            assert_eq!(fraction, format!("{count}/{denominator}"), "{label}");
+            let printed: f64 = percentage.strip_suffix("%)").unwrap().parse().unwrap();
+            let exact = count as f64 * 100.0 / denominator as f64;
+            assert!((printed - exact).abs() <= 0.5, "{label}: {cell}");
+        }
+    }
+}
+
+#[test]
 fn bundled_legacy_modes_match_unique_upstream_concrete_exports() {
     // Classification from the exact release's runtime values. The other
     // exports are seven factories and the CSS keyword table.

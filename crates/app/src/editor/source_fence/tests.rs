@@ -24,6 +24,7 @@ use crate::{
     },
 };
 
+mod deferred;
 mod indent;
 mod lr;
 

@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use gpui_editor_codemirror::{
-    Compartment, EditError, EditorState, Extension, Range, Transaction,
+    Change, ChangeSet, Compartment, EditError, EditorState, Extension, Range, Transaction,
     lint::{
-        Diagnostic, LintGutterConfig, Severity, lint_gutter, lint_gutter_markers,
-        lint_gutter_tooltip, lint_gutter_widget_marker, set_diagnostics,
+        Diagnostic, LintConfig, LintGutterConfig, Severity, diagnostic_count, lint_gutter,
+        lint_gutter_markers, lint_gutter_tooltip, lint_gutter_widget_marker, linter,
+        set_diagnostics,
     },
     setup::basic_setup,
     view::{
@@ -78,6 +79,91 @@ fn gutter_grouping_uses_default_logical_lines_and_removes_its_slot() {
             .unwrap()
             .is_none()
     );
+}
+
+#[test]
+fn gutter_publication_and_edit_mapping_match_the_pinned_state() {
+    let mut rows = include_str!("fixtures/lint_gutter_mapping.jsonl").lines();
+    let start: Value = serde_json::from_str(rows.next().unwrap()).unwrap();
+    let slot = Compartment::new();
+    let mut state = EditorState::with_extensions(
+        start["source"].as_str().unwrap(),
+        Extension::group([
+            linter(
+                None,
+                LintConfig {
+                    marker_filter: Some(Arc::new(|_, _| Vec::new())),
+                    ..Default::default()
+                },
+            ),
+            slot.of(Extension::default()),
+        ]),
+    )
+    .unwrap();
+    for line in rows {
+        let case: Value = serde_json::from_str(line).unwrap();
+        let value = &case["value"];
+        let tx = match case["op"].as_str().unwrap() {
+            "configure" => {
+                let extension = match value.as_str().unwrap() {
+                    "off" => Extension::default(),
+                    "all" => lint_gutter(Default::default()),
+                    "without errors" => lint_gutter(LintGutterConfig {
+                        marker_filter: Some(Arc::new(|mut diagnostics, _| {
+                            diagnostics.retain(|d| d.severity != Severity::Error);
+                            diagnostics
+                        })),
+                        ..Default::default()
+                    }),
+                    other => panic!("unknown configuration {other}"),
+                };
+                Transaction::default().with_effects([slot.reconfigure(extension)])
+            }
+            "publish" => set_diagnostics(
+                value
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|d| {
+                        let severity = match d[2].as_str().unwrap() {
+                            "hint" => Severity::Hint,
+                            "info" => Severity::Info,
+                            "warning" => Severity::Warning,
+                            "error" => Severity::Error,
+                            other => panic!("unknown severity {other}"),
+                        };
+                        Diagnostic::new(byte(&d[0])..byte(&d[1]), severity, d[3].as_str().unwrap())
+                    })
+                    .collect(),
+            ),
+            "edit" => Transaction::new(
+                ChangeSet::single(Change::new(
+                    byte(&value[0])..byte(&value[1]),
+                    value[2].as_str().unwrap(),
+                ))
+                .unwrap(),
+            ),
+            other => panic!("unknown operation {other}"),
+        };
+        state.update(tx).unwrap();
+        let markers = lint_gutter_markers(&state).map(|markers| {
+            markers
+                .iter(0)
+                .map(|m| {
+                    let messages: Vec<_> =
+                        m.value.diagnostics().iter().map(|d| &d.message).collect();
+                    json!([
+                        m.from,
+                        format!("{:?}", m.value.severity()).to_lowercase(),
+                        messages
+                    ])
+                })
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(json!(markers), case["markers"], "{line}");
+        assert_eq!(diagnostic_count(&state), 0);
+        assert_eq!(state.text().as_str(), case["raw"].as_str().unwrap());
+    }
 }
 
 #[test]

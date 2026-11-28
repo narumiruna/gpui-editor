@@ -22,8 +22,9 @@ static PLACEMENT: LazyLock<Facet<PanelPlacement, PanelPlacement>> = LazyLock::ne
 });
 
 /// Set the placement of the registered search panel. The default is bottom.
-/// Multiple inputs use extension precedence. An open native panel keeps its
-/// identity when its declared placement changes.
+/// Multiple inputs use extension precedence. The stock panel keeps its
+/// identity when its declared placement changes. An open custom panel keeps
+/// the placement it had when it opened.
 pub fn search_panel_placement(placement: PanelPlacement) -> Extension {
     PLACEMENT.of(placement)
 }
@@ -38,6 +39,7 @@ pub fn search_panel_id() -> PanelId {
 struct SearchState {
     query: Arc<SearchQuery>,
     panel_open: bool,
+    custom_placement: Option<PanelPlacement>,
 }
 
 static SEARCH_STATE: LazyLock<StateField<SearchState>> = LazyLock::new(|| {
@@ -46,6 +48,7 @@ static SEARCH_STATE: LazyLock<StateField<SearchState>> = LazyLock::new(|| {
             Ok(SearchState {
                 query: Arc::new(default_query(state, *state.facet(&SEARCH_OPTIONS)?, None)),
                 panel_open: false,
+                custom_placement: None,
             })
         },
         |value, update| {
@@ -57,10 +60,19 @@ static SEARCH_STATE: LazyLock<StateField<SearchState>> = LazyLock::new(|| {
                     next.panel_open = *open;
                 }
             }
+            if !next.panel_open {
+                next.custom_placement = None;
+            } else if !value.panel_open && panel::has_factory(update.state())? {
+                next.custom_placement = Some(*update.state().facet(&PLACEMENT)?);
+            }
             Ok(next)
         },
         StateFieldOptions::<SearchState>::default()
-            .compare(|a, b| a.panel_open == b.panel_open && Arc::ptr_eq(&a.query, &b.query))
+            .compare(|a, b| {
+                a.panel_open == b.panel_open
+                    && a.custom_placement == b.custom_placement
+                    && Arc::ptr_eq(&a.query, &b.query)
+            })
             .provide(|field| {
                 Extension::group([
                     SHOW_PANEL.compute_with_dependencies(
@@ -69,10 +81,14 @@ static SEARCH_STATE: LazyLock<StateField<SearchState>> = LazyLock::new(|| {
                             deps.facet(&PLACEMENT);
                         },
                         move |state| {
-                            if !state.field(&field)?.is_some_and(|search| search.panel_open) {
+                            let Some(search) =
+                                state.field(&field)?.filter(|search| search.panel_open)
+                            else {
                                 return Ok(None);
-                            }
-                            let placement = *state.facet(&PLACEMENT)?;
+                            };
+                            let placement = search
+                                .custom_placement
+                                .map_or_else(|| state.facet(&PLACEMENT).map(|value| *value), Ok)?;
                             Ok(Some(Panel::Custom {
                                 id: search_panel_id(),
                                 placement,

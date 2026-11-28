@@ -68,7 +68,8 @@ fn configured_hits_match_the_pinned_plugins() {
 
 #[test]
 fn python_config_does_not_match_in_the_unparsed_suffix() {
-    let source = "first = (1)\r\nbroken = )\r\nlater = [2] # «😀»\r\n";
+    // An unexpected `]` still leaves this suffix unparsed.
+    let source = "first = (1)\r\nbroken = ]\r\nlater = [2] # «😀»\r\n";
     let doc = PythonDocument::parse(Text::new(source));
     assert!(doc.is_recovered());
     let config = BracketConfig {

@@ -5,7 +5,7 @@ use crate::{Assoc, Text};
 use super::{
     super::{
         IndentContext,
-        html::{HtmlDocument, HtmlNodeKind, HtmlOptions},
+        html::{HtmlDocument, HtmlNesting, HtmlNodeKind, HtmlOptions},
     },
     HighlightSpan, IndentOptions, Node, StreamSettings,
 };
@@ -25,7 +25,12 @@ pub struct JinjaHtml {
 }
 
 impl JinjaHtml {
-    pub(super) fn parse(text: &Text, nodes: &[Node], options: HtmlOptions) -> Option<Self> {
+    pub(super) fn parse_with_nesting(
+        text: &Text,
+        nodes: &[Node],
+        options: HtmlOptions,
+        nesting: HtmlNesting<'_>,
+    ) -> Option<Self> {
         let mut projected = String::new();
         let mut segments = Vec::<Segment>::new();
         for node in nodes
@@ -54,7 +59,22 @@ impl JinjaHtml {
         if segments.is_empty() {
             return None;
         }
-        let document = HtmlDocument::parse_with_options(Text::new(projected), options);
+        let original = |range: Range<usize>| {
+            let first =
+                segments.get(segments.partition_point(|part| part.projected.end <= range.start))?;
+            let last =
+                segments.get(segments.partition_point(|part| part.projected.end < range.end))?;
+            Some(
+                first.source.start + range.start - first.projected.start
+                    ..last.source.start + range.end - last.projected.start,
+            )
+        };
+        let document = HtmlDocument::parse_projected(
+            Text::new(projected),
+            options,
+            nesting,
+            (text.as_str(), &original),
+        );
         Some(Self { document, segments })
     }
 

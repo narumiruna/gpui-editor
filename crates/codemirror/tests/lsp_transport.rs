@@ -9,10 +9,10 @@ use std::{
 };
 
 use gpui_editor_codemirror::{
-    Change, ChangeSet, EditorState, Transaction,
+    Change, ChangeSet, EditorSelection, EditorState, Transaction,
     lsp::{
         FormattingOptions, LspClient, LspError,
-        features::{Documentation, FeatureError, FeatureRequest, hover_request},
+        features::{Documentation, FeatureError, FeatureRequest, Hover, hover_request},
         formatting_request, language_server_extensions,
         rpc::{FrameError, LspState, RpcError, RpcId, RpcMessage},
         transport::{
@@ -329,6 +329,296 @@ fn managed_client_orders_batches_and_feature_requests_under_backpressure() {
     assert!(client.shutdown(WAIT).unwrap().success());
 }
 
+#[test]
+fn deferred_client_waits_for_document_sync_and_admits_in_fifo_order() {
+    const URI: &str = "file:///deferred.rs";
+    let fixture = Fixture::new();
+    let mut client = fixture.start("deferred", WAIT);
+    let mut view = EditorView::new(EditorState::new("a😀b"));
+    let original = client.attach(&mut view, URI, "rust").unwrap();
+    let mapping = client.with_workspace(|workspace| workspace.workspace_mapping());
+    let cancelled = client.defer_request::<FeatureRequest<Hover>>(WAIT).unwrap();
+    let cancelled_notification = client.defer_notification().unwrap();
+    let before_hover = client.defer_notification().unwrap();
+    let replaced = client.defer_request(WAIT).unwrap();
+    assert!(view.remove_plugin(original));
+    client.attach(&mut view, URI, "rust").unwrap();
+    let stale_selection = view.state().selection().main();
+    let stale_host = client.defer_request(WAIT).unwrap();
+    let unsupported = client.defer_request(WAIT).unwrap();
+    let managed = client.defer_notification().unwrap();
+    let expires = client.defer_request(Duration::ZERO).unwrap();
+    let request_timeout = Duration::from_millis(500);
+    let hover = client.defer_request(request_timeout).unwrap();
+    let after_hover = client.defer_notification().unwrap();
+    let _extra_views: Vec<_> = (0..8)
+        .map(|i| {
+            let mut extra = EditorView::<()>::new(EditorState::new("a"));
+            client
+                .attach(&mut extra, format!("file:///deferred/{i}.rs"), "rust")
+                .unwrap();
+            extra
+        })
+        .collect();
+    change(&mut view, 5..6, "β");
+    view.update(
+        Transaction::new(ChangeSet::default()).with_selection(EditorSelection::single(7, 7)),
+        (),
+        |_| (None, ()),
+    )
+    .unwrap();
+
+    // The fixture holds initialization until the host's reply. Poll for at
+    // least the final feature's timeout without admitting any request.
+    let Some(TransportEvent::Message(RpcMessage::Request { id, method, .. })) =
+        client.next_event(WAIT).unwrap()
+    else {
+        panic!("expected the initialization gate");
+    };
+    assert_eq!(method, "workspace/configuration");
+    assert!(
+        client
+            .try_admit_request(&cancelled, |_| panic!("prepared before initialization"))
+            .unwrap()
+            .is_none()
+    );
+    drop(cancelled_notification);
+    assert!(
+        !client
+            .try_admit_notification(&before_hover, |_| panic!(
+                "prepared a notification during initialization"
+            ))
+            .unwrap()
+    );
+    assert!(client.next_event(request_timeout).unwrap().is_none());
+    client.reply(id, Ok(json!([]))).unwrap();
+    assert!(matches!(
+        client.next_event(WAIT).unwrap(),
+        Some(TransportEvent::Initialized)
+    ));
+    assert!(
+        client
+            .try_admit_request(&replaced, |_| panic!("skipped the FIFO head"))
+            .unwrap()
+            .is_none()
+    );
+    drop(cancelled);
+    assert!(
+        !client
+            .try_admit_notification(&before_hover, |_| panic!(
+                "prepared with a full output queue"
+            ))
+            .unwrap()
+    );
+    let start = Instant::now();
+    while !client
+        .try_admit_notification(&before_hover, |_| {
+            Ok((
+                "workspace/didChangeConfiguration",
+                Some(json!({"settings":{"phase":"before"}})),
+            ))
+        })
+        .unwrap()
+    {
+        assert!(
+            client
+                .next_event(Duration::from_millis(5))
+                .unwrap()
+                .is_none()
+        );
+        assert!(start.elapsed() < WAIT);
+    }
+    assert!(matches!(
+        client.try_admit_notification(&before_hover, |_| panic!("reused a notification token")),
+        Err(StdioClientError::InvalidDeferredNotification)
+    ));
+    assert!(
+        !client
+            .try_admit_notification(&after_hover, |_| panic!("jumped the FIFO"))
+            .unwrap()
+    );
+
+    let start = Instant::now();
+    loop {
+        match client.try_admit_request(&replaced, |workspace| {
+            if mapping.get_mapping(URI).is_none() {
+                return Err(FeatureError::Unsupported("changed attachment"));
+            }
+            hover_request(workspace, URI, 0)
+        }) {
+            Err(StdioClientError::Feature(FeatureError::Unsupported("changed attachment"))) => {
+                break;
+            }
+            Ok(None) => {}
+            result => panic!("unexpected stale attachment admission: {result:?}"),
+        }
+        assert!(
+            client
+                .next_event(Duration::from_millis(5))
+                .unwrap()
+                .is_none()
+        );
+        assert!(start.elapsed() < WAIT);
+    }
+    assert!(matches!(
+        client.try_admit_request(&stale_host, |workspace| {
+            if view.state().selection().main() != stale_selection {
+                return Err(FeatureError::Unsupported("changed selection"));
+            }
+            hover_request(workspace, URI, stale_selection.head())
+        }),
+        Err(StdioClientError::Feature(FeatureError::Unsupported(
+            "changed selection"
+        )))
+    ));
+    assert!(matches!(
+        client.try_admit_request(&unsupported, |workspace| formatting_request(
+            workspace,
+            URI,
+            FormattingOptions {
+                tab_size: 4,
+                insert_spaces: true,
+            }
+        )),
+        Err(StdioClientError::UnsupportedCapability(
+            "documentFormattingProvider"
+        ))
+    ));
+    assert!(matches!(
+        client.try_admit_notification(&managed, |_| Ok(("textDocument/didClose", None))),
+        Err(StdioClientError::ManagedNotification(
+            "textDocument/didClose"
+        ))
+    ));
+
+    let (expired, _) = client
+        .try_admit_request(&expires, |workspace| hover_request(workspace, URI, 0))
+        .unwrap()
+        .unwrap();
+    assert_eq!(expired.get(), 2, "local rejections must not allocate IDs");
+    assert!(matches!(
+        client.try_admit_request(&expires, |_| panic!("reused a token")),
+        Err(StdioClientError::InvalidDeferredRequest)
+    ));
+    assert!(matches!(
+        client.next_event(Duration::ZERO).unwrap(),
+        Some(TransportEvent::TimedOut(id)) if id == expired
+    ));
+    let (id, hover) = client
+        .try_admit_request(&hover, |workspace| {
+            hover_request(workspace, URI, view.state().selection().main().head())
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(hover.version(), 2);
+    assert_eq!(id.get(), 3);
+    assert!(
+        client
+            .try_admit_notification(&after_hover, |_| {
+                Ok((
+                    "workspace/didChangeConfiguration",
+                    Some(json!({"settings":{"phase":"after"}})),
+                ))
+            })
+            .unwrap()
+    );
+    let Some(TransportEvent::Resolution(reply)) = client.next_event(WAIT).unwrap() else {
+        panic!("expected a hover response after admission");
+    };
+    assert_eq!(reply.id, id);
+    let hover = client
+        .with_workspace(|workspace| hover.resolve(workspace, &reply.outcome.unwrap()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(hover.contents, [Documentation::PlainText("fixture".into())]);
+    assert!(client.shutdown(WAIT).unwrap().success());
+}
+
+#[test]
+fn deferred_client_bounds_staging_and_waits_for_a_pending_slot() {
+    const URI: &str = "file:///deferred-pending.rs";
+    let fixture = Fixture::new();
+    let mut client = fixture.start("deferred-pending", WAIT);
+    let mut view = EditorView::<()>::new(EditorState::new("a"));
+    client.attach(&mut view, URI, "rust").unwrap();
+    assert!(matches!(
+        client.next_event(WAIT).unwrap(),
+        Some(TransportEvent::Initialized)
+    ));
+    let notice = client.defer_notification().unwrap();
+    let token = client.defer_request(WAIT).unwrap();
+    let mut rest: Vec<_> = (2..64)
+        .map(|_| client.defer_request::<FeatureRequest<Hover>>(WAIT).unwrap())
+        .collect();
+    assert!(matches!(
+        client.defer_request::<FeatureRequest<Hover>>(WAIT),
+        Err(StdioClientError::DeferredQueueFull)
+    ));
+    assert!(matches!(
+        client.defer_notification(),
+        Err(StdioClientError::DeferredQueueFull)
+    ));
+    drop(rest.remove(1));
+    rest.push(client.defer_request(WAIT).unwrap());
+
+    // Immediate requests remain independent of staged requests. The fixture
+    // receives all 64 but holds their responses to fill the pending limit.
+    let start = Instant::now();
+    for _ in 0..64 {
+        loop {
+            match client.try_request(WAIT, |workspace| hover_request(workspace, URI, 0)) {
+                Ok(_) => break,
+                Err(StdioClientError::Transport(TransportError::QueueFull)) => {}
+                Err(error) => panic!("{error}"),
+            }
+            assert!(
+                client
+                    .next_event(Duration::from_millis(2))
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(start.elapsed() < WAIT);
+        }
+    }
+    let Some(TransportEvent::Message(RpcMessage::Request { id, .. })) =
+        client.next_event(WAIT).unwrap()
+    else {
+        panic!("expected the pending request gate");
+    };
+    assert!(
+        client
+            .try_admit_notification(&notice, |_| {
+                Ok((
+                    "workspace/didChangeConfiguration",
+                    Some(json!({"settings":{"pending":64}})),
+                ))
+            })
+            .unwrap()
+    );
+    assert!(
+        client
+            .try_admit_request(&token, |_| panic!("prepared without a pending slot"))
+            .unwrap()
+            .is_none()
+    );
+    client.reply(id, Ok(json!([]))).unwrap();
+    assert!(matches!(
+        client.next_event(WAIT).unwrap(),
+        Some(TransportEvent::Resolution(reply)) if reply.id.get() == 2
+    ));
+    let (id, _) = client
+        .try_admit_request(&token, |workspace| hover_request(workspace, URI, 0))
+        .unwrap()
+        .unwrap();
+    assert_eq!(id.get(), 66);
+    assert!(matches!(
+        client.next_event(WAIT).unwrap(),
+        Some(TransportEvent::Resolution(reply)) if reply.id == id
+    ));
+    // Leave the other tokens staged: shutdown must not send them.
+    assert!(client.shutdown(WAIT).unwrap().success());
+}
+
 fn change(view: &mut EditorView<()>, range: std::ops::Range<usize>, text: impl Into<String>) {
     let changes = ChangeSet::single(Change::new(range, text)).unwrap();
     view.update(Transaction::new(changes), (), |_| (None, ()))
@@ -365,6 +655,15 @@ fn managed_client_does_not_activate_after_failed_initialization() {
             .attach(&mut view, "file:///pending.rs", "rust")
             .unwrap();
         change(&mut view, 1..1, "b");
+        let token = client.defer_request::<FeatureRequest<Hover>>(WAIT).unwrap();
+        let mapping = client.with_workspace(|workspace| workspace.workspace_mapping());
+        assert!(mapping.get_mapping("file:///pending.rs").is_some());
+        assert!(
+            client
+                .try_admit_request(&token, |_| panic!("prepared during initialization"))
+                .unwrap()
+                .is_none()
+        );
         let event = client.next_event(WAIT);
         match (mode, timeout, event) {
             ("reject-initialize", _, Ok(Some(TransportEvent::Resolution(response)))) => {
@@ -395,6 +694,33 @@ fn managed_client_does_not_activate_after_failed_initialization() {
             }
         );
         assert_eq!(client.server_capabilities(), None);
+        assert!(mapping.get_mapping("file:///pending.rs").is_none());
+        assert!(matches!(
+            client.try_admit_request(&token, |_| panic!("prepared after failure")),
+            Err(StdioClientError::InvalidDeferredRequest)
+        ));
+        assert!(matches!(
+            client.defer_request::<FeatureRequest<Hover>>(WAIT),
+            Err(StdioClientError::Transport(TransportError::Rpc(
+                RpcError::InvalidSessionState
+            )))
+        ));
+        if mode == "reject-initialize" {
+            let mut replacement = fixture.start(mode, timeout);
+            let own = replacement
+                .defer_request::<FeatureRequest<Hover>>(WAIT)
+                .unwrap();
+            assert!(matches!(
+                replacement.try_admit_request(&token, |_| panic!("replayed on another client")),
+                Err(StdioClientError::InvalidDeferredRequest)
+            ));
+            assert!(
+                replacement
+                    .try_admit_request(&own, |_| panic!("prepared during initialization"))
+                    .unwrap()
+                    .is_none()
+            );
+        }
         assert!(matches!(
             client.try_flush(),
             Err(StdioClientError::Transport(TransportError::Rpc(
@@ -420,6 +746,7 @@ fn managed_client_invalidates_feature_mappings_on_eof() {
         client.next_event(WAIT).unwrap(),
         Some(TransportEvent::Initialized)
     ));
+    let token = client.defer_request::<FeatureRequest<Hover>>(WAIT).unwrap();
     let (id, hover) = client
         .try_request(WAIT, |workspace| hover_request(workspace, URI, 0))
         .unwrap();
@@ -427,6 +754,10 @@ fn managed_client_invalidates_feature_mappings_on_eof() {
         matches!(client.next_event(WAIT).unwrap(), Some(TransportEvent::Disconnected { reason: TransportError::Eof(_), pending }) if pending == [id])
     );
     assert_eq!(client.state(), LspState::Closed);
+    assert!(matches!(
+        client.try_admit_request(&token, |_| panic!("prepared after EOF")),
+        Err(StdioClientError::InvalidDeferredRequest)
+    ));
     let stale = client
         .with_workspace(|workspace| hover.resolve(workspace, &json!({"contents":"not usable"})));
     assert!(matches!(stale, Err(FeatureError::StaleResponse { .. })));

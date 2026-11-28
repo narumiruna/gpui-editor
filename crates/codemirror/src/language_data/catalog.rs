@@ -1,7 +1,50 @@
 // Generated from the SRI-verified @codemirror/language-data 6.5.2 dist/index.js.
 // See docs/codemirror-upstream.json and docs/licenses/codemirror-language-data.txt.
 
-use super::{FilenamePattern, LanguageDescription, LoadInvocation::*, LoadSource};
+use std::{future::ready, ptr, sync::OnceLock};
+
+use crate::Extension;
+
+use super::{
+    FilenamePattern, LanguageDescription, LoadInvocation::*, LoadSource, NativeAsyncLanguageLoad,
+    NativeLanguageSupport, UnavailableLanguage,
+};
+
+type SupportLoad = NativeAsyncLanguageLoad<'static, NativeLanguageSupport, UnavailableLanguage>;
+
+impl LanguageDescription {
+    /// Get the shared async load handle for this [`LANGUAGES`] entry.
+    /// This caches the attempt and its result for the life of the catalog.
+    /// Return `None` for custom descriptions and copies of catalog entries.
+    pub fn catalog_support_load(&self) -> Option<&'static SupportLoad> {
+        // Cache by catalog position, not by recipe. Multiple descriptions
+        // can use the same recipe without sharing their loading state.
+        static LOADS: [OnceLock<SupportLoad>; LANGUAGES.len()] =
+            [const { OnceLock::new() }; LANGUAGES.len()];
+        let id = LANGUAGES.iter().position(|entry| ptr::eq(entry, self))?;
+        Some(LOADS[id].get_or_init(|| {
+            NativeAsyncLanguageLoad::new(&LANGUAGES[id], move |description| {
+                ready(
+                    description
+                        .built_in()
+                        .map(|language| NativeLanguageSupport::for_catalog(language, id))
+                        .ok_or(UnavailableLanguage {
+                            name: description.name,
+                            source: description.source,
+                        }),
+                )
+            })
+        }))
+    }
+}
+
+pub(super) fn stream_extension(id: usize, support: NativeLanguageSupport) -> Extension {
+    static EXTENSIONS: [OnceLock<Extension>; LANGUAGES.len()] =
+        [const { OnceLock::new() }; LANGUAGES.len()];
+    EXTENSIONS[id]
+        .get_or_init(|| support.tracked_syntax_extension())
+        .clone()
+}
 
 macro_rules! package {
     ($name:literal, $export:literal) => {

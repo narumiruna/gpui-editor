@@ -1,9 +1,9 @@
 use gpui::Context;
 use gpui_editor_codemirror::{
-    Transaction,
+    EditError, Transaction,
     language::markdown::{
         MarkdownDialect, MarkdownDocument, MarkdownMarkupCommand, markdown_snapshot,
-        paste_url_as_link, plan_markdown_markup, plan_markdown_paste,
+        paste_url_as_link, plan_markdown_markup, plan_markdown_paste, plan_markdown_refresh,
     },
 };
 
@@ -11,6 +11,43 @@ use super::Editor;
 use crate::document::SectionKind;
 
 impl Editor {
+    /// Queue publication of deferred Markdown fence loads already polled by the host.
+    /// The callback uses the current editor state and does not poll any loads.
+    pub fn request_markdown_refresh(&mut self, cx: &mut Context<Self>) {
+        let editor = cx.weak_entity();
+        cx.defer(move |cx| {
+            let _ = editor.update(cx, |editor, cx| {
+                if !editor.is_markdown() {
+                    return;
+                }
+                let Ok(Some(transaction)) = plan_markdown_refresh(editor.view.state()) else {
+                    return;
+                };
+                let active = editor.active.clone();
+                let effect_count = transaction.effects().len();
+                let result = editor.view.update_checked(
+                    transaction,
+                    active.clone(),
+                    |resolved| {
+                        if !resolved.changes().is_empty()
+                            || resolved.selection().is_some()
+                            || resolved.add_to_history()
+                            || resolved.scroll_into_view()
+                            || resolved.effects().len() != effect_count
+                        {
+                            return Err(EditError::InvalidRange);
+                        }
+                        Ok(())
+                    },
+                    |_| (None, active),
+                );
+                if result.is_ok() {
+                    cx.notify();
+                }
+            });
+        });
+    }
+
     pub(super) fn paste_source_link(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
         if !self.can_edit_markup() {
             return false;

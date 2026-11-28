@@ -73,7 +73,13 @@ impl ListSource {
                 Some("[A-Za-z0-9_]*".to_owned()),
             )
         } else {
-            let first = charset(options.iter().filter_map(|item| item.label.chars().next()));
+            // The pin uses label[0] as a key. An empty label becomes
+            // "undefined", which adds ASCII word characters to the first class.
+            let first = charset(
+                options
+                    .iter()
+                    .map(|item| item.label.chars().next().unwrap_or('_')),
+            );
             let tail = charset(options.iter().flat_map(|item| item.label.chars().skip(1)));
             let pattern = first
                 .map(|first| tail.map_or_else(|| first.clone(), |tail| format!("{first}{tail}*")));

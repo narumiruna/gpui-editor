@@ -84,8 +84,13 @@ fn pinned_rust_edit_oracle() {
     {
         let row: Value = serde_json::from_str(line).unwrap();
         let id = row["id"].as_str().unwrap();
-        let source = row["source"].as_str().unwrap();
-        let fresh = RustDocument::parse(Text::new(source));
+        let mut source = row["source"].as_str().unwrap().to_owned();
+        if let Some(padding) = row["padding"].as_array() {
+            let at = padding[0].as_u64().unwrap() as usize;
+            let spaces = padding[1].as_u64().unwrap() as usize;
+            source.insert_str(at, &" ".repeat(spaces));
+        }
+        let fresh = RustDocument::parse(Text::new(&source));
         let phase = i % 3;
         let doc = if let Some(change) = row["edit"].as_array() {
             let from = change[0].as_u64().unwrap() as usize;
@@ -96,7 +101,7 @@ fn pinned_rust_edit_oracle() {
                 .reparse(&edit(from, to, change[2].as_str().unwrap()))
                 .unwrap()
         } else {
-            RustDocument::parse(Text::new(source))
+            RustDocument::parse(Text::new(&source))
         };
         assert_eq!(doc.text().as_str(), source, "{id}");
         let split_crlf = phase == 1 && id == "split-crlf";
@@ -174,7 +179,7 @@ fn repaired_document_uses_only_strict_prefix_checkpoints() {
 }
 
 #[test]
-fn over_recovery_cap_uses_local_tree_without_a_seed() {
+fn only_small_eof_recovery_keeps_a_seed() {
     let prefix = "const ONE: i32 = 1;\r\n".repeat(5);
     let tail = "\r\nconst LAST: i32 = 1\r\n";
     let padding = 16 * 1024 - prefix.len() - "//".len() - tail.len();
@@ -183,10 +188,7 @@ fn over_recovery_cap_uses_local_tree_without_a_seed() {
         let broken = RustDocument::parse(Text::new(&source));
         assert!(broken.is_recovered());
         assert_eq!(broken.reuse_stats(), ReuseStats::default());
-        assert_eq!(
-            broken.nodes().any(|node| node.kind().name() == "ConstItem"),
-            extra == 0
-        );
+        assert!(broken.nodes().any(|node| node.kind().name() == "ConstItem"));
         let at = source.rfind("\r\n").unwrap();
         let fixed = broken.reparse(&edit(at, at, ";")).unwrap();
         assert!(!fixed.is_recovered());

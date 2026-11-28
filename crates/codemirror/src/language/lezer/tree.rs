@@ -488,6 +488,44 @@ impl SyntaxTree {
         Arc::ptr_eq(&self.names, &parser.names)
     }
 
+    // Move a preceding sibling to the front of the child list of its chosen
+    // destination. The destination must be the next sibling or a descendant
+    // of that sibling. This changes links, not byte ranges or node records.
+    pub(in crate::language) fn move_preceding_children(
+        &mut self,
+        mut destination: impl for<'a> FnMut(SyntaxNode<'a>, SyntaxNode<'a>) -> Option<SyntaxNode<'a>>,
+    ) {
+        assert!(
+            self.incremental.is_none(),
+            "cached parse records are immutable"
+        );
+        // The parser adds each parent after its children. Edit each child
+        // list in place, after all its subtrees have been processed.
+        for parent in 0..self.nodes.len() {
+            let count = self.nodes[parent].children.len();
+            let mut kept = 0;
+            for read in 0..count {
+                let child = self.nodes[parent].children[read];
+                if kept > 0 {
+                    let previous = self.nodes[parent].children[kept - 1];
+                    let node = |id| SyntaxNode { tree: self, id };
+                    let target = destination(node(previous), node(child)).map(|node| node.id);
+                    if let Some(target) = target {
+                        self.nodes.unshared()[target].children.insert(0, previous);
+                        kept -= 1;
+                    }
+                }
+                if kept != read {
+                    self.nodes.unshared()[parent].children[kept] = child;
+                }
+                kept += 1;
+            }
+            if kept < count {
+                self.nodes.unshared()[parent].children.truncate(kept);
+            }
+        }
+    }
+
     /// The root covers the entire input, including skipped text.
     pub fn root(&self) -> SyntaxNode<'_> {
         SyntaxNode {

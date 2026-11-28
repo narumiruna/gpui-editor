@@ -516,6 +516,76 @@ fn measured_tooltip_space_uses_current_state_and_configuration_precedence() {
     }
 }
 
+#[test]
+fn tooltip_space_measures_only_for_active_tooltips_in_view() {
+    let slot = Compartment::new();
+    let tip = Tooltip::new(0);
+    let space_reads = Arc::new(Mutex::new(0_u64));
+    let space = rect(0., 0., 240., 180.);
+    let measured_space = tooltip_space({
+        let space_reads = space_reads.clone();
+        move |_, _| {
+            *space_reads.lock().unwrap() += 1;
+            space
+        }
+    });
+    let mut state = EditorState::with_extensions(
+        "abc",
+        Extension::group([measured_space, slot.of(SHOW_TOOLTIP.of(Some(tip.clone())))]),
+    )
+    .unwrap();
+    let mut layout = TooltipLayout::default();
+    let mut was_active = true;
+    let mut actual = Vec::new();
+    let mut expected = Vec::new();
+    for line in include_str!("fixtures/tooltip_measure_gate.jsonl").lines() {
+        let row: Value = serde_json::from_str(line).unwrap();
+        let active = row["active"].as_bool().unwrap();
+        if active != was_active {
+            let input = SHOW_TOOLTIP.of(active.then(|| tip.clone()));
+            state
+                .update(Transaction::default().with_effects([slot.reconfigure(input)]))
+                .unwrap();
+            was_active = active;
+        }
+        let geometry = TooltipGeometry {
+            visible: rect(32., 32., 192., 128.),
+            in_view: row["inView"].as_bool().unwrap(),
+            ..geometry()
+        };
+        let anchor = if row["clipAnchor"] == true {
+            rect(60., 4., 60., 20.)
+        } else {
+            rect(60., 60., 60., 76.)
+        };
+        let mut anchor_reads = 0;
+        let placed = layout.position(&state, geometry, |_| {
+            anchor_reads += 1;
+            TooltipMeasurement::new(Some(anchor), 40., 20.)
+        });
+        assert_eq!(
+            placed.placements.len(),
+            usize::from(active),
+            "{}",
+            row["step"]
+        );
+        let visible = placed.placements.iter().any(|(_, tip)| tip.is_some());
+        actual.push(json!([
+            row["step"],
+            anchor_reads,
+            std::mem::take(&mut *space_reads.lock().unwrap()),
+            visible
+        ]));
+        expected.push(json!([
+            row["step"],
+            row["anchorReads"],
+            row["spaceReads"],
+            row["visible"]
+        ]));
+    }
+    assert_eq!(actual, expected);
+}
+
 fn geometry() -> TooltipGeometry {
     TooltipGeometry {
         viewport: rect(5.0, 0.0, 105.0, 100.0),

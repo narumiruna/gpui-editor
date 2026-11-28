@@ -5,30 +5,31 @@ use super::{
 impl TreeBuilder {
     // Existing records stay read-only. Roll back temporary records on both
     // success and limit errors, without moving or copying the live records.
-    pub(in crate::language::lezer) fn with_staged_output<T>(
+    pub(in crate::language::lezer) fn with_staged_output(
         &mut self,
-        stage: impl FnOnce(&mut Self) -> Result<T, ParseError>,
-    ) -> Result<T, ParseError> {
-        assert_eq!(
-            self.defer_named_below, 0,
-            "staging only supports deferred repeats"
-        );
-        let deferred = self.deferred.len();
+        parser: &Parser,
+        end: usize,
+        work: &Work,
+        stage: impl FnOnce(&mut Self) -> Result<Roots, ParseError>,
+    ) -> Result<SyntaxTree, ParseError> {
+        let live_deferred = std::mem::take(&mut self.deferred);
         self.nodes.isolate_tail();
         self.links.isolate_tail();
-        let result = stage(self);
+        let result = stage(self)
+            .and_then(|roots| self.finish_stage(parser, roots, end, work, &live_deferred));
         self.nodes.restore_tail();
         self.links.restore_tail();
-        self.deferred.truncate(deferred);
+        self.deferred = live_deferred;
         result
     }
 
-    pub(in crate::language::lezer) fn finish_stage(
+    fn finish_stage(
         &mut self,
         parser: &Parser,
         roots: Roots,
         end: usize,
         work: &Work,
+        live_deferred: &[DeferredChildren],
     ) -> Result<SyntaxTree, ParseError> {
         work.spend(end, roots.len)?;
         self.finish_root(parser, roots, end);
@@ -49,9 +50,15 @@ impl TreeBuilder {
                     if usize::from(node.term) < parser.names.len() {
                         pending.push(Visit::Leave(id, children.len()));
                     }
-                    if Some(node.term) == self.defer_repeat
-                        && node.children.is_empty()
-                        && let Some(span) = DeferredChildren::find(&self.deferred, id, end, work)?
+                    let deferred = if live_deferred.last().is_some_and(|span| id <= span.node) {
+                        live_deferred
+                    } else {
+                        &self.deferred
+                    };
+                    if node.children.is_empty()
+                        && (Some(node.term) == self.defer_repeat
+                            || (node.term != 0 && usize::from(node.term) < self.defer_named_below))
+                        && let Some(span) = DeferredChildren::find(deferred, id, end, work)?
                     {
                         pending.extend(
                             span.reverse_children(&self.links, end, work)?

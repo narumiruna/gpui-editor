@@ -18,6 +18,7 @@ use std::{
 use crate::{
     Assoc, EditError, EditorSelection, EditorState, Extension, Facet, MapMode, RangeSet,
     StateContext, StateEffect, StateEffectType, StateField, StateUpdate, Transaction,
+    language::line_projection::configured_editor_lines,
 };
 
 mod gutter;
@@ -196,8 +197,9 @@ impl LintState {
         }
         let filters = state.facet(&MARKER_FILTERS)?;
         let text = state.text();
+        let projected = configured_editor_lines(state)?;
         self.markers = Arc::new(markers::build(
-            text,
+            projected.as_ref().as_ref().unwrap_or(text),
             filtered.iter().filter(|d| {
                 publication.scope.accepts(&d.range)
                     && text.is_valid_range(d.range.clone())

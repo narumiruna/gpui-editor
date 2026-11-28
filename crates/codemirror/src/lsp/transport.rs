@@ -28,7 +28,9 @@ use super::rpc::{
 
 mod client;
 
-pub use client::{PreparedRequest, StdioClient, StdioClientError};
+pub use client::{
+    DeferredNotification, DeferredRequest, PreparedRequest, StdioClient, StdioClientError,
+};
 
 const MAX_HEADER_BYTES: usize = 8 * 1024;
 const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;

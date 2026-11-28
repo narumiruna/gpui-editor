@@ -71,7 +71,7 @@ pub fn insert_newline_and_indent_with_projection(
 }
 
 /// Insert an indented line below the last line of each selection. Do not split
-/// bracket pairs. A whitespace-only source line can lose its indentation.
+/// bracket pairs. Clear leading whitespace only on a single selected line.
 /// Use `enclosing_ending` (LF or CRLF) when the source has no local ending.
 pub fn insert_blank_line(
     state: &EditorState,
@@ -133,12 +133,14 @@ fn insert_indented_break(
     let settings = settings(indent);
     let transaction = state.change_by_range(|selection| {
         let mut range = include_crlf(source, selection.range());
+        let first = line_at(text, range.start);
+        let first_number = first.number;
         let line = if blank_below {
-            let line = line_at(text, range.end);
-            range = line.range.end..line.range.end;
-            line
+            let last = line_at(text, range.end);
+            range = last.range.end..last.range.end;
+            last
         } else {
-            line_at(text, range.start)
+            first
         };
         let original_indent = leading_space(line.text);
         let gap = if !blank_below && range.is_empty() {
@@ -174,7 +176,7 @@ fn insert_indented_break(
             if range.end < line.range.end {
                 range.end += leading_space(&source[range.end..line.range.end]).len();
             }
-            if clear_prefix(text, &line, position, original_indent) {
+            if first_number == line.number && clear_prefix(text, &line, position, original_indent) {
                 range.start = line.range.start;
             }
         }

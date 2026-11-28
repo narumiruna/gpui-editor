@@ -11,9 +11,14 @@
 
 use std::ops::Range;
 
-use crate::{Assoc, ChangeSet, EditError, Text};
+use crate::{
+    Assoc, ChangeSet, EditError, Text, commands::CommentTokens, language_data::CloseBracketData,
+};
 
-use super::{HighlightSpan, IndentOptions, StreamSettings, lezer::ReuseStats};
+use super::{
+    HighlightSpan, IndentOptions, LanguageData, StreamSettings,
+    lezer::{NodeType, NodeTypes, ParseError, ReuseStats},
+};
 
 mod brackets;
 mod completion;
@@ -24,17 +29,36 @@ mod parser;
 mod tables;
 mod tokens;
 
-pub use kind::GoNodeKind;
-
-/// The upstream language name.
 pub use completion::{
     GoSnippet, SNIPPETS, go_completion_snippet, go_local_completion, go_snippet_completion,
 };
+pub use kind::GoNodeKind;
+pub(crate) use parser::{parse_raw, stock_data_facet, stock_node_types};
 
+/// The upstream language name.
 pub const NAME: &str = "go";
 pub const LINE_COMMENT: &str = "//";
 pub const BLOCK_COMMENT: (&str, &str) = ("/*", "*/");
 pub const CLOSE_BRACKETS: [char; 6] = ['(', '[', '{', '\'', '"', '`'];
+
+pub(crate) fn language_data() -> LanguageData {
+    LanguageData::default()
+        .with(
+            "commentTokens",
+            CommentTokens {
+                line: Some(LINE_COMMENT),
+                block: Some(BLOCK_COMMENT),
+            },
+        )
+        .with("indentOnInput", indent_on_input as fn(&str) -> bool)
+        .with(
+            "closeBrackets",
+            CloseBracketData {
+                brackets: Some(&["(", "[", "{", "'", "\"", "`"]),
+                ..Default::default()
+            },
+        )
+}
 
 /// Whether the line from its start to the cursor triggers reindentation.
 pub fn indent_on_input(line_prefix: &str) -> bool {
@@ -57,6 +81,7 @@ struct Node {
 #[derive(Clone, Copy, Debug)]
 pub struct GoNode<'a> {
     nodes: &'a [Node],
+    node_types: Option<&'a NodeTypes>,
     source: &'a str,
     id: usize,
 }
@@ -67,7 +92,20 @@ impl<'a> GoNode<'a> {
     }
 
     pub fn kind(self) -> GoNodeKind {
-        GoNodeKind::from_term(self.data().term)
+        GoNodeKind::from_term(self.term())
+    }
+
+    /// The grammar-local term ID, including distinct IDs for repeated names.
+    pub fn term(self) -> u16 {
+        self.data().term
+    }
+
+    /// The immutable type row for this term.
+    pub fn node_type(self) -> &'a NodeType {
+        self.node_types
+            .unwrap_or_else(|| stock_node_types())
+            .get(self.term())
+            .expect("valid Go node term")
     }
 
     pub fn range(self) -> Range<usize> {
@@ -103,7 +141,7 @@ impl<'a> GoNode<'a> {
                 } else {
                     let last = before_end.chars().next_back()?;
                     before_end = &before_end[..before_end.len() - last.len_utf8()];
-                    units = units.saturating_sub(last.len_utf16());
+                    units = units.checked_sub(last.len_utf16())?;
                 }
             }
             return (before_end.len() >= 2)
@@ -143,11 +181,27 @@ pub struct GoDocument {
     recovered: bool,
     cache: Option<Box<parser::Cache>>,
     editor_lines: Option<Text>,
+    // Standalone and mounted parses keep their existing data routing.
+    node_types: Option<NodeTypes>,
 }
 
 impl GoDocument {
     pub fn parse(text: Text) -> Self {
         Self::parse_with_prefix(text, None)
+    }
+
+    pub(crate) fn parse_editor_strict(text: Text) -> Result<Self, ParseError> {
+        let nodes = parser::parse_editor_strict(text.as_str())?;
+        Ok(Self::from_nodes(text, nodes, false, None))
+    }
+
+    pub(crate) fn with_node_types(mut self, node_types: NodeTypes) -> Self {
+        self.node_types = Some(node_types);
+        self
+    }
+
+    pub(crate) fn configured_node_types(&self) -> Option<&NodeTypes> {
+        self.node_types.as_ref()
     }
 
     /// Apply byte edits and parse the new document. Reuse a validated LR
@@ -162,7 +216,9 @@ impl GoDocument {
             .next()
             .map_or(text.len(), |(range, _)| range.start);
         let prefix = self.cache.as_deref().map(|cache| (cache, end));
-        Ok(Self::parse_with_prefix(text, prefix))
+        let mut next = Self::parse_with_prefix(text, prefix);
+        next.node_types = self.node_types.clone();
+        Ok(next)
     }
 
     /// LR checkpoint reuse in the last parse. The resume offset is in the
@@ -176,8 +232,18 @@ impl GoDocument {
 
     fn parse_with_prefix(text: Text, prefix: Option<(&parser::Cache, usize)>) -> Self {
         let (nodes, recovered, cache) = parser::parse(text.as_str(), prefix);
+        Self::from_nodes(text, nodes, recovered, cache)
+    }
+
+    fn from_nodes(
+        text: Text,
+        nodes: Vec<Node>,
+        recovered: bool,
+        cache: Option<parser::Cache>,
+    ) -> Self {
         let highlights = highlight::collect(GoNode {
             nodes: &nodes,
+            node_types: None,
             source: text.as_str(),
             id: 0,
         });
@@ -188,6 +254,7 @@ impl GoDocument {
             highlights,
             recovered,
             cache: cache.map(Box::new),
+            node_types: None,
         }
     }
 
@@ -209,6 +276,7 @@ impl GoDocument {
     pub fn root(&self) -> GoNode<'_> {
         GoNode {
             nodes: &self.nodes,
+            node_types: self.node_types.as_ref(),
             source: self.text.as_str(),
             id: 0,
         }

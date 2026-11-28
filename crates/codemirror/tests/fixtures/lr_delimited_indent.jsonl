@@ -1,0 +1,28 @@
+{"name":"empty body","grammar":"lezer","mode":"stock","mounted":false,"source":"R{}","at":2,"columns":[1,0,2],"calls":[]}
+{"name":"space before closer","grammar":"lezer","mode":"stock","mounted":false,"source":"R{  }","at":2,"columns":[1,0,2],"calls":[]}
+{"name":"empty inner parentheses","grammar":"lezer","mode":"stock","mounted":false,"source":"R{()}","at":3,"columns":[2,0,2],"calls":[]}
+{"name":"nonempty body at closer","grammar":"lezer","mode":"stock","mounted":false,"source":"R{a}","at":3,"columns":[1,1,2],"calls":[]}
+{"name":"nonempty body at opener end","grammar":"lezer","mode":"stock","mounted":false,"source":"R{  a}","at":2,"columns":[4,2,2],"calls":[]}
+{"name":"aligned body on the next line","grammar":"lezer","mode":"stock","mounted":false,"source":"Rule{  a\r\n  }","at":10,"columns":[4,4,7],"calls":[]}
+{"name":"empty body on the next line","grammar":"lezer","mode":"stock","mounted":false,"source":"R{\r\n}","at":4,"columns":[0,0,2],"calls":[]}
+{"name":"nonempty, not aligned","grammar":"lezer","mode":"stock","mounted":false,"source":"    R{\n  a\n}","at":11,"columns":[4,4,6],"calls":[]}
+{"name":"skipped comment before same-line content","grammar":"lezer","mode":"stock","mounted":false,"source":"R{ /*x*/a\r\n}","at":8,"columns":[3,2,2],"calls":[]}
+{"name":"skipped comment before same-line closer","grammar":"lezer","mode":"stock","mounted":false,"source":"R{ /*x*/ }","at":9,"columns":[1,0,2],"calls":[]}
+{"name":"skipped comment on its own line","grammar":"lezer","mode":"stock","mounted":false,"source":"R{ //x\r\n}","at":8,"columns":[0,0,2],"calls":[]}
+{"name":"query before a skipped comment","grammar":"lezer","mode":"stock","mounted":false,"source":"R{ /*x*/ }","at":2,"columns":[3,2,2],"calls":[]}
+{"name":"skipped recovery before closer","grammar":"lezer","mode":"stock","mounted":false,"source":"R{?}","at":3,"columns":[1,0,2],"calls":[]}
+{"name":"missing closer without content","grammar":"lezer","mode":"stock","mounted":false,"source":"R{","at":2,"columns":[2,2,2],"calls":[]}
+{"name":"missing closer with aligned content","grammar":"lezer","mode":"stock","mounted":false,"source":"Rule{  a","at":8,"columns":[7,7,7],"calls":[]}
+{"name":"missing closer with skipped comment","grammar":"lezer","mode":"stock","mounted":false,"source":"Rule{ /*x*/","at":11,"columns":[2,2,2],"calls":[]}
+{"name":"override Body","grammar":"lezer","mode":"override","mounted":false,"source":"R{}","at":2,"columns":[7,7,7],"calls":[[["Body",1,3],["{",1,2],["}",2,3],2],[["Body",1,3],["{",1,2],["}",2,3],2],[["Body",1,3],["{",1,2],["}",2,3],2]]}
+{"name":"remove Body override","grammar":"lezer","mode":"remove","mounted":false,"source":"R{}","at":2,"columns":[1,0,2],"calls":[]}
+{"name":"standalone projected closer","grammar":"lezer","mode":"stock","mounted":false,"source":"// 前 😀\r\n/*猫😀*/ R{}","at":27,"columns":[8,0,2],"calls":[]}
+{"name":"quoted projected closer","grammar":"lezer","mode":"stock","mounted":true,"source":"前 😀\r\n\r\n> ```lezer\r\n> // 前 😀\r\n> R{}\r\n> ```\r\n","at":43,"columns":[3,0,2],"calls":[]}
+{"name":"quoted projected next-line closer","grammar":"lezer","mode":"stock","mounted":true,"source":"前 😀\r\n\r\n> ```lezer\r\n> R{\r\n>   }\r\n> ```\r\n","at":34,"columns":[0,0,2],"calls":[]}
+{"name":"quoted projected Body range","grammar":"lezer","mode":"override","mounted":true,"source":"前 😀\r\n\r\n> ```lezer\r\n> // 前 😀\r\n> R{}\r\n> ```\r\n","at":43,"columns":[7,7,7],"calls":[[["Body",42,44],["{",42,43],["}",43,44],43],[["Body",42,44],["{",42,43],["}",43,44],43],[["Body",42,44],["{",42,43],["}",43,44],43]]}
+{"name":"quoted projected Body override removed","grammar":"lezer","mode":"remove","mounted":true,"source":"前 😀\r\n\r\n> ```lezer\r\n> // 前 😀\r\n> R{}\r\n> ```\r\n","at":43,"columns":[3,0,2],"calls":[]}
+{"name":"stock JSON object","grammar":"json","mode":"stock","mounted":false,"source":"{}","at":1,"columns":[0,0,2],"calls":[]}
+{"name":"stock JSON array under an object","grammar":"json","mode":"stock","mounted":false,"source":"{\"😀\":[]}","at":9,"columns":[0,0,2],"calls":[]}
+{"name":"JSON array with stock rule removed","grammar":"json","mode":"remove","mounted":false,"source":"{\"😀\":[]}","at":9,"columns":[5,0,2],"calls":[]}
+{"name":"stock WAST App with matching closer","grammar":"wast","mode":"stock","mounted":false,"source":"(module ())","at":9,"columns":[0,0,2],"calls":[]}
+{"name":"stock WAST App with nonempty body","grammar":"wast","mode":"stock","mounted":false,"source":"(module (; note ;) (func))","at":24,"columns":[0,0,2],"calls":[]}

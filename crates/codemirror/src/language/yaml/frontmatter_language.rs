@@ -1,32 +1,101 @@
 //! Native `yamlFrontmatter` wrapping based on `@codemirror/lang-yaml` 6.1.3.
 //! See `docs/licenses/codemirror-lang-yaml.txt`.
 //!
-//! The wrapper uses the existing YAML delimiter scan. It does not expose Lezer
-//! wrapper error nodes or reproduce its recovery around U+FFFF. It accepts a
-//! native parser and can forward native editor extensions.
+//! The wrapper mounts a native body parser and can forward native extensions.
+//! Its outer syntax tree is available separately from the mounted YAML and body.
 
-use std::{ops::Range, sync::Arc};
+use std::{
+    ops::Range,
+    sync::{Arc, OnceLock},
+};
 
 use crate::{
     Assoc, Change, ChangeSet, Text,
-    language::{HighlightSpan, lezer::ReuseStats},
-    language_data::{NativeLanguage, NativeSyntax, SupportedDocument, SyntaxUpdateError},
-    stream_parser::TokenizeError,
+    language::{
+        HighlightSpan, IndentOptions, StreamSettings,
+        lezer::{ParseError, ReuseStats, SyntaxTree},
+        line_projection::{EditorOffsets, splits_crlf},
+    },
+    language_data::{
+        JsonLanguage, LezerLanguage, NativeLanguage, NativeSyntax, SupportedDocument,
+        SyntaxUpdateError, WastLanguage, YamlLanguage,
+    },
 };
 
 use super::YamlFrontmatter;
 
 mod state;
+mod tree;
 
 /// Parse optional YAML front matter and mount the selected parser in the body.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct YamlFrontmatterLanguage {
-    content: NativeLanguage,
+    content: ContentParser,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+enum ContentParser {
+    Native(NativeLanguage),
+    Json(JsonLanguage),
+    Lezer(LezerLanguage),
+    Wast(WastLanguage),
+    Yaml(YamlLanguage),
+}
+
+impl ContentParser {
+    fn parse(&self, text: &Text, start: usize) -> Result<SupportedDocument, SyntaxUpdateError> {
+        let body = text.slice_owned(start..text.len()).unwrap();
+        let settings = StreamSettings::default();
+        match self {
+            Self::Native(language) => {
+                return language
+                    .support()
+                    .parse(body)
+                    .map_err(SyntaxUpdateError::Tokenize);
+            }
+            Self::Json(language) => language.parse_for_editor(body, settings),
+            Self::Lezer(language) => language.parse_for_editor(body, settings),
+            Self::Wast(language) => language.parse_for_editor(body, settings),
+            Self::Yaml(language) => language.parse_for_editor(body, settings),
+        }
+        .map_err(|error| SyntaxUpdateError::StrictSyntax(error.map_offset(|at| start + at)))
+    }
 }
 
 impl YamlFrontmatterLanguage {
     pub const fn new(content: NativeLanguage) -> Self {
-        Self { content }
+        Self {
+            content: ContentParser::Native(content),
+        }
+    }
+
+    /// Wrap a JSON parser without discarding its strictness or node properties.
+    pub fn with_json(content: JsonLanguage) -> Self {
+        Self {
+            content: ContentParser::Json(content),
+        }
+    }
+
+    /// Wrap a Lezer grammar parser without discarding its strictness or node properties.
+    pub fn with_lezer(content: LezerLanguage) -> Self {
+        Self {
+            content: ContentParser::Lezer(content),
+        }
+    }
+
+    /// Wrap a WAST parser without discarding its strictness or node properties.
+    pub fn with_wast(content: WastLanguage) -> Self {
+        Self {
+            content: ContentParser::Wast(content),
+        }
+    }
+
+    /// Use the supplied YAML parser for the body. The front matter still
+    /// uses the stock permissive parser. Both mounts share the YAML data facet.
+    pub fn with_yaml(content: YamlLanguage) -> Self {
+        Self {
+            content: ContentParser::Yaml(content),
+        }
     }
 
     /// Parse the content even if the body is empty. Without front matter,
@@ -34,22 +103,20 @@ impl YamlFrontmatterLanguage {
     ///
     /// # Errors
     ///
-    /// Return a tokenization error from the selected content parser.
-    pub fn parse(&self, text: Text) -> Result<YamlFrontmatterDocument, TokenizeError> {
+    /// Return a tokenization error or strict parse error from the body parser.
+    /// A strict parse error uses the original document's byte offset.
+    pub fn parse(&self, text: Text) -> Result<YamlFrontmatterDocument, SyntaxUpdateError> {
         let frontmatter = YamlFrontmatter::parse(&text);
-        let body_range = frontmatter
-            .as_ref()
-            .map_or(0..text.len(), YamlFrontmatter::body);
-        let body = self
-            .content
-            .support()
-            .parse(text.slice_owned(body_range.clone()).unwrap())?;
+        let body_start = frontmatter.as_ref().map_or(0, |front| front.body.start);
+        let body = self.content.parse(&text, body_start)?;
         Ok(YamlFrontmatterDocument {
             text,
             frontmatter,
-            body_start: body_range.start,
+            body_start,
             body: Arc::new(body),
-            language: self.content,
+            content: self.content.clone(),
+            editor_offsets: OnceLock::new(),
+            wrapper: OnceLock::new(),
         })
     }
 }
@@ -62,7 +129,9 @@ pub struct YamlFrontmatterDocument {
     frontmatter: Option<YamlFrontmatter>,
     body_start: usize,
     body: Arc<SupportedDocument>,
-    language: NativeLanguage,
+    content: ContentParser,
+    editor_offsets: OnceLock<EditorOffsets>,
+    wrapper: OnceLock<Result<SyntaxTree, ParseError>>,
 }
 
 struct MountUpdate {
@@ -70,6 +139,15 @@ struct MountUpdate {
     frontmatter: Option<YamlFrontmatter>,
     body_start: usize,
     local_changes: Option<ChangeSet>,
+}
+
+fn body_error(error: SyntaxUpdateError, start: usize) -> SyntaxUpdateError {
+    match error {
+        SyntaxUpdateError::StrictSyntax(error) => {
+            SyntaxUpdateError::StrictSyntax(error.map_offset(|at| start + at))
+        }
+        _ => error,
+    }
 }
 
 impl YamlFrontmatterDocument {
@@ -82,7 +160,8 @@ impl YamlFrontmatterDocument {
         }
         let update = self.prepare_update(changes)?;
         if let (Some(local), Some(body)) = (&update.local_changes, Arc::get_mut(&mut self.body)) {
-            body.apply_changes(local)?;
+            body.apply_changes(local)
+                .map_err(|error| body_error(error, update.body_start))?;
         } else {
             self.body = self.updated_body(&update)?;
         }
@@ -90,6 +169,8 @@ impl YamlFrontmatterDocument {
             Some(self.body.text().as_str()),
             update.text.slice(update.body_start..update.text.len())
         );
+        self.editor_offsets.take();
+        self.wrapper.take();
         self.text = update.text;
         self.frontmatter = update.frontmatter;
         self.body_start = update.body_start;
@@ -108,7 +189,9 @@ impl YamlFrontmatterDocument {
             frontmatter: update.frontmatter,
             body_start: update.body_start,
             body,
-            language: self.language,
+            content: self.content.clone(),
+            editor_offsets: OnceLock::new(),
+            wrapper: OnceLock::new(),
         })
     }
 
@@ -153,18 +236,15 @@ impl YamlFrontmatterDocument {
     ) -> Result<Arc<SupportedDocument>, SyntaxUpdateError> {
         match &update.local_changes {
             Some(local) if local.is_empty() => Ok(Arc::clone(&self.body)),
-            Some(local) => Ok(Arc::new(self.body.reparse(local)?)),
-            None => self
-                .language
-                .support()
-                .parse(
-                    update
-                        .text
-                        .slice_owned(update.body_start..update.text.len())
-                        .unwrap(),
-                )
+            Some(local) => self
+                .body
+                .reparse(local)
                 .map(Arc::new)
-                .map_err(SyntaxUpdateError::Tokenize),
+                .map_err(|error| body_error(error, update.body_start)),
+            None => self
+                .content
+                .parse(&update.text, update.body_start)
+                .map(Arc::new),
         }
     }
 
@@ -174,6 +254,16 @@ impl YamlFrontmatterDocument {
     }
     pub fn text(&self) -> &Text {
         &self.text
+    }
+
+    /// Read the outer `Document`, `Frontmatter`, and `Body` syntax, including
+    /// wrapper errors. Ranges use original bytes. Mounted trees remain separate.
+    /// This query builds the outer tree once per snapshot.
+    pub fn wrapper_tree(&self) -> Result<&SyntaxTree, ParseError> {
+        self.wrapper
+            .get_or_init(|| tree::parse(self.text.as_str()))
+            .as_ref()
+            .map_err(|&error| error)
     }
 
     /// The delimiters and parsed YAML, with absolute source ranges.
@@ -219,6 +309,53 @@ impl YamlFrontmatterDocument {
                     range: span.range.start + offset..span.range.end + offset,
                     tags: span.tags,
                 })),
+        )
+    }
+
+    /// Query YAML or body indentation at an original byte position. The
+    /// wrapper supplies column zero on its delimiter lines and projection gaps.
+    /// Overrides use host byte offsets, including in the body parser.
+    pub fn indentation(
+        &self,
+        position: usize,
+        settings: StreamSettings,
+        options: IndentOptions<'_>,
+    ) -> Option<usize> {
+        if !self.text.is_char_boundary(position) || splits_crlf(self.text.as_str(), position) {
+            return None;
+        }
+        if let Some(frontmatter) = &self.frontmatter {
+            let yaml = frontmatter.yaml();
+            let range = yaml.root().range();
+            if range.start < position && position < range.end
+                || position == range.end && yaml.flow_at(position).is_some()
+            {
+                return yaml.indentation(position, settings, options);
+            }
+            if position <= self.body_start {
+                return Some(0);
+            }
+        }
+        if let NativeSyntax::Yaml(body) = self.body()
+            && (position == self.body_start
+                || position == self.text.len()
+                    && body.flow_at(position - self.body_start).is_none())
+        {
+            // The wrapper supplies the indent outside the mount, except when
+            // an unfinished flow node extends to the end of the document.
+            return Some(0);
+        }
+        let indentation = |at| options.override_indentation?(self.body_start + at);
+        self.body().indentation(
+            position - self.body_start,
+            settings,
+            IndentOptions {
+                override_indentation: Some(&indentation),
+                simulate_break: options
+                    .simulate_break
+                    .and_then(|at| at.checked_sub(self.body_start)),
+                ..options
+            },
         )
     }
 

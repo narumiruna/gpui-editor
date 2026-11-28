@@ -1,6 +1,51 @@
 use std::ops::Range;
 
-use super::{Node, SqlNodeKind as Kind, dialect::LexConfig, tokenizer};
+use super::{Node, SqlNodeKind as Kind, dialect::LexConfig, import_tree, tokenizer};
+use crate::language::lezer::{ParseError, Parser};
+
+const MAX_SEMICOLON_RECOVERY_BYTES: usize = 16 * 1024;
+
+/// Accept only one deleted semicolon directly inside closed parentheses.
+/// The size cap bounds the extra parse; Lezer also limits its search work.
+pub(super) fn closed_parens_semicolon(
+    parser: &Parser,
+    source: &str,
+    strict_error: ParseError,
+) -> Option<Vec<Node>> {
+    let ParseError::UnexpectedToken {
+        offset,
+        term: Some(term),
+        ..
+    } = strict_error
+    else {
+        return None;
+    };
+    if source.len() > MAX_SEMICOLON_RECOVERY_BYTES
+        || term != Kind::Semicolon as u16
+        || source.as_bytes().get(offset) != Some(&b';')
+    {
+        return None;
+    }
+    let tree = parser.parse_recovering(source).ok()?;
+    let nodes = import_tree(tree.root());
+    let mut errors = nodes.iter().filter(|node| node.kind == Kind::Error);
+    let error = errors.next()?;
+    if error.range != (offset..offset + 1) || errors.next().is_some() {
+        return None;
+    }
+    let [semicolon] = error.children.as_slice() else {
+        return None;
+    };
+    let semicolon = &nodes[*semicolon];
+    let group = &nodes[error.parent?];
+    let closer = &nodes[*group.children.last()?];
+    (semicolon.kind == Kind::Semicolon
+        && semicolon.range == error.range
+        && group.kind == Kind::Parens
+        && closer.kind == Kind::CloseParen
+        && source.get(closer.range.clone()) == Some(")"))
+    .then_some(nodes)
+}
 
 /// Keep usable syntax when the strict runtime cannot finish. Missing tokens
 /// are empty errors. Unexpected delimiters keep their token under an error.

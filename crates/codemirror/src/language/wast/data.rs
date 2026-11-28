@@ -70,6 +70,21 @@ impl WastDocument {
             .configured_data_at(state, || Some(root.resolve_at(position, Some(side))))
     }
 
+    pub(in crate::language) fn configured_data_in_body(
+        &self,
+        state: &EditorState,
+        origin: usize,
+        side: Assoc,
+        position: impl FnOnce() -> Option<usize>,
+    ) -> Vec<Arc<LanguageData>> {
+        let root = WastNode {
+            coordinates: super::Coordinates::Linear(origin),
+            ..self.root()
+        };
+        root.node_type()
+            .configured_data_at(state, || Some(root.resolve_at(position()?, Some(side))))
+    }
+
     pub(crate) fn configured_data_in_markdown(
         &self,
         state: &EditorState,

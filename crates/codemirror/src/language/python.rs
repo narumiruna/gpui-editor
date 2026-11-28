@@ -247,6 +247,19 @@ impl PythonDocument {
     }
 
     fn resolve_at(&self, at: usize, side: Option<Assoc>) -> Option<PythonNode<'_>> {
+        self.resolve_token_at(at, side, false)
+    }
+
+    fn resolve_bracket_at(&self, at: usize, side: Assoc) -> Option<PythonNode<'_>> {
+        self.resolve_token_at(at, Some(side), true)
+    }
+
+    fn resolve_token_at(
+        &self,
+        at: usize,
+        side: Option<Assoc>,
+        brackets: bool,
+    ) -> Option<PythonNode<'_>> {
         if !self.text.is_char_boundary(at) {
             return None;
         }
@@ -267,9 +280,20 @@ impl PythonDocument {
             {
                 return Some(node);
             }
-            // A recovery region marks unparsed text, not a resolved token.
-            if self.nodes[child].term == 0 {
-                return None;
+            let data = &self.nodes[child];
+            if data.term == 0 {
+                // The wrong call closer is a real bracket under an error node.
+                // Other recovery regions can contain unparsed text.
+                let [closer] = data.children.as_slice() else {
+                    return None;
+                };
+                if !brackets
+                    || node.data().term != tables::ARG_LIST
+                    || self.nodes[*closer].term != parser::BRACKET_R
+                    || self.nodes[*closer].range != data.range
+                {
+                    return None;
+                }
             }
             node.id = child;
         }

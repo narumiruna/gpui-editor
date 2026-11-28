@@ -12,9 +12,9 @@
 //! Navigation requests scrolling through the native transaction flag, not an
 //! upstream scroll range. There are no custom widget or button callbacks.
 
-use std::ops::Range;
+use std::{convert::Infallible, ops::Range, sync::Arc, time::Duration};
 
-use crate::{ChangeDesc, EditError, Text};
+use crate::{ChangeDesc, ConfigurationError, EditError, Text};
 
 mod diff;
 mod projection;
@@ -22,14 +22,23 @@ mod session;
 mod side_by_side;
 mod update;
 
-pub use diff::{Diff, DiffChange, DiffConfig, diff, presentable_diff};
+pub use diff::{
+    Diff, DiffChange, DiffConfig, DiffOverride, InvalidDiffOverride, diff, presentable_diff,
+};
 pub use projection::{CollapseConfig, MergeProjection, ProjectionRow};
 pub use session::{
     MergeChunks, MergeControl, MergeControlKind, UnifiedMerge, UnifiedMergeConfig, accept_chunk,
     get_chunks, get_original_doc, go_to_next_chunk, go_to_previous_chunk,
     original_doc_change_effect, reject_chunk, unified_merge_state, unified_merge_view,
+    unified_merge_view_with_override, unified_merge_view_with_timeout,
 };
 pub use side_by_side::{MergeView, MergeViewConfig, RevertControl};
+
+#[derive(Clone, Debug, Default)]
+struct SessionDiff {
+    timeout: Duration,
+    diff_override: Option<DiffOverride>,
+}
 
 /// One of the documents in a comparison.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -92,7 +101,29 @@ impl Chunk {
     }
 
     pub fn build_with_config(a: &Text, b: &Text, config: DiffConfig) -> Vec<Self> {
-        build(a.as_str(), b.as_str(), config)
+        Self::build_with_timeout(a, b, config, Duration::ZERO)
+    }
+
+    /// Build chunks with the advisory time limit of [`DiffConfig::diff_with_timeout`].
+    pub fn build_with_timeout(
+        a: &Text,
+        b: &Text,
+        config: DiffConfig,
+        timeout: Duration,
+    ) -> Vec<Self> {
+        let (a, b) = (a.as_str(), b.as_str());
+        build(a, b, config.presentable_diff_with_timeout(a, b, timeout))
+    }
+
+    /// Build chunks from the checked override and the native display and line
+    /// rules. Return an error if the override returns invalid ranges.
+    pub fn build_with_override(
+        a: &Text,
+        b: &Text,
+        diff_override: &DiffOverride,
+    ) -> Result<Vec<Self>, InvalidDiffOverride> {
+        let (a, b) = (a.as_str(), b.as_str());
+        Ok(build(a, b, diff_override.presentable_diff(a, b)?))
     }
 
     /// Copy this chunk from the other document into `destination`. Return the
@@ -124,16 +155,97 @@ impl Chunk {
         changes: &ChangeDesc,
         config: DiffConfig,
     ) -> Vec<Self> {
-        update::update(chunks, a, b, edited, changes, config)
-            .unwrap_or_else(|| Self::build_with_config(a, b, config))
+        Self::update_with_timeout(chunks, a, b, edited, changes, config, Duration::ZERO)
+    }
+
+    /// Update chunks as in [`Self::update`]. Each rebuilt window starts a new
+    /// advisory time limit. Zero disables the limit.
+    pub fn update_with_timeout(
+        chunks: &[Self],
+        a: &Text,
+        b: &Text,
+        edited: Side,
+        changes: &ChangeDesc,
+        config: DiffConfig,
+        timeout: Duration,
+    ) -> Vec<Self> {
+        Self::update_with(chunks, a, b, edited, changes, |a, b| {
+            Ok::<_, Infallible>(config.presentable_diff_with_timeout(a, b, timeout))
+        })
+        .unwrap()
+    }
+
+    /// Update chunks with the same windows as [`Self::update`]. For each
+    /// rebuilt window, the callback receives the current slice from A followed
+    /// by the current slice from B. An empty edit does not call the override.
+    /// Invalid callback ranges return an error instead of replacing the chunks.
+    pub fn update_with_override(
+        chunks: &[Self],
+        a: &Text,
+        b: &Text,
+        edited: Side,
+        changes: &ChangeDesc,
+        diff_override: &DiffOverride,
+    ) -> Result<Vec<Self>, InvalidDiffOverride> {
+        Self::update_with(chunks, a, b, edited, changes, |a, b| {
+            diff_override.presentable_diff(a, b)
+        })
+    }
+
+    fn build_for_session(
+        a: &Text,
+        b: &Text,
+        config: DiffConfig,
+        policy: &SessionDiff,
+    ) -> Result<Arc<[Self]>, ConfigurationError> {
+        let chunks = match &policy.diff_override {
+            Some(diff_override) => Self::build_with_override(a, b, diff_override)
+                .map_err(|_| ConfigurationError::InvalidFieldData)?,
+            None => Self::build_with_timeout(a, b, config, policy.timeout),
+        };
+        Ok(chunks.into())
+    }
+
+    fn update_for_session(
+        chunks: &[Self],
+        a: &Text,
+        b: &Text,
+        edited: Side,
+        changes: &ChangeDesc,
+        config: DiffConfig,
+        policy: &SessionDiff,
+    ) -> Result<Arc<[Self]>, ConfigurationError> {
+        let chunks = match &policy.diff_override {
+            Some(diff_override) => {
+                Self::update_with_override(chunks, a, b, edited, changes, diff_override)
+                    .map_err(|_| ConfigurationError::InvalidFieldData)?
+            }
+            None => {
+                Self::update_with_timeout(chunks, a, b, edited, changes, config, policy.timeout)
+            }
+        };
+        Ok(chunks.into())
+    }
+
+    fn update_with<E>(
+        chunks: &[Self],
+        a: &Text,
+        b: &Text,
+        edited: Side,
+        changes: &ChangeDesc,
+        diff: impl Fn(&str, &str) -> Result<Diff, E>,
+    ) -> Result<Vec<Self>, E> {
+        let rebuild = |a: &str, b: &str| Ok(build(a, b, diff(a, b)?));
+        update::update(chunks, a, b, edited, changes, rebuild)
+            .unwrap_or_else(|| rebuild(a.as_str(), b.as_str()))
     }
 }
 
-fn build(a: &str, b: &str, config: DiffConfig) -> Vec<Chunk> {
+fn build(a: &str, b: &str, diff: Diff) -> Vec<Chunk> {
     let Diff {
         mut changes,
         precise,
-    } = config.presentable_diff(a, b);
+    } = diff;
     if changes.is_empty() {
         return Vec::new();
     }

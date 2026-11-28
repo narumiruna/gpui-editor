@@ -6,12 +6,12 @@ use std::{
 use crate::{
     AnnotationType, ChangeSet, ConfigurationError, EditError, EditorSelection, EditorState,
     Extension, Facet, StateEffect, StateField, Text, Transaction,
-    extension::{Extensions, Reconfiguration},
+    extension::{Extensions, Reconfiguration, ResolvedValues},
     state_config::PRESERVE_REPLACEMENTS,
 };
 
 use super::{
-    Collab, CollabError, OriginStates, SharedEffects, SharedEffectsContext, TransactionContext,
+    Collab, CollabError, QueueSnapshot, SharedEffects, SharedEffectsContext, TransactionContext,
     Update,
 };
 
@@ -130,6 +130,7 @@ fn combine<T>(
 struct Acknowledged {
     from: Arc<()>,
     next: Collab,
+    permits_changes: bool,
 }
 
 static ACKNOWLEDGED: LazyLock<AnnotationType<Acknowledged>> = LazyLock::new(AnnotationType::new);
@@ -164,8 +165,13 @@ static COLLAB_STATE: LazyLock<StateField<Collab>> = LazyLock::new(|| {
                 // Publish the reconfiguration transaction with its start policy.
                 next.client_id.clone_from(&start_config.client_id);
                 next.share.clone_from(&start_config.share);
-                next.record(transaction.clone(), *start, *update.state())
-                    .map_err(|_| ConfigurationError::InvalidFieldData)?;
+                next.record(
+                    transaction.clone(),
+                    *start,
+                    *update.state(),
+                    Some(&config.client_id),
+                )
+                .map_err(|_| ConfigurationError::InvalidFieldData)?;
                 next
             };
             if previous.client_id != config.client_id {
@@ -206,21 +212,31 @@ pub(crate) fn capture_origin_states(
 ) -> Result<(), ConfigurationError> {
     if let Some(field) = LazyLock::get(&COLLAB_STATE)
         && let Some(session) = after.context(text, selection).field(field)?
+        && let Some(origin) = session
+            .pending
+            .last()
+            .and_then(|update| update.origin.as_ref())
+        && !origin.is_captured()
     {
-        session.capture_origin_states(before, after);
+        let initial = before
+            .context(origin.start_text(), origin.start_selection())
+            .field(field)?;
+        origin.capture(
+            origin_values(before),
+            origin_values(after),
+            initial
+                .as_deref()
+                .map(|initial| QueueSnapshot::new(initial, None)),
+            Some(QueueSnapshot::new(&session, Some(origin))),
+        );
     }
     Ok(())
 }
 
-pub(super) fn origin_states(before: &Extensions, after: &Extensions) -> OriginStates {
-    // This private field is the only registry entry that can own the queue
-    // under construction. Capturing it would let the origin own itself and
-    // would retain the entire pending vector at each earlier origin.
-    let field = COLLAB_STATE.reader();
-    OriginStates {
-        start: before.capture_without(field),
-        result: after.capture_without(field),
-    }
+pub(super) fn origin_values(extensions: &Extensions) -> ResolvedValues {
+    // Keep the live field out of the resolved registry. The origin captures
+    // collaboration separately, without owning the live session or itself.
+    extensions.capture_without(COLLAB_STATE.reader())
 }
 
 /// Read the configured client ID, synchronized version, and sendable updates.
@@ -230,6 +246,8 @@ pub fn collab_state(state: &EditorState) -> Result<Option<Arc<Collab>>, Configur
 
 /// Return a snapshot of the local queue, in send order. This does not
 /// acknowledge any updates. Use [`collab_state`] to read the queue without cloning it.
+/// For an update's historical queues, see [`TransactionContext::start_collab_state`]
+/// and [`TransactionContext::collab_state`].
 pub fn sendable_updates(state: &EditorState) -> Result<Vec<Update>, CollabError> {
     Ok(require_collab(state)?.sendable_updates().to_vec())
 }
@@ -266,6 +284,7 @@ pub(crate) fn validate_receipt(
     };
     let current = collab_state(state)?;
     if receipts.next().is_some()
+        || (!receipt.permits_changes && !transaction.changes().is_empty())
         || reconfiguration.is_some_and(|config| !config.has_facet(&CONFIG))
         || current.is_none_or(|current| !Arc::ptr_eq(&current.generation, &receipt.from))
     {
@@ -278,9 +297,9 @@ pub(crate) fn validate_receipt(
 /// Dispatch it to the same editor while the extension is still enabled, before
 /// other shared edits or acknowledgements. Dispatch rejects a stale receipt,
 /// multiple receipts in one transaction, or removal of the extension.
-/// The transaction is not recorded as local undo, and history maps pending
-/// events over it. Unlike upstream, even empty and acknowledgement-only
-/// receipts bypass filters and opt out of history. Extenders can still run.
+/// Remote edits bypass filters and local undo. Empty and acknowledgement-only
+/// receipts run filters, but reject any added document changes. Extenders run
+/// at dispatch for both forms.
 pub fn receive_updates(
     state: &EditorState,
     from_version: usize,
@@ -369,9 +388,12 @@ pub fn prepare_text_update_group(
             start.context(),
             state.context(),
         ));
-        origin
-            .states
-            .get_or_init(|| origin_states(&start.extensions, &state.extensions));
+        origin.capture(
+            origin_values(&start.extensions),
+            origin_values(&state.extensions),
+            Some(QueueSnapshot::new(&initial, None)),
+            Some(QueueSnapshot::new(&current, None)),
+        );
         pending.push(Update {
             client_id: current.client_id.clone(),
             edit: combined,
@@ -381,20 +403,22 @@ pub fn prepare_text_update_group(
         changes
     };
     let mut next = (*current).clone();
-    next.pending = Arc::new(pending);
+    next.replace_pending(pending);
     next.generation = Arc::new(());
+    let transaction = Transaction::default()
+        .with_add_to_history(false)
+        .without_filtering();
     Ok(Some((
-        session_receipt(Transaction::default(), &current, next),
+        session_receipt(transaction, &current, next),
         changes,
     )))
 }
 
 fn session_receipt(transaction: Transaction, current: &Collab, next: Collab) -> Transaction {
-    transaction
-        .with_annotation(ACKNOWLEDGED.of(Acknowledged {
-            from: current.generation.clone(),
-            next,
-        }))
-        .with_add_to_history(false)
-        .without_filtering()
+    let permits_changes = !transaction.changes().is_empty();
+    transaction.with_annotation(ACKNOWLEDGED.of(Acknowledged {
+        from: current.generation.clone(),
+        next,
+        permits_changes,
+    }))
 }

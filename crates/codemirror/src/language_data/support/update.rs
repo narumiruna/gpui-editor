@@ -67,14 +67,21 @@ impl SupportedDocument {
 
     /// Create a new snapshot without changing the one held by the old state.
     pub(crate) fn reparse(&self, changes: &ChangeSet) -> Result<Self, SyntaxUpdateError> {
-        let syntax = if let Some(parser) = &self.strict_parser {
+        let mut syntax = if let Some(parser) = &self.strict_parser {
             let mut text = self.text().clone();
             changes.apply_to(&mut text)?;
             match parser {
                 StrictParser::Lr(grammar) => {
                     let node_types = match &self.syntax {
+                        NativeSyntax::Cpp(doc) => doc.node_types(),
+                        NativeSyntax::Go(doc) => doc
+                            .configured_node_types()
+                            .expect("strict Go attachment has configured rows"),
+                        NativeSyntax::Java(doc) => doc.node_types(),
                         NativeSyntax::Json(doc) => doc.node_types(),
                         NativeSyntax::LezerGrammar(doc) => doc.node_types(),
+                        NativeSyntax::Rust(doc) => doc.node_types(),
+                        NativeSyntax::Yaml(_) => grammar.node_types(),
                         _ => unreachable!("strict LR attachment has the corresponding grammar"),
                     };
                     grammar.parse_editor(text, true, node_types)
@@ -91,7 +98,7 @@ impl SupportedDocument {
             markdown_parser: self.markdown_parser.clone(),
             strict_parser: self.strict_parser.clone(),
             markdown_mounts: markdown_mounts(
-                &syntax,
+                &mut syntax,
                 self.settings,
                 self.markdown_parser.as_deref(),
             )

@@ -82,8 +82,8 @@ impl SelectionRange {
     }
 
     /// Map the range and retain its metadata. `assoc` only affects cursors.
-    /// Nonempty ranges map their endpoints inward. If a replacement makes
-    /// these endpoints cross, collapse at the mapped upper endpoint.
+    /// Nonempty ranges map their endpoints inward. If the mapped endpoints
+    /// cross, the anchor and head change order and [`Self::range`] stays ordered.
     pub fn map_with_assoc(self, changes: &ChangeDesc, assoc: Assoc) -> Result<Self, EditError> {
         self.map_positions(assoc, |pos, side| {
             changes.map_pos(pos, side, MapMode::Simple)
@@ -104,7 +104,6 @@ impl SelectionRange {
         } else {
             let start = f(range.start, Assoc::After)?;
             let end = f(range.end, Assoc::Before)?;
-            let start = start.min(end);
             (self.anchor, self.head) = if self.head < self.anchor {
                 (end, start)
             } else {

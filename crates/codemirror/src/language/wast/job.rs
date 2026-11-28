@@ -22,6 +22,7 @@ pub struct WastParseJob {
     offsets: NormalizedOffsets,
     session: RecoveringSession,
     node_types: WastNodeTypes,
+    in_flight: bool,
 }
 
 /// Result and work counts for one call to [`WastParseJob::advance`].
@@ -67,6 +68,7 @@ impl WastParseJob {
             offsets,
             session,
             node_types,
+            in_flight: false,
         }
     }
 
@@ -77,6 +79,14 @@ impl WastParseJob {
         self.session
             .cutoff_after(start, units)
             .map(|end| self.offsets.original_byte(end))
+    }
+
+    /// Raw byte coverage of unfinished work, not token overrun from a stage.
+    pub(crate) fn in_flight_progress(&self) -> Option<usize> {
+        if !self.in_flight {
+            return None;
+        }
+        Some(self.offsets.original_byte(self.session.position()?))
     }
 
     fn round_up(&self, upto: usize) -> usize {
@@ -103,6 +113,11 @@ impl WastParseJob {
             .session
             .advance(self.offsets.normalized_byte(upto), rounds)
             .map_err(|error| error.map_offset(original_byte))?;
+        if advance.output.is_some() {
+            self.in_flight = false;
+        } else if advance.rounds != 0 {
+            self.in_flight = true;
+        }
         let mut output_work = advance.output_work;
         let output = advance.output.map(|(mut tree, complete)| {
             output_work += tree.project_glr_ranges(original_byte);

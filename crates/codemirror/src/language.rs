@@ -55,8 +55,8 @@ pub use highlight::{
 pub use indent::{IndentContext, IndentOptions};
 pub(crate) use indent_service::style as indent_style;
 pub use indent_service::{
-    INDENT_UNIT, IndentDecision, IndentStyle, MarkdownWastIndent, get_indent_unit, get_indentation,
-    indent_range, indent_service, indent_string,
+    INDENT_UNIT, IndentDecision, IndentStyle, MarkdownCodeIndent, MarkdownWastIndent,
+    get_indent_unit, get_indentation, indent_range, indent_service, indent_string,
 };
 pub use parse_service::{
     ParseJob, ParseRequest, ParseService, ParseSkip, ParseSnapshot, ParseStep, whole_document,

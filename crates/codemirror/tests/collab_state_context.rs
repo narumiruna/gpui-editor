@@ -117,6 +117,21 @@ fn shared_effects_can_read_both_state_views_before_the_update_is_queued() {
                     assert_eq!(update.origin().unwrap().time(), Some(19));
                     assert_eq!(update.effects().len(), 1);
                     let captured = update.origin_context().unwrap();
+                    let start = captured.start_collab_state().unwrap();
+                    let result = captured.collab_state().unwrap();
+                    assert_eq!(start.client_id(), "a");
+                    assert_eq!(result.client_id(), "a");
+                    assert_eq!(start.synced_version(), Ok(7));
+                    assert_eq!(result.synced_version(), Ok(7));
+                    assert!(start.sendable_updates().unwrap().is_empty());
+                    let historical = result.sendable_updates().unwrap();
+                    assert_eq!(historical.len(), 1);
+                    assert!(std::ptr::eq(
+                        historical[0].origin_context().unwrap(),
+                        captured
+                    ));
+                    assert_eq!(historical[0].change_desc().length(), initial.len());
+                    assert_eq!(update.change_desc().length(), state.text().len());
                     let expected = json!([
                         describe(&captured.start_state().unwrap()),
                         describe(&captured.state().unwrap()),

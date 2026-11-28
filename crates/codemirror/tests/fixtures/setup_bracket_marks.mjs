@@ -15,6 +15,12 @@ const cases = [
     ['JSON before-only forbids the other probe', 'json', '["(|«x»",\r\n")"]', {brackets: '()«»', maxScanDistance: 1, afterCursor: false}],
     ['WAST renderer receives tree-based matches', 'wast', '(|module ;; 😀 )\r\n)\r;; )|', {render: true}],
     ['JSON renderer can choose a single span', 'json', '{|"a":"}"}\r\n[|0]', {render: true}],
+    ['Java class skips a comment closer', 'java', 'class A {| // }😀\r\n void m() { return; }\r\n}', {}],
+    ['Java literal keeps its own bracket scope', 'java', 'class A { String a = "([|😀])"; char p = \')\'; }\r\n', {}],
+    ['Java renderer sees custom and marked mates', 'java', 'class A { // «|猫😀»\r\n void u() {| }\r\n}', {brackets: '«»', render: true}],
+    ['C++ struct skips a comment closer', 'cpp', 'struct A {| // }😀\r\n int x;\r\n};', {}],
+    ['C++ block skips raw string punctuation', 'cpp', 'int f() {| auto r = R"tag(}😀)tag"; return 0;\r\n}', {render: true}],
+    ['C++ comments keep their own pairs', 'cpp', 'int a[] = {0}; // [|😀]\r\n', {maxScanDistance: 1}],
 ];
 assert.equal(process.argv.length, 3, 'usage: node setup_bracket_marks.mjs <pinned archive directory>');
 const scratch = mkdtempSync(join(realpathSync(tmpdir()), 'gpui-setup-bracket-marks.'));
@@ -26,6 +32,9 @@ try {
     const {Decoration, ViewPlugin} = await load('@codemirror/view');
     const {json} = await load('@codemirror/lang-json');
     const {wast} = await load('@codemirror/lang-wast');
+    const {cpp} = await load('@codemirror/lang-cpp');
+    const {java} = await load('@codemirror/lang-java');
+    const languages = {json, wast, cpp, java};
     for (const [name, mode, annotated, options] of cases) {
         const parts = annotated.split('|');
         const source = parts.join('');
@@ -46,7 +55,7 @@ try {
         assert(plugin && basicSetup.flat(Infinity).includes(plugin));
         const slot = new Compartment();
         let state = EditorState.create({doc: source, selection,
-            extensions: [mode === 'json' ? json() : wast(), basicSetup, slot.of(extension)]});
+            extensions: [languages[mode](), basicSetup, slot.of(extension)]});
         const marks = () => {
             const result = [];
             for (const it = plugin.create({state}).decorations.iter(); it.value; it.next()) {

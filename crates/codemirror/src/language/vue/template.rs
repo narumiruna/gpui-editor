@@ -23,6 +23,7 @@ impl Template {
     pub(super) fn parse(host: &HtmlDocument) -> Self {
         let mut template = Self::default();
         let source = host.text().as_str();
+        let mut mounts = host.mounts().iter().peekable();
         for node in host.nodes() {
             let range = node.range();
             let fragment = &source[range.clone()];
@@ -35,6 +36,20 @@ impl Template {
                 }
                 _ => continue,
             };
+            // A body mount owns its covered nodes. A route that starts
+            // inside a directive is only an attribute value mount.
+            while mounts
+                .peek()
+                .is_some_and(|mount| mount.range().end <= range.start)
+            {
+                mounts.next();
+            }
+            if mounts
+                .peek()
+                .is_some_and(|mount| mount.range().start <= range.start)
+            {
+                continue;
+            }
             template.overlays.push(range.clone());
             let parser = if directive {
                 tables::attribute()
@@ -101,6 +116,13 @@ impl Template {
             }
         }
         true
+    }
+
+    pub(super) fn replaces_value(&self, start: usize) -> bool {
+        let index = self.overlays.partition_point(|range| range.end <= start);
+        self.overlays
+            .get(index)
+            .is_some_and(|range| range.contains(&start))
     }
 
     pub(super) fn expression_at(&self, position: usize) -> Option<&VueExpression> {

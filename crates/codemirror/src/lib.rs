@@ -45,7 +45,7 @@ pub use extension::{
     StateField, StateFieldOptions, StateFieldReader, StateUpdate,
 };
 pub use history::{History, HistoryIsolation, inverted_effects};
-use language::wast::WastPublication;
+use language::{lezer::LrPublication, wast::WastPublication};
 pub use range_set::{
     Range, RangeComparator, RangeSet, RangeSetBuilder, RangeSetError, RangeSetUpdate, RangeValue,
     SpanIterator,
@@ -55,7 +55,7 @@ pub use serialization::{JsonField, SerializationError};
 pub use state_config::{
     ALLOW_MULTIPLE_SELECTIONS, LINE_SEPARATOR, PHRASES, PhraseMap, READ_ONLY, TAB_SIZE,
 };
-pub use text::{Line, Text, TextCursor};
+pub use text::{Line, Text, TextCursor, TextLineCursor};
 pub use transaction_filter::{
     ChangePermission, TransactionExtension, change_filter, transaction_extender, transaction_filter,
 };
@@ -162,6 +162,7 @@ pub struct EditorState {
     selection: EditorSelection,
     extensions: Extensions,
     wast_publication: Option<Arc<WastPublication>>,
+    lr_publication: Option<Arc<LrPublication>>,
 }
 
 impl EditorState {
@@ -177,6 +178,7 @@ impl EditorState {
             selection: EditorSelection::single(0, 0),
             extensions: Extensions::default(),
             wast_publication: None,
+            lr_publication: None,
         }
     }
 
@@ -225,6 +227,19 @@ impl EditorState {
         self.apply_resolved(transaction)
     }
 
+    // A native parser publication is not a host edit. It updates the resolved
+    // fields without running filters, extenders, or touching selection/history.
+    pub(crate) fn refresh_viewport_fields(&mut self) -> Result<ChangeDesc, EditError> {
+        let transaction = Transaction::default().with_add_to_history(false);
+        let changes = transaction.changes().desc(self.text.len())?;
+        let current = (&self.text, &self.selection);
+        let extensions = self
+            .extensions
+            .update(current, current, &transaction, &changes, None)?;
+        self.extensions = extensions;
+        Ok(changes)
+    }
+
     fn apply_resolved(
         &mut self,
         transaction: Transaction,
@@ -242,6 +257,8 @@ impl EditorState {
         if let Some(selection) = &transaction.selection {
             selection.check(|pos| transaction.changes.is_boundary_after(source, pos))?;
         }
+        let markdown_refresh =
+            language::markdown::checked_markdown_refresh(self.context(), &transaction)?;
         let reconfiguration = self.extensions.prepare_reconfiguration(&transaction)?;
         collab::validate_receipt(self, &transaction, reconfiguration.as_ref())?;
         let preserve_replacements = force_preserve_replacements
@@ -281,10 +298,20 @@ impl EditorState {
                 &desc,
                 reconfiguration,
             )?;
+            if let Some(refresh) = markdown_refresh {
+                refresh.check_published(self.context(), extensions.context(&text, &selection))?;
+            }
             if !changes.is_empty() {
                 self.wast_publication = None;
-            } else if reconfigured && self.wast_publication.is_some() {
-                self.retain_wast_publication(&extensions.context(&text, &selection));
+                self.lr_publication = None;
+            } else if reconfigured {
+                let next = extensions.context(&text, &selection);
+                if self.wast_publication.is_some() {
+                    self.retain_wast_publication(&next);
+                }
+                if self.lr_publication.is_some() {
+                    self.retain_lr_publication(&next);
+                }
             }
             self.text = text;
             self.extensions = extensions;

@@ -72,12 +72,12 @@ pub(super) fn tracker() -> ContextTracker<Context> {
                 parent: context.clone(),
             })))))
         })
-        .with_reduce(|context, term, _, _| {
-            Ok(context
+        .with_reduce_term(|context, term| {
+            context
                 .0
                 .as_ref()
                 .filter(|_| term == ELEMENT)
-                .map(|frame| frame.parent.clone()))
+                .map(|frame| frame.parent.clone())
         })
 }
 

@@ -236,6 +236,28 @@ fn pinned_commands_oracle() {
 }
 
 #[test]
+fn blank_line_keeps_existing_multiline_selection_content() {
+    for line in include_str!("fixtures/commands_blank_line.jsonl").lines() {
+        check_oracle(serde_json::from_str(line).unwrap());
+    }
+    // The pin can use the first selected line's whitespace to clear existing
+    // text through the last line. Do not delete text for this insert command.
+    let mut state = EditorState::new(" \nx");
+    state
+        .update(Transaction::default().with_selection(EditorSelection::single(0, 2)))
+        .unwrap();
+    let transaction = insert_blank_line(&state, Indentation::default(), |_, _, _| None, "\n")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        transaction.changes().changes().collect::<Vec<_>>(),
+        [(&(3..3), "\n")]
+    );
+    state.update(transaction).unwrap();
+    assert_eq!(state.text().as_str(), " \nx\n");
+}
+
+#[test]
 fn newline_uses_local_endings_and_does_not_split_crlf() {
     let mut state = EditorState::new("a\r\nb\nc\r\nd");
     let selection = EditorSelection::new(

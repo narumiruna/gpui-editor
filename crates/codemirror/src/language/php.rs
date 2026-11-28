@@ -5,7 +5,7 @@
 //! use UTF-8 byte offsets. Strict LR parses can reuse prefix checkpoints.
 //! The shared LR and GLR work limits apply. Recovery can retain a complete
 //! prefix but does not reproduce Lezer's full recovery. The HTML parse uses a
-//! separate, mapped projection. It does not accept custom base languages.
+//! separate, mapped projection with optional HTML dialects and nesting rules.
 //! Fold and indentation queries use both native trees.
 
 use std::ops::Range;
@@ -14,6 +14,7 @@ use crate::{ChangeSet, EditError, Text, commands::CommentTokens};
 
 use super::{
     HighlightSpan, IndentOptions, LanguageData, StreamSettings,
+    html::{HtmlNesting, HtmlOptions},
     lezer::{ReuseStats, SyntaxTree},
 };
 
@@ -165,6 +166,7 @@ pub struct PhpDocument {
     highlights: Vec<HighlightSpan<'static>>,
     recovered: bool,
     options: PhpOptions,
+    html_options: HtmlOptions,
     strict: Option<Box<SyntaxTree>>,
 }
 
@@ -174,11 +176,44 @@ impl PhpDocument {
     }
 
     pub fn parse_with_options(text: Text, options: PhpOptions) -> Self {
-        Self::parse_with_prefix(text, options, None)
+        Self::parse_with_html_nesting(
+            text,
+            options,
+            HtmlOptions {
+                match_closing_tags: false,
+                ..HtmlOptions::default()
+            },
+            HtmlNesting::default(),
+        )
     }
 
-    /// Apply UTF-8 byte edits and rebuild the HTML projection with the original options.
+    /// Parse template text with the specified HTML dialect and nesting rules.
+    /// Rules check tag names and attributes in the original source before the
+    /// stock rules. Child parsers receive projected text without PHP gaps.
+    /// The HTML settings have no effect in plain mode or when HTML is disabled.
+    pub fn parse_with_html_nesting(
+        text: Text,
+        options: PhpOptions,
+        html_options: HtmlOptions,
+        nesting: HtmlNesting<'_>,
+    ) -> Self {
+        Self::parse_with_prefix(text, options, html_options, nesting, None)
+    }
+
+    /// Apply UTF-8 byte edits with the same HTML dialect and stock routes.
+    /// To keep custom routes, use [`Self::reparse_with_html_nesting`].
     pub fn reparse(&self, changes: &ChangeSet) -> Result<Self, EditError> {
+        self.reparse_with_html_nesting(changes, HtmlNesting::default())
+    }
+
+    /// Apply UTF-8 byte edits and rebuild the HTML projection with the supplied
+    /// routes. The document does not retain route callbacks. The PHP parser
+    /// can reuse strict checkpoints before the first edit.
+    pub fn reparse_with_html_nesting(
+        &self,
+        changes: &ChangeSet,
+        nesting: HtmlNesting<'_>,
+    ) -> Result<Self, EditError> {
         let mut text = self.text.clone();
         changes.apply_to(&mut text)?;
         let end = changes
@@ -186,7 +221,13 @@ impl PhpDocument {
             .next()
             .map_or(text.len(), |(range, _)| range.start);
         let prefix = self.strict.as_deref().map(|tree| (tree, end));
-        Ok(Self::parse_with_prefix(text, self.options, prefix))
+        Ok(Self::parse_with_prefix(
+            text,
+            self.options,
+            self.html_options,
+            nesting,
+            prefix,
+        ))
     }
 
     /// Report strict LR prefix reuse in logical bytes (CRLF counts as one byte).
@@ -200,6 +241,8 @@ impl PhpDocument {
     fn parse_with_prefix(
         text: Text,
         options: PhpOptions,
+        html_options: HtmlOptions,
+        nesting: HtmlNesting<'_>,
         prefix: Option<(&SyntaxTree, usize)>,
     ) -> Self {
         let (nodes, recovered, strict) = parser::parse(text.as_str(), options.plain, prefix);
@@ -210,11 +253,12 @@ impl PhpDocument {
             highlights: Vec::new(),
             recovered,
             options,
+            html_options,
             strict: strict.map(Box::new),
         };
         doc.highlights = highlight::collect(doc.root());
         if !options.plain && options.html {
-            doc.html = PhpHtml::parse(&doc);
+            doc.html = PhpHtml::parse(&doc, html_options, nesting);
         }
         doc
     }

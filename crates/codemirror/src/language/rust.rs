@@ -7,15 +7,27 @@
 //! a later edit. A local token tree serves as the fallback. Recovery can differ
 //! from upstream. Ranges are UTF-8 bytes in the original text.
 
-use std::ops::Range;
+use std::{
+    ops::Range,
+    sync::{Arc, OnceLock},
+};
 
-use crate::{Assoc, ChangeSet, EditError, Text};
+use crate::{
+    Assoc, ChangeSet, EditError, RangeSet, Text,
+    commands::CommentTokens,
+    language_data::CloseBracketData,
+    view::{MarkDecoration, Viewport},
+};
 
-use super::{HighlightSpan, IndentOptions, StreamSettings, lezer::ReuseStats};
+use super::{
+    BidiIsolateOptions, HighlightSpan, IndentOptions, LanguageData, StreamSettings,
+    bidi::IsolateRanges,
+    lezer::{ISOLATE, NodeType, NodeTypes, ParseError, ReuseStats},
+};
 
 mod brackets;
 mod highlight;
-mod indent;
+pub(super) mod indent;
 mod kind;
 mod lr;
 mod recovery;
@@ -23,12 +35,32 @@ mod tables;
 mod tokens;
 
 pub use kind::RustNodeKind;
+pub(crate) use lr::{parse_raw, stock_data_facet, stock_node_types};
 
 /// The upstream language name.
 pub const NAME: &str = "rust";
 pub const LINE_COMMENT: &str = "//";
 pub const BLOCK_COMMENT: (&str, &str) = ("/*", "*/");
 pub const STRING_PREFIXES: [&str; 3] = ["b", "r", "br"];
+
+pub(crate) fn language_data() -> LanguageData {
+    LanguageData::default()
+        .with(
+            "commentTokens",
+            CommentTokens {
+                line: Some(LINE_COMMENT),
+                block: Some(BLOCK_COMMENT),
+            },
+        )
+        .with(
+            "closeBrackets",
+            CloseBracketData {
+                string_prefixes: &STRING_PREFIXES,
+                ..Default::default()
+            },
+        )
+        .with("indentOnInput", indent_on_input as fn(&str) -> bool)
+}
 
 /// Whether the line from its start to the cursor triggers reindentation.
 pub fn indent_on_input(line_prefix: &str) -> bool {
@@ -42,6 +74,7 @@ fn trim_js_space(text: &str) -> &str {
 #[derive(Debug)]
 struct Node {
     kind: RustNodeKind,
+    term: Option<u16>,
     range: Range<usize>,
     parent: Option<usize>,
     children: Vec<usize>,
@@ -53,6 +86,7 @@ struct Node {
 pub struct RustNode<'a> {
     source: &'a str,
     nodes: &'a [Node],
+    node_types: &'a NodeTypes,
     id: usize,
 }
 
@@ -61,8 +95,18 @@ impl<'a> RustNode<'a> {
         &self.nodes[self.id]
     }
 
+    pub(super) fn same_tree(self, other: Self) -> bool {
+        std::ptr::eq(self.nodes, other.nodes)
+    }
+
     pub fn kind(self) -> RustNodeKind {
         self.data().kind
+    }
+
+    /// The exact grammar row. Local fallback nodes without a known term
+    /// have no row.
+    pub fn node_type(self) -> Option<&'a NodeType> {
+        self.node_types.get(self.data().term?)
     }
 
     pub fn range(self) -> Range<usize> {
@@ -123,6 +167,8 @@ pub struct RustDocument {
     text: Text,
     editor_lines: Option<Text>,
     nodes: Vec<Node>,
+    node_types: NodeTypes,
+    isolate_ranges: OnceLock<IsolateRanges>,
     highlights: Vec<HighlightSpan<'static>>,
     recovered: bool,
     checkpoint: Option<Box<lr::Cache>>,
@@ -144,7 +190,7 @@ impl RustDocument {
             .next()
             .map_or(text.len(), |(range, _)| range.start);
         let prefix = self.checkpoint.as_deref().map(|cache| (cache, end));
-        Ok(Self::parse_with_prefix(text, prefix))
+        Ok(Self::parse_with_prefix(text, prefix).with_node_types(self.node_types.clone()))
     }
 
     /// LR reuse in the last parse. The resume offset is in original UTF-8 bytes,
@@ -156,9 +202,24 @@ impl RustDocument {
             .map_or_else(ReuseStats::default, |cache| cache.reuse)
     }
 
+    pub(crate) fn parse_editor_strict(text: Text) -> Result<Self, ParseError> {
+        let parsed = lr::parse(text.as_str(), None, true)?;
+        Ok(Self::from_parse(text, parsed, false))
+    }
+
+    pub(crate) fn node_types(&self) -> &NodeTypes {
+        &self.node_types
+    }
+
+    pub(crate) fn with_node_types(mut self, rows: NodeTypes) -> Self {
+        self.node_types = rows;
+        self.isolate_ranges.take();
+        self
+    }
+
     fn parse_with_prefix(text: Text, prefix: Option<(&lr::Cache, usize)>) -> Self {
         let source = text.as_str();
-        let (parsed, local) = match lr::parse(source, prefix) {
+        let (parsed, local) = match lr::parse(source, prefix, false) {
             Ok(parsed) => (parsed, false),
             Err(_) => (
                 lr::Parsed {
@@ -169,11 +230,17 @@ impl RustDocument {
                 true,
             ),
         };
+        Self::from_parse(text, parsed, local)
+    }
+
+    fn from_parse(text: Text, parsed: lr::Parsed, local: bool) -> Self {
         let highlights = highlight::collect(&parsed.nodes, local);
         Self {
             editor_lines: super::line_projection::editor_lines(text.as_str()),
             text,
             nodes: parsed.nodes,
+            node_types: stock_node_types().clone(),
+            isolate_ranges: OnceLock::new(),
             highlights,
             recovered: parsed.recovered,
             checkpoint: parsed.cache.map(Box::new),
@@ -199,6 +266,7 @@ impl RustDocument {
         RustNode {
             source: self.text.as_str(),
             nodes: &self.nodes,
+            node_types: &self.node_types,
             id: 0,
         }
     }
@@ -206,6 +274,23 @@ impl RustDocument {
     /// All nodes in pre-order, with each parent before its children.
     pub fn nodes(&self) -> impl ExactSizeIterator<Item = RustNode<'_>> {
         (0..self.nodes.len()).map(|id| RustNode { id, ..self.root() })
+    }
+
+    /// Collect isolation marks for verified grammar rows in this viewport.
+    /// A configured row can set, replace, or remove a direction. Returned
+    /// ranges use original byte offsets and cover complete syntax nodes.
+    pub fn bidi_isolate_marks(
+        &self,
+        viewport: &Viewport,
+        options: BidiIsolateOptions,
+    ) -> Result<Arc<RangeSet<MarkDecoration>>, EditError> {
+        let ranges = self.isolate_ranges.get_or_init(|| {
+            IsolateRanges::new(self.nodes().filter_map(|node| {
+                let direction = (*node.node_type()?.prop(&ISOLATE)?)?;
+                Some((node.range(), direction))
+            }))
+        });
+        ranges.marks(&self.text, self.syntax_lines(), viewport, options)
     }
 
     /// Highlight spans clipped to a byte range. Return `None` if either
@@ -253,8 +338,12 @@ impl RustDocument {
         found
     }
 
-    /// Compute the indentation in columns. Return `None` for invalid byte
-    /// positions or where upstream preserves existing indentation.
+    pub(crate) fn has_configured_indentation(&self) -> bool {
+        indent::has_configured_indentation(self)
+    }
+
+    /// Compute stock indentation in columns. Return `None` for invalid byte
+    /// positions or where the stock rules preserve existing indentation.
     pub fn indentation(
         &self,
         position: usize,
@@ -262,6 +351,19 @@ impl RustDocument {
         options: IndentOptions<'_>,
     ) -> Option<usize> {
         indent::indentation(self, position, settings, options)
+    }
+
+    pub(in crate::language) fn bracket_node(
+        &self,
+        position: usize,
+        side: Assoc,
+    ) -> Option<RustNode<'_>> {
+        if !self.text.is_char_boundary(position)
+            || super::line_projection::splits_crlf(self.text.as_str(), position)
+        {
+            return None;
+        }
+        self.path(position, Some(side)).last()
     }
 
     fn path(&self, position: usize, side: Option<Assoc>) -> impl Iterator<Item = RustNode<'_>> {

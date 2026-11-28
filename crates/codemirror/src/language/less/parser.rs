@@ -85,6 +85,8 @@ static PARSER: LazyLock<Parser> = LazyLock::new(|| {
     .expect("verified Less grammar tables")
 });
 
+const MAX_ATTRIBUTE_RECOVERY_BYTES: usize = 64 * 1024;
+
 type ScanResult = Result<Option<ExternalToken>, ParseError>;
 
 fn external(scan: fn(&mut TokenInput<'_>, &StackView<'_>) -> ScanResult) -> Tokenizer {
@@ -159,6 +161,11 @@ pub(super) fn parse(
         Err(ParseError::Ambiguous { .. }) => PARSER.parse_glr(&input.text),
         Err(error) => Err(error),
     };
+    if let Err(error) = &result
+        && let Some(nodes) = recover_attribute_closer(&input.text, error, byte)
+    {
+        return (nodes, None);
+    }
     let nodes = match result {
         Ok(tree) => flatten(&tree, None, byte),
         Err(error) => match recovery::repair(&input.text, error) {
@@ -182,6 +189,51 @@ pub(super) fn parse(
         },
     };
     (nodes, None)
+}
+
+// Keep only one missing `]` at the start of a real ruleset block. The table
+// parser handles selectors, quotes, comments, and call literals as usual.
+fn recover_attribute_closer(
+    input: &str,
+    error: &ParseError,
+    byte: impl Fn(usize) -> usize,
+) -> Option<Vec<Node>> {
+    let ParseError::UnexpectedToken { offset, .. } = *error else {
+        return None;
+    };
+    if input.len() > MAX_ATTRIBUTE_RECOVERY_BYTES
+        || input.as_bytes().get(offset) != Some(&b'{')
+        || !input[..offset].contains('[')
+    {
+        return None;
+    }
+    let at = byte(offset);
+    let tree = PARSER.parse_recovering(input).ok()?;
+    let nodes = flatten(&tree, None, byte);
+    let mut errors = nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| node.kind == Error);
+    let (id, error) = errors.next()?;
+    if error.range != (at..at) || errors.next().is_some() {
+        return None;
+    }
+    let selector = &nodes[error.parent?];
+    let block = nodes.get(id + 1)?;
+    let (&last, preceding) = selector.children.split_last()?;
+    let previous = preceding
+        .iter()
+        .rev()
+        .map(|&child| nodes[child].kind)
+        .find(|kind| !matches!(kind, Comment | LineComment))?;
+    // GLR can also end an attribute here when its name or match value is absent.
+    (selector.kind == AttributeSelector
+        && last == id
+        && !matches!(previous, OpenBracket | MatchOp)
+        && block.kind == Block
+        && block.range.start == at
+        && nodes[block.parent?].kind == RuleSet)
+        .then_some(nodes)
 }
 
 enum Entry<'a> {

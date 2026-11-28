@@ -204,6 +204,16 @@ impl NodeTypes {
         skipped: &[u16],
         seed: impl Fn(u16, &'static str, &mut Properties),
     ) -> Self {
+        Self::with_tops(names, repeat_count, &[top], skipped, seed)
+    }
+
+    pub(crate) fn with_tops(
+        names: &'static str,
+        repeat_count: u16,
+        tops: &[u16],
+        skipped: &[u16],
+        seed: impl Fn(u16, &'static str, &mut Properties),
+    ) -> Self {
         Self(
             names
                 .split(' ')
@@ -216,7 +226,7 @@ impl NodeTypes {
                     Arc::new(NodeType::new(
                         term,
                         name,
-                        term == top,
+                        tops.contains(&term),
                         skipped.contains(&term),
                         props,
                     ))

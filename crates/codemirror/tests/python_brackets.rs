@@ -2,6 +2,7 @@ use gpui_editor_codemirror::{
     Change, ChangeSet, Text,
     language::{
         brackets::{BracketConfig, BracketMatch, bracket_near},
+        lezer::ReuseStats,
         python::PythonDocument,
     },
 };
@@ -40,13 +41,6 @@ fn python_bracket_feedback_matches_the_pinned_editor_across_edits() {
             let changes = ChangeSet::single(Change::new(from..to, insert)).unwrap();
             document.reparse(&changes).unwrap()
         };
-        // The native parser retains only a valid prefix in these two rows.
-        // Upstream still resolves brackets in parts of the damaged suffix.
-        let unparsed_hits: &[usize] = match name {
-            "replace call closer with wrong bracket" => &[37, 38, 46, 47, 48, 49, 50],
-            "native prefix recovery cannot see later grouping" => &[22, 23, 33, 34, 35, 36],
-            _ => &[],
-        };
         let text = document.text();
         let fresh = PythonDocument::parse(text.clone());
         for doc in [&document, &fresh] {
@@ -55,14 +49,7 @@ fn python_bracket_feedback_matches_the_pinned_editor_across_edits() {
             // interior of CRLF and multibyte scalars.
             for head in 0..=text.len() {
                 let actual = record(doc.bracket_near(head));
-                let upstream = hit_at(&row["hits"], head);
-                let expected = if unparsed_hits.contains(&head) {
-                    assert!(!upstream.is_null(), "{name} at byte {head}");
-                    &Value::Null
-                } else {
-                    upstream
-                };
-                assert_eq!(&actual, expected, "{name} at byte {head}");
+                assert_eq!(&actual, hit_at(&row["hits"], head), "{name} at byte {head}");
             }
             assert!(doc.bracket_near(text.len() + 1).is_none(), "{name}");
         }
@@ -77,6 +64,124 @@ fn python_bracket_feedback_matches_the_pinned_editor_across_edits() {
             assert_eq!(raw, probe[1], "{name} at byte {head}");
             assert_ne!(&raw, hit_at(&row["hits"], head), "{name} at byte {head}");
         }
+    }
+}
+
+#[test]
+fn stray_parenthesis_keeps_later_syntax_without_checkpoints() {
+    let seed = PythonDocument::parse(Text::new("0\n\n[]"));
+    let change = ChangeSet::single(Change::new(2..2, ")")).unwrap();
+    let edited = seed.reparse(&change).unwrap();
+    let no_edit = ChangeSet::default();
+    let same = edited.reparse(&no_edit).unwrap();
+    assert!(seed.reparse(&no_edit).unwrap().reuse_stats().nodes_reused > 0);
+    for doc in [&edited, &same] {
+        assert!(doc.is_recovered());
+        assert_eq!(doc.reuse_stats(), ReuseStats::default());
+        assert_eq!(
+            doc.nodes()
+                .map(|node| (node.name(), node.range(), node.parent().map(|p| p.name())))
+                .collect::<Vec<_>>(),
+            [
+                ("Script", 0..6, None),
+                ("ExpressionStatement", 0..1, Some("Script")),
+                ("Number", 0..1, Some("ExpressionStatement")),
+                ("ExpressionStatement", 2..3, Some("Script")),
+                ("TupleExpression", 2..3, Some("ExpressionStatement")),
+                ("⚠", 2..2, Some("TupleExpression")),
+                (")", 2..3, Some("TupleExpression")),
+                ("ExpressionStatement", 4..6, Some("Script")),
+                ("ArrayExpression", 4..6, Some("ExpressionStatement")),
+                ("[", 4..5, Some("ArrayExpression")),
+                ("]", 5..6, Some("ArrayExpression")),
+            ]
+        );
+    }
+    let restored = edited
+        .reparse(&change.inverted(seed.text()).unwrap())
+        .unwrap();
+    assert!(!restored.is_recovered());
+    assert_eq!(restored.reuse_stats(), ReuseStats::default());
+    assert_eq!(restored.text().as_str(), seed.text().as_str());
+}
+
+#[test]
+fn wrong_call_closer_keeps_the_array_and_error_without_checkpoints() {
+    let seed = PythonDocument::parse(Text::new("f([1]) + [2]"));
+    let edit = ChangeSet::single(Change::new(5..6, "]")).unwrap();
+    let recovered = seed.reparse(&edit).unwrap();
+    let fresh = PythonDocument::parse(recovered.text().clone());
+    for doc in [&recovered, &fresh] {
+        assert!(doc.is_recovered());
+        assert_eq!(doc.reuse_stats(), ReuseStats::default());
+        let error = doc.nodes().find(|node| node.name() == "⚠").unwrap();
+        assert_eq!(error.range(), 5..6);
+        assert_eq!(error.parent().map(|node| node.name()), Some("ArgList"));
+        assert_eq!(
+            error.children().map(|node| node.name()).collect::<Vec<_>>(),
+            ["]"]
+        );
+        assert_eq!(
+            doc.bracket_near_with_config(6, BracketConfig::default()),
+            Some(BracketMatch {
+                start: 5..6,
+                end: None,
+                matched: false,
+            })
+        );
+    }
+    let repaired = recovered
+        .reparse(&edit.inverted(seed.text()).unwrap())
+        .unwrap();
+    assert_eq!(repaired.text(), seed.text());
+    assert!(!repaired.is_recovered());
+    assert_eq!(repaired.reuse_stats(), ReuseStats::default());
+}
+
+#[test]
+fn closer_repair_keeps_prefix_fallback_outside_its_scope() {
+    for source in [
+        "0\n)\n \t\n",  // No later nonblank line.
+        "0\n); []",     // Later code on the same line.
+        "0\n42)\n[]",   // Deleted token, not a recovered tuple.
+        "0\nf([1)\n[]", // ')' closes a call after a missing ']'.
+        "0\nf([]]\n[]", // Extra recovery after the wrong call closer.
+        "0\nx=[(1]]",   // Unexpected ']' outside a call.
+        "0\nf([]]]",    // More than one bad call closer.
+        "0\n)\n[",      // Extra recovery at EOF.
+        "0\n)\n[]\n?",  // Extra recovery after a valid later line.
+    ] {
+        let doc = PythonDocument::parse(Text::new(source));
+        assert!(doc.is_recovered(), "{source:?}");
+        assert_eq!(
+            doc.root()
+                .children()
+                .map(|node| (node.name(), node.range()))
+                .collect::<Vec<_>>(),
+            [("ExpressionStatement", 0..1), ("⚠", 2..source.len())],
+            "{source:?}"
+        );
+    }
+}
+
+#[test]
+fn stray_parenthesis_repair_obeys_the_normalized_repair_cap() {
+    let head = "0\r\n)\r\n[]\r\n#";
+    let normalized_len = head.len() - head.matches('\r').count();
+    let cap = 64 * 1024;
+    for (len, within_cap) in [(cap, true), (cap + 1, false)] {
+        let source = format!("{head}{}", " ".repeat(len - normalized_len));
+        let doc = PythonDocument::parse(Text::new(source));
+        assert!(doc.is_recovered());
+        assert_eq!(
+            doc.bracket_near(6),
+            within_cap.then_some(BracketMatch {
+                start: 6..7,
+                end: Some(7..8),
+                matched: true,
+            }),
+            "{len} normalized bytes"
+        );
     }
 }
 

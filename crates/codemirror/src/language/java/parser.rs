@@ -2,10 +2,11 @@ use std::sync::LazyLock;
 
 use super::{
     super::lezer::{
-        GrammarSpec, ParseError, Parser, SerializedTables, Specializer, SyntaxTree, Tokenizer,
+        CLOSED_BY, GROUP, GrammarSpec, ISOLATE, Isolation, LANGUAGE_DATA, LanguageFacet, NodeTypes,
+        OPENED_BY, ParseError, Parser, SerializedTables, Specializer, SyntaxTree, Tokenizer,
         TreeFragment,
     },
-    Node, tables,
+    Node, closed_by, group, isolates_direction, language_data, opened_by, tables,
 };
 
 static PROGRAM: LazyLock<Parser> = LazyLock::new(|| build(tables::PROGRAM));
@@ -28,6 +29,42 @@ pub fn class_content_parser() -> &'static Parser {
 
 pub(super) fn name(term: u16) -> &'static str {
     NAMES[usize::from(term)]
+}
+
+pub(crate) fn stock_data_facet() -> &'static LanguageFacet {
+    static FACET: LazyLock<LanguageFacet> =
+        LazyLock::new(|| LanguageFacet::new(Some(language_data())));
+    &FACET
+}
+
+pub(crate) fn stock_node_types() -> &'static NodeTypes {
+    static TYPES: LazyLock<NodeTypes> = LazyLock::new(|| {
+        let roots = [Mode::Program.term(), Mode::ClassContent.term()];
+        NodeTypes::with_tops(
+            tables::NODE_NAMES,
+            tables::REPEAT_NODE_COUNT,
+            &roots,
+            &[0, 1, 2],
+            |term, _, props| {
+                if let Some(group) = group(term) {
+                    props.insert(&GROUP, vec![group.to_owned()]);
+                }
+                if let Some(name) = opened_by(term) {
+                    props.insert(&OPENED_BY, vec![name.to_owned()]);
+                }
+                if let Some(name) = closed_by(term) {
+                    props.insert(&CLOSED_BY, vec![name.to_owned()]);
+                }
+                if isolates_direction(term) {
+                    props.insert(&ISOLATE, Some(Isolation::Auto));
+                }
+                if roots.contains(&term) {
+                    props.insert(&LANGUAGE_DATA, Some(stock_data_facet().clone()));
+                }
+            },
+        )
+    });
+    &TYPES
 }
 
 fn build(top_rule: [u16; 2]) -> Parser {
@@ -54,11 +91,16 @@ fn build(top_rule: [u16; 2]) -> Parser {
     )
     .and_then(|parser| parser.with_dynamic_precedence(tables::DYNAMIC_PRECEDENCE))
     .expect("valid tables for the pinned Java grammar")
+    .with_pruned_recovery()
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(super) enum Mode {
+/// The top rule for a Java parse.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Mode {
+    /// Parse a complete Java source file.
+    #[default]
     Program,
+    /// Parse members without an enclosing class.
     ClassContent,
 }
 
@@ -70,11 +112,20 @@ impl Mode {
         }
     }
 
-    fn root(self) -> u16 {
+    /// The top rule's term ID in the pinned grammar.
+    pub fn term(self) -> u16 {
         match self {
             Self::Program => tables::PROGRAM[1],
             Self::ClassContent => tables::CLASS_CONTENT[1],
         }
+    }
+}
+
+pub(crate) fn parse_raw(top: Mode, source: &str, strict: bool) -> Result<SyntaxTree, ParseError> {
+    let parser = top.parser();
+    match parse(parser, source) {
+        Err(ParseError::UnexpectedToken { .. }) if !strict => parser.parse_recovering(source),
+        result => result,
     }
 }
 
@@ -91,17 +142,20 @@ fn try_glr(parser: &Parser, source: &str, error: ParseError) -> Result<SyntaxTre
     }
 }
 
+pub(super) type Parsed = (Vec<Node>, Option<ParseError>, Option<SyntaxTree>);
+
 pub(super) fn document_nodes(
-    mode: Mode,
+    top: Mode,
     source: &str,
+    original_len: usize,
     prefix: Option<(&SyntaxTree, usize)>,
-) -> (Vec<Node>, Option<ParseError>, Option<SyntaxTree>) {
+) -> Parsed {
     let fragment = prefix.map(|(tree, end)| TreeFragment {
         tree,
         old_range: 0..end,
         new_range: 0..end,
     });
-    let parser = mode.parser();
+    let parser = top.parser();
     let error = match parser.parse_incremental(source, fragment.clone()) {
         Ok(tree) => return (collect(&tree, None), None, Some(tree)),
         Err(error) => match try_glr(parser, source, error) {
@@ -110,17 +164,21 @@ pub(super) fn document_nodes(
         },
     };
     let mut nodes = vec![Node {
-        term: mode.root(),
+        term: top.term(),
         range: 0..source.len(),
         parent: None,
         children: Vec::new(),
     }];
-    // Keep recovery within the existing size cap. Do not retry work-limit
-    // errors. Repeat the strict pass to keep only its validated checkpoints.
-    if source.len() <= 16 * 1024
-        && let ParseError::UnexpectedToken { offset, .. } = error
-    {
-        if let Ok(tree) = parser.parse_incremental_recovering(source, fragment.as_slice()) {
+    // The size cap limits replay and fallback attempts, not bounded recovery.
+    // Do not retry work-limit errors.
+    if let ParseError::UnexpectedToken { offset, .. } = error {
+        let can_replay = original_len <= 16 * 1024;
+        let recovered = if can_replay {
+            parser.parse_incremental_recovering(source, fragment.as_slice())
+        } else {
+            parser.parse_recovering(source)
+        };
+        if let Ok(tree) = recovered {
             let nodes = collect(&tree, None);
             return (
                 nodes,
@@ -130,12 +188,14 @@ pub(super) fn document_nodes(
         }
         // If bounded recovery hits a limit, try only end punctuation or a
         // strict prefix. These fallback trees cannot seed the next parse.
-        if offset == source.len()
+        if can_replay
+            && offset == source.len()
             && let Some(tree) = close_at_end(parser, source)
         {
             return (collect(&tree, Some(offset)), Some(error), None);
         }
-        if offset < source.len()
+        if can_replay
+            && offset < source.len()
             && let Some(prefix) = source.get(..offset)
             && let Ok(tree) = parse(parser, prefix)
         {

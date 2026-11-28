@@ -59,8 +59,16 @@ impl<'a> IndentContext<'a> {
         self.settings
     }
 
+    pub(crate) fn options(&self) -> IndentOptions<'a> {
+        self.options
+    }
+
     pub fn simulated_break(&self) -> Option<usize> {
         self.options.simulate_break
+    }
+
+    pub(super) fn at_double_break(&self) -> bool {
+        self.options.simulate_double_break && self.simulated_break() == Some(self.position)
     }
 
     /// Get the logical line or the part of it on the selected side of a

@@ -3,7 +3,8 @@
 //!
 //! The host detects input and decides whether to offer it to handlers. This module
 //! does not detect DOM changes, selection-only events, atomic ranges, or IME changes.
-//! It does not apply transactions, run transaction filters, or record history.
+//! The single-edit planner does not resolve or dispatch transactions. The opt-in
+//! headless path dispatches a replacement or a host default with optional completion.
 
 use std::{
     cell::{Cell, OnceCell},
@@ -12,8 +13,11 @@ use std::{
 };
 
 use crate::{
-    Change, ChangeSet, EditError, EditorState, Extension, Facet, SelectionRange, Transaction,
+    Change, ChangeSet, EditError, EditorState, Extension, Facet, History, SelectionRange,
+    StateEffect, Transaction, history::UpdateReport,
 };
+
+use super::{EditorView, Transition};
 
 /// One host-detected text replacement and the state before it. Positions are UTF-8 bytes.
 #[derive(Clone, Copy, Debug)]
@@ -171,6 +175,209 @@ pub fn plan_input(
         InputHandling::Handled(transaction) => Ok(transaction),
         InputHandling::Pass => unreachable!("the planner uses a default when all handlers pass"),
     }
+}
+
+/// One resolved step of a headless input. Changes use `start_state` positions.
+/// The explicit selection and effects use positions in `state`.
+#[derive(Debug)]
+pub struct InputStep {
+    pub start_state: EditorState,
+    pub state: EditorState,
+    pub transaction: Transaction,
+}
+
+/// The resolved host default and its resulting state, built on first use.
+/// All calls return the same step or error.
+pub type DefaultInputState<'a> = dyn Fn() -> Result<&'a InputStep, EditError> + 'a;
+
+type ReplacementHandler =
+    Arc<dyn for<'a> Fn(InputChange<'a>) -> Result<Option<Transaction>, EditError> + Send + Sync>;
+type CompletionHandler = Arc<
+    dyn for<'a> Fn(
+            InputChange<'a>,
+            &'a DefaultInputState<'a>,
+        ) -> Result<Option<Transaction>, EditError>
+        + Send
+        + Sync,
+>;
+#[derive(Clone)]
+enum HeadlessHandler {
+    Replacement(ReplacementHandler),
+    Completion(CompletionHandler),
+}
+static HEADLESS_HANDLERS: LazyLock<Facet<HeadlessHandler, Vec<HeadlessHandler>>> =
+    LazyLock::new(Facet::collect);
+
+/// Register a headless replacement handler in the same precedence order as
+/// completion handlers. `Ok(None)` passes. `Ok(Some(transaction))` consumes the
+/// input and uses that proposal against the original state instead of the host
+/// default, even if filters remove its changes. No user event is added to the
+/// proposal. `Err` aborts the input. This extension does not affect the
+/// single-edit planner.
+pub fn headless_input_handler(
+    handler: impl for<'a> Fn(InputChange<'a>) -> Result<Option<Transaction>, EditError>
+    + Send
+    + Sync
+    + 'static,
+) -> Extension {
+    HEADLESS_HANDLERS.of(HeadlessHandler::Replacement(Arc::new(handler)))
+}
+
+/// Register a headless completion handler in extension precedence order.
+/// A handler can pass with `Ok(None)` or return a proposal in the default's
+/// resulting document. The first proposal stops the chain, even if filters
+/// remove its changes. This extension does not affect the single-edit planner.
+pub fn input_completion_handler(
+    handler: impl for<'a> Fn(
+        InputChange<'a>,
+        &'a DefaultInputState<'a>,
+    ) -> Result<Option<Transaction>, EditError>
+    + Send
+    + Sync
+    + 'static,
+) -> Extension {
+    HEADLESS_HANDLERS.of(HeadlessHandler::Completion(Arc::new(handler)))
+}
+
+impl<M: Clone> EditorView<M> {
+    /// Dispatch a headless replacement or the host default with an optional
+    /// second `input.complete` step. The host supplies the default proposal and
+    /// decides whether input is allowed. Only headless handlers run on this path.
+    ///
+    /// Resolve each step against its predecessor and publish one view update.
+    /// History groups the steps with its ordinary rules and the same metadata.
+    /// Replay infers the opposite selection from each recorded change.
+    /// An error does not change the view or history. Side effects of user
+    /// callbacks that ran while resolving the steps are not rolled back.
+    pub fn apply_headless_input(
+        &mut self,
+        range: Range<usize>,
+        text: &str,
+        default_factory: impl FnOnce(&EditorState) -> Result<Transaction, EditError>,
+        metadata: M,
+    ) -> Result<(), EditError> {
+        let change = InputChange::new(self.state(), range, text)?;
+        let handlers = change.state().context().facet(&HEADLESS_HANDLERS)?;
+        let (steps, report) = if handlers.is_empty() {
+            let proposal = default_factory(self.state())?;
+            let (step, report) = apply_step(&mut self.history, proposal, &metadata)?;
+            (vec![step], report)
+        } else {
+            let StagedInput {
+                history,
+                steps,
+                report,
+            } = stage_input(&self.history, change, &handlers, default_factory, &metadata)?;
+            self.history = history;
+            (steps, report)
+        };
+        let start = steps[0].start_state.clone();
+        let length = start.text().len();
+        self.report_transition(Some(start), report, length, Transition::Input(&steps));
+        Ok(())
+    }
+}
+
+struct StagedInput<M> {
+    history: History<M>,
+    steps: Vec<InputStep>,
+    report: UpdateReport,
+}
+
+fn stage_input<M: Clone>(
+    history: &History<M>,
+    change: InputChange<'_>,
+    handlers: &[HeadlessHandler],
+    build: impl FnOnce(&EditorState) -> Result<Transaction, EditError>,
+    metadata: &M,
+) -> Result<StagedInput<M>, EditError> {
+    let stage_first = |proposal| -> Result<_, EditError> {
+        let mut staged = history.staging_copy();
+        let (step, report) = apply_step(&mut staged, proposal, metadata)?;
+        Ok((staged, step, report))
+    };
+    let factory = Cell::new(Some(build));
+    let default = OnceCell::new();
+    let default_insert = || {
+        default
+            .get_or_init(|| {
+                let proposal = factory.take().expect("one default per operation")(change.state())?;
+                stage_first(proposal)
+            })
+            .as_ref()
+            .map(|(_, step, _)| step)
+            .map_err(|error| *error)
+    };
+    let mut proposal = None;
+    for handler in handlers {
+        match handler {
+            HeadlessHandler::Replacement(handler) => {
+                if let Some(replacement) = handler(change)? {
+                    // Start from the original history even if a completion handler
+                    // requested the default before passing.
+                    let (history, step, report) = stage_first(replacement)?;
+                    return Ok(StagedInput {
+                        history,
+                        steps: vec![step],
+                        report,
+                    });
+                }
+            }
+            HeadlessHandler::Completion(handler) => {
+                if let Some(completion) = handler(change, &default_insert)? {
+                    proposal = Some(completion);
+                    break;
+                }
+            }
+        }
+    }
+    default_insert()?;
+    let (mut history, first, mut report) = default.into_inner().expect("default was built")?;
+    let length = first.start_state.text().len();
+    let mut steps = vec![first];
+    if let Some(mut proposal) = proposal {
+        proposal.annotations.insert(
+            0,
+            Transaction::user_event_annotation().of("input.complete".to_owned()),
+        );
+        let (step, completion) = apply_step(&mut history, proposal, metadata)?;
+        if let Some(changes) = &completion.changes {
+            let desc = changes.desc(step.start_state.text().len())?;
+            report.effects = StateEffect::map_all(&report.effects, &desc);
+        }
+        report.effects.extend(completion.effects);
+        report.selection_set |= completion.selection_set;
+        report.scroll_into_view |= completion.scroll_into_view;
+        report.changes = match (report.changes, completion.changes) {
+            (Some(first), Some(second)) => Some(first.compose(&second, length)?),
+            (first, second) => first.or(second),
+        };
+        steps.push(step);
+    }
+    Ok(StagedInput {
+        history,
+        steps,
+        report,
+    })
+}
+
+fn apply_step<M: Clone>(
+    history: &mut History<M>,
+    proposal: Transaction,
+    metadata: &M,
+) -> Result<(InputStep, UpdateReport), EditError> {
+    let start_state = history.state().clone();
+    let mut transaction = start_state.filter_transaction(proposal)?;
+    let report = history.update_resolved_input_step(transaction.clone(), metadata)?;
+    transaction.changes = report.changes.clone().unwrap_or_default();
+    Ok((
+        InputStep {
+            start_state,
+            state: history.state().clone(),
+            transaction,
+        },
+        report,
+    ))
 }
 
 fn typed(transaction: Transaction) -> Transaction {

@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    Assoc, ChangeDesc, EditError, EditorState, StateContext, Transaction,
+    Assoc, ChangeDesc, EditError, EditorState, StateContext,
     language::{HighlightContext, HighlightSpan, LanguageData},
     language_data::active_wast_viewport,
 };
@@ -56,10 +56,6 @@ impl WastPublication {
 impl WastParseOutput {
     pub(crate) fn covers(&self, upto: usize, len: usize) -> bool {
         self.parsed_to >= upto && (upto < len || self.complete)
-    }
-
-    pub(crate) fn extends(&self, old: &Self) -> bool {
-        (self.parsed_to, self.complete) > (old.parsed_to, old.complete)
     }
 }
 
@@ -142,13 +138,7 @@ impl EditorState {
         &mut self,
         output: Arc<WastParseOutput>,
     ) -> Result<ChangeDesc, EditError> {
-        let transaction = Transaction::default().with_add_to_history(false);
-        let changes = transaction.changes().desc(self.text.len())?;
-        let current = (&self.text, &self.selection);
-        let extensions = self
-            .extensions
-            .update(current, current, &transaction, &changes, None)?;
-        self.extensions = extensions;
+        let changes = self.refresh_viewport_fields()?;
         self.wast_publication = Some(WastPublication::new(output));
         Ok(changes)
     }

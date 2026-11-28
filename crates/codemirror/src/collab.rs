@@ -65,112 +65,54 @@
 //! Composition uses the individual wire sections as input. Joining them before
 //! composition can change where a pending edit lands. An echo must match
 //! individual deletion boundaries, not just the resulting text.
+//!
+//! Even when both sides process the same batch, a concrete authority rebase
+//! can produce a different echo from a description-only rebase. For example,
+//! start with `a` and queue an effect-only update, then insert `!` at 0. In
+//! one batch, a peer inserts `X` and `B` in separate wire sections at 0,
+//! the authority acknowledges the effect-only update, and another peer
+//! inserts `Z` after `X` and deletes `Ba`. The concrete rebase inserts `!`
+//! before `XZ`; the description-only rebase and the client put it after `XZ`.
+//! Upstream clears the queue for either echo. Rust rejects the concrete echo
+//! without changing the document, version, or queue, whether the echo arrives
+//! in that batch or in a separate receipt after the prefix. The compatible
+//! description-only echo leaves both sides at `XZ!`.
+//!
+//! Inbound effects map through the composition of the remaining pending edits.
+//! For example, with two pending front deletions in `abc`, a confirmed
+//! `TrackDel` mark at 1 is dropped. Mapping the mark through each deletion
+//! separately would keep it at 0.
 
-use std::{
-    borrow::Cow,
-    fmt,
-    ops::Range,
-    sync::{Arc, OnceLock},
-};
+use std::{borrow::Cow, fmt, ops::Range, sync::Arc};
 
 use crate::{
-    ChangeDesc, ChangeSet, EditError, EditorSelection, EditorState, StateContext, StateEffect,
-    Text, Transaction,
-    extension::{Extensions, ResolvedValues},
+    ChangeDesc, ChangeSet, EditError, EditorState, StateContext, StateEffect, Text, Transaction,
 };
 
 mod extension;
+mod origin;
 pub use extension::{
     CollabConfig, collab, collab_state, get_client_id, get_synced_version,
     prepare_text_update_group, receive_updates, sendable_updates,
 };
 pub(crate) use extension::{capture_origin_states, validate_receipt};
+pub use origin::{OriginCollabState, TransactionContext};
+use origin::{PendingHistory, QueueSnapshot};
 
 /// Whether a transaction is marked as coming from another source.
 pub fn is_remote(transaction: &Transaction) -> bool {
     transaction.is_remote()
 }
 
-/// The accepted local transaction and its state before and after application.
-#[derive(Debug)]
-pub struct TransactionContext {
-    transaction: Transaction,
-    start_text: Text,
-    start_selection: EditorSelection,
-    new_text: Text,
-    new_selection: EditorSelection,
-    states: OnceLock<OriginStates>,
-}
-
-#[derive(Debug)]
-struct OriginStates {
-    start: ResolvedValues,
-    result: ResolvedValues,
-}
-
-impl TransactionContext {
-    fn new(transaction: Transaction, start: StateContext<'_>, state: StateContext<'_>) -> Self {
-        Self {
-            transaction,
-            start_text: start.text().clone(),
-            start_selection: start.selection().clone(),
-            new_text: state.text().clone(),
-            new_selection: state.selection().clone(),
-            states: OnceLock::new(),
-        }
-    }
-
-    pub fn transaction(&self) -> &Transaction {
-        &self.transaction
-    }
-
-    pub fn start_text(&self) -> &Text {
-        &self.start_text
-    }
-
-    pub fn start_selection(&self) -> &EditorSelection {
-        &self.start_selection
-    }
-
-    pub fn new_text(&self) -> &Text {
-        &self.new_text
-    }
-
-    /// The applied selection, including an implicit selection mapped over the edit.
-    pub fn new_selection(&self) -> &EditorSelection {
-        &self.new_selection
-    }
-
-    /// Read the resolved start fields and facets. The private collaboration
-    /// queue is not part of this snapshot. While selecting effects, use the
-    /// live state views from [`SharedEffectsContext`] instead.
-    pub fn start_state(&self) -> Option<StateContext<'_>> {
-        Some(
-            self.states
-                .get()?
-                .start
-                .context(&self.start_text, &self.start_selection),
-        )
-    }
-
-    /// Read the resolved result fields and facets. See [`Self::start_state`].
-    pub fn state(&self) -> Option<StateContext<'_>> {
-        Some(
-            self.states
-                .get()?
-                .result
-                .context(&self.new_text, &self.new_selection),
-        )
-    }
-}
-
 /// The transaction and both state views while selecting shared effects.
-/// The result view includes computed fields and facets. It cannot read the
-/// collaboration field while that field is selecting effects.
+/// The result view includes computed fields, facets, and the result client
+/// ID. It cannot read the result queue or version while that queue is being built.
 pub struct SharedEffectsContext<'a> {
     transaction: &'a TransactionContext,
     start: StateContext<'a>,
     result: StateContext<'a>,
+    start_collab: &'a Collab,
+    result_client_id: &'a str,
 }
 
 impl SharedEffectsContext<'_> {
@@ -184,6 +126,16 @@ impl SharedEffectsContext<'_> {
 
     pub fn state(&self) -> &StateContext<'_> {
         &self.result
+    }
+
+    /// Read the queue, client ID, and version before the transaction.
+    pub fn start_collab(&self) -> &Collab {
+        self.start_collab
+    }
+
+    /// Read the configured client ID after the transaction, including reconfiguration.
+    pub fn result_client_id(&self) -> &str {
+        self.result_client_id
     }
 }
 
@@ -238,14 +190,14 @@ impl Update {
         &self.effects
     }
 
-    /// The accepted local transaction before rebasing. Effects or changes in
-    /// the update itself can have different positions after rebasing. Unlike
-    /// upstream, the authority rebase helpers also retain this origin.
+    /// The accepted local transaction for an update from the local queue.
+    /// Its positions are unchanged by receipt rebasing. Updates mapped by an
+    /// authority rebase have no origin.
     pub fn origin(&self) -> Option<&Transaction> {
         self.origin_context().map(TransactionContext::transaction)
     }
 
-    /// The original local transaction and snapshots, unchanged by rebasing.
+    /// The original local transaction and snapshots, unchanged by receipt rebasing.
     /// Updates created by [`Update::new`] do not have an origin.
     pub fn origin_context(&self) -> Option<&TransactionContext> {
         self.origin.as_deref()
@@ -270,12 +222,21 @@ impl Update {
         self.edit.changes.apply_to(text)
     }
 
-    fn with_mapped_edit(&self, edit: VersionedChange, through: &ChangeDesc) -> Self {
+    fn with_mapped_edit(
+        &self,
+        edit: VersionedChange,
+        through: &ChangeDesc,
+        keep_origin: bool,
+    ) -> Self {
         Self {
             client_id: self.client_id.clone(),
             edit,
             effects: StateEffect::map_all(self.effects(), through),
-            origin: self.origin.clone(),
+            origin: if keep_origin {
+                self.origin.clone()
+            } else {
+                None
+            },
         }
     }
 }
@@ -311,6 +272,7 @@ pub struct Collab {
     synced_text: Text,
     optimistic_text: Text,
     pending: Arc<Vec<Update>>,
+    pending_history: PendingHistory,
     share: Option<Arc<SharedEffects>>,
     identity: Arc<()>,
     generation: Arc<()>,
@@ -341,6 +303,7 @@ impl Collab {
             synced_text: text.clone(),
             optimistic_text: text.clone(),
             pending: Arc::new(Vec::new()),
+            pending_history: PendingHistory::default(),
             share: None,
             identity: Arc::new(()),
             generation: Arc::new(()),
@@ -400,8 +363,15 @@ impl Collab {
         let mut candidate = state.clone();
         let edit = candidate.apply_with_replacement_policy(accepted.clone(), true)?;
         accepted.changes = edit.map_or_else(ChangeSet::default, |edit| edit.forward);
-        self.record(accepted, state.context(), candidate.context())?;
-        self.capture_origin_states(&state.extensions, &candidate.extensions);
+        let before = QueueSnapshot::new(self, None);
+        if let Some(origin) = self.record(accepted, state.context(), candidate.context(), None)? {
+            origin.capture(
+                extension::origin_values(&state.extensions),
+                extension::origin_values(&candidate.extensions),
+                Some(before),
+                Some(QueueSnapshot::new(self, Some(&origin))),
+            );
+        }
         *state = candidate;
         Ok(())
     }
@@ -411,7 +381,9 @@ impl Collab {
         transaction: Transaction,
         start: StateContext<'_>,
         state: StateContext<'_>,
-    ) -> Result<(), EditError> {
+        result_client_id: Option<&str>,
+    ) -> Result<Option<Arc<TransactionContext>>, EditError> {
+        let mut recorded = None;
         if !transaction.changes().is_empty() || self.share.is_some() {
             let origin = Arc::new(TransactionContext::new(transaction, start, state));
             let effects = self.share.as_ref().map_or_else(Vec::new, |share| {
@@ -419,6 +391,8 @@ impl Collab {
                     transaction: &origin,
                     start,
                     result: state,
+                    start_collab: self,
+                    result_client_id: result_client_id.unwrap_or(&self.client_id),
                 })
             });
             let changes = origin.transaction().changes();
@@ -426,25 +400,20 @@ impl Collab {
                 let mut update =
                     Update::new(&self.client_id, changes.clone(), self.optimistic_text.len())?
                         .with_effects(effects);
-                update.origin = Some(origin);
+                update.origin = Some(origin.clone());
+                self.pending_history.append(update.clone());
                 Arc::make_mut(&mut self.pending).push(update);
                 self.generation = Arc::new(());
+                recorded = Some(origin);
             }
         }
         self.optimistic_text = state.text().clone();
-        Ok(())
+        Ok(recorded)
     }
 
-    fn capture_origin_states(&self, before: &Extensions, after: &Extensions) {
-        if let Some(origin) = self
-            .pending
-            .last()
-            .and_then(|update| update.origin.as_deref())
-        {
-            origin
-                .states
-                .get_or_init(|| extension::origin_states(before, after));
-        }
+    fn replace_pending(&mut self, pending: Vec<Update>) {
+        self.pending = Arc::new(pending);
+        self.pending_history = PendingHistory::base(&self.pending);
     }
 
     /// Apply contiguous authoritative updates, acknowledge matching local updates,
@@ -503,7 +472,7 @@ impl Collab {
         let mut next = self.clone();
         next.version = version;
         next.synced_text = synced_text;
-        next.pending = Arc::new(pending);
+        next.replace_pending(pending);
         next.generation = Arc::new(());
         let transaction = if let Some(remote) = remote {
             remote.check_length(text.len())?;
@@ -615,7 +584,7 @@ pub fn rebase_updates_described(
     for update in pending {
         let edit = update.edit.map(&remote, false)?;
         remote = remote.map(&update.edit.desc, true)?;
-        rebased.push(update.with_mapped_edit(edit, &remote));
+        rebased.push(update.with_mapped_edit(edit, &remote, false));
     }
     Ok(rebased)
 }
@@ -768,7 +737,7 @@ fn reconcile(
         if let Some(changes) = &mut remote {
             let edit = update.edit.map(&changes.desc, false)?;
             changes.map_over_local(&update.edit, receiving)?;
-            let mut mapped = update.with_mapped_edit(edit, &changes.desc);
+            let mut mapped = update.with_mapped_edit(edit, &changes.desc, receiving);
             if let Some(client_id) = own_id {
                 // A receive uses the current configuration for mapped entries.
                 client_id.clone_into(&mut mapped.client_id);

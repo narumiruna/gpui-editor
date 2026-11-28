@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::{Assoc, Text};
 
 use super::{
-    super::html::{HtmlDocument, HtmlOptions},
+    super::html::{HtmlDocument, HtmlNesting, HtmlOptions},
     HighlightSpan, IndentOptions,
     LiquidNodeKind::*,
     Node, StreamSettings,
@@ -24,7 +24,12 @@ pub struct LiquidHtmlMount {
 }
 
 impl LiquidHtmlMount {
-    pub(super) fn new(source: &str, nodes: &[Node], options: HtmlOptions) -> Option<Self> {
+    pub(super) fn new(
+        source: &str,
+        nodes: &[Node],
+        options: HtmlOptions,
+        nesting: HtmlNesting<'_>,
+    ) -> Option<Self> {
         let mut compact = String::new();
         let mut ranges: Vec<LiquidHtmlRange> = Vec::new();
         for node in nodes
@@ -45,10 +50,24 @@ impl LiquidHtmlMount {
                 });
             }
         }
-        (!ranges.is_empty()).then(|| Self {
-            document: HtmlDocument::parse_with_options(Text::new(&compact), options),
-            ranges,
-        })
+        if ranges.is_empty() {
+            return None;
+        }
+        let original = |range: Range<usize>| {
+            let first = ranges.get(ranges.partition_point(|part| part.html.end <= range.start))?;
+            let last = ranges.get(ranges.partition_point(|part| part.html.end < range.end))?;
+            Some(
+                first.source.start + range.start - first.html.start
+                    ..last.source.start + range.end - last.html.start,
+            )
+        };
+        let document = HtmlDocument::parse_projected(
+            Text::new(compact),
+            options,
+            nesting,
+            (source, &original),
+        );
+        Some(Self { document, ranges })
     }
 
     /// The HTML tree and its native child mounts use compact byte offsets.

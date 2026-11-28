@@ -1,8 +1,10 @@
 // Generate cpp_edit_oracle.jsonl with Node 22.14+ and the pinned npm archives:
 // node crates/codemirror/tests/fixtures/cpp_edit_oracle.mjs <archive-root>
-// Use --ambiguous for cpp_ambiguity_oracle.jsonl or --corpus for the grammar audit.
+// Use --ambiguous for cpp_ambiguity_oracle.jsonl, --large-recovery for
+// cpp_large_recovery.jsonl, or --corpus for the grammar audit.
 import assert from 'node:assert/strict';
 import {mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync} from 'node:fs';
+import {createRequire} from 'node:module';
 import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {projectedOffsets} from './editor_line_offsets.mjs';
@@ -33,20 +35,38 @@ const edits = [
 
 const archives = resolve(process.argv[2]);
 const mode = process.argv[3];
-assert([undefined, '--ambiguous', '--corpus'].includes(mode));
+assert([undefined, '--ambiguous', '--large-recovery', '--corpus'].includes(mode));
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'cpp-edit-oracle-')));
 try {
     const {install, load} = pinnedModules(archives, root);
     const pkg = await load('@codemirror/lang-cpp');
     const {cpp, cppLanguage} = pkg;
-    assert.deepEqual(Object.keys(pkg), ['cpp', 'cppLanguage']);
+    const exports = ['cpp', 'cppLanguage'];
+    assert.deepEqual(Object.keys(pkg), exports);
+    const require = createRequire(install('@codemirror/lang-cpp').path);
+    assert.deepEqual(Object.keys(require('@codemirror/lang-cpp')).sort(), exports);
     const {parser} = await load('@lezer/cpp');
     const strict = parser.configure({strict: true});
-    const {foldable, forceParsing, getIndentation, IndentContext, indentUnit, syntaxTree} = await load('@codemirror/language');
+    const {foldable, forceParsing, getIndentation, IndentContext, indentUnit, LanguageSupport, LRLanguage,
+           syntaxTree} = await load('@codemirror/language');
     const {EditorState} = await load('@codemirror/state');
     const {highlightTree, tags} = await load('@lezer/highlight');
     const support = cpp();
+    assert.ok(support instanceof LanguageSupport);
+    assert.notEqual(cpp(), support);
     assert.equal(support.language, cppLanguage);
+    assert.ok(cppLanguage instanceof LRLanguage);
+    assert.equal(cppLanguage.name, 'cpp');
+    for (const extension of [support, cppLanguage]) {
+        const state = EditorState.create({doc: 'int a;', extensions: extension});
+        const data = key => state.languageDataAt(key, 0);
+        assert.deepEqual(data('autocomplete'), []);
+        assert.deepEqual(data('commentTokens'), [{line: '//', block: {open: '/*', close: '*/'}}]);
+        assert.deepEqual(data('closeBrackets'), [{stringPrefixes: ['L', 'u', 'U', 'u8', 'LR', 'UR', 'uR', 'u8R', 'R']}]);
+        const [onInput] = data('indentOnInput');
+        assert.deepEqual(['case ', 'default:', '{', '}', 'case', 'case 1:', '}\n'].map(s => onInput.test(s)),
+            [true, true, true, true, false, false, false]);
+    }
     const names = new Map(Object.entries(tags).filter(([, tag]) => typeof tag !== 'function')
         .map(([name, tag]) => [tag, name]));
     for (const [name, ...modifiers] of [
@@ -93,7 +113,8 @@ try {
         }
         return {id, stage, edit, source, tree, spans, lines, points};
     }
-    function cycle(id, before, removed, inserted, stage, raw) {
+    const emit = row => console.log(JSON.stringify(row));
+    function cycle(id, before, removed, inserted, stage, raw, output = emit) {
         const at = before.indexOf(removed);
         assert(at >= 0, id);
         const left = before.slice(0, at), after = left + inserted + before.slice(at + removed.length);
@@ -114,11 +135,37 @@ try {
                 assert.deepEqual(result, snapshot(create(source, language), source, id, step, edit));
             }
             assert.equal(syntaxTree(state).toString(), raw.parse(normalize(source)).toString(), id);
-            console.log(JSON.stringify(result));
+            output(result);
         }
     }
     if (mode === undefined) {
         for (const edit of edits) cycle(...edit, 'broken', parser);
+    } else if (mode === '--large-recovery') {
+        const limit = 16 * 1024;
+        const marker = '{padding}';
+        const prefix = '// Editor buffer 🧪\r\n' +
+            Array.from({length: 6}, (_, i) => `int prefix${i} = ${i};\r\n`).join('');
+        const paddedComment = `/* ${marker} */\r\n`;
+        const call = prefix + paddedComment + 'int f(void) {\r\n  return call(1,\r\n              2);\r\n}\r\n';
+        for (const [id, source, removed, inserted, bytes] of [
+            ['eof-at-limit', call, '              2);\r\n}\r\n', '', limit],
+            ['eof-over-limit', call, '              2);\r\n}\r\n', '', limit + 1],
+            ['condition-before-large-suffix', prefix + 'int f(int x) {\r  if (x) {\r\n    return 1;\n  }\r\n  return 2;\r\n}\r\n' +
+                paddedComment + 'int tail;\r\n', 'if (x)', 'if ()', limit + 1],
+            ['invalid-token-after-large-prefix', prefix + paddedComment + 'int f() {\r\n  return 1;\r\n}\r\nint tail;\r\n',
+                '  return 1;', '  @🧪\r  return 1;', limit + 32],
+        ]) {
+            const normalize = text => text.replace(/\r\n?/g, '\n');
+            const unpadded = source.replace(marker, '').replace(removed, inserted);
+            const pad = bytes - Buffer.byteLength(normalize(unpadded));
+            assert(pad > 0);
+            const padding = ' '.repeat(pad);
+            cycle(id, source.replace(marker, padding), removed, inserted, 'broken', parser, row => {
+                if (row.stage === 'broken') assert.equal(Buffer.byteLength(normalize(row.source)), bytes);
+                assert(row.source.includes(padding));
+                emit({...row, source: row.source.replace(padding, marker), pad});
+            });
+        }
     } else {
         const dir = join(dirname(install('@lezer/cpp').path), 'test');
         const corpus = new Map();

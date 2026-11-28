@@ -72,6 +72,19 @@ fn regexp_cases_match_pinned_streamparser() {
     }
 }
 
+#[test]
+fn legacy_mixed_ascii_classes_match_each_utf16_unit() {
+    let mut positive = RegExp::new(r"^[A-FK-S\d_\-]$", "i").unwrap();
+    let mut negative = RegExp::new(r"^[^A-FK-S\d_\-]$", "i").unwrap();
+    for unit in 0..=u16::MAX {
+        let member = u8::try_from(unit).is_ok_and(|byte| {
+            matches!(byte.to_ascii_uppercase(), b'A'..=b'F' | b'K'..=b'S' | b'0'..=b'9' | b'_' | b'-')
+        });
+        assert_eq!(positive.test(&[unit]), member, "{unit:04x}");
+        assert_eq!(negative.test(&[unit]), !member, "{unit:04x}");
+    }
+}
+
 fn range_pair(range: Option<std::ops::Range<usize>>) -> Option<[usize; 2]> {
     range.map(|range| [range.start, range.end])
 }

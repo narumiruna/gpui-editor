@@ -6,11 +6,11 @@ use super::{
             BracketConfig, BracketDirection, BracketDirection::Forward, BracketMatch,
             bracket_pairs, directional_bracket_near, editor_bracket_index,
             match_configured_editor_text, match_editor_siblings, match_editor_text,
-            match_named_siblings, node_delimiter,
         },
+        lezer::{LrSyntaxNode, match_lr_marked},
         line_projection::splits_crlf,
     },
-    JsonDocument, JsonNode, JsonNodeKind,
+    JsonDocument, JsonNodeKind,
 };
 
 impl JsonDocument {
@@ -62,20 +62,14 @@ impl JsonDocument {
             Assoc::Before
         };
         let start = self.node_at(pos, Some(side))?;
-        let pairs = bracket_pairs(config);
-        for node in std::iter::successors(Some(start), |node| node.parent()) {
-            if !node.range().is_empty()
-                && let Some(expected) = node_delimiter(node.node_type(), direction, pairs)
-            {
-                return Some(match_named_siblings(
-                    node.range(),
-                    direction,
-                    expected,
-                    node.parent().into_iter().flat_map(JsonNode::children),
-                    |sibling| (sibling.range(), sibling.kind().name()),
-                    |sibling, dir| node_delimiter(sibling.node_type(), dir, pairs).is_some(),
-                ));
-            }
+        if let Some(hit) = match_lr_marked(
+            self.text(),
+            LrSyntaxNode::json(start),
+            pos,
+            direction,
+            bracket_pairs(config),
+        ) {
+            return Some(hit);
         }
         match_configured_editor_text(self.syntax_lines(), pos, direction, config, |at| {
             !splits_crlf(source, at)

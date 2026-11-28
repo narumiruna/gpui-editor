@@ -1,9 +1,9 @@
 use std::{cmp::Reverse, collections::HashSet, ops::Range};
 
 use super::{
-    super::reduction_base, ActionKind, ActionLimit, Branch, CUT_DEPTH, GlrMode, MAX_BRANCHES,
-    MAX_STACK_DEPTH, ParseError, Parser, Position, State, SyntaxTree, Token, TokenCache,
-    TreeBuilder, Work,
+    super::{TrialFrames, reduction_base},
+    ActionKind, ActionLimit, Branch, CUT_DEPTH, Candidate, GlrMode, MAX_BRANCHES, MAX_STACK_DEPTH,
+    ParseError, Parser, Position, State, SyntaxTree, Token, TokenCache, TreeBuilder, Work,
 };
 use crate::language::lezer::{action, tree::Roots};
 
@@ -17,6 +17,33 @@ const MAX_FORCED_REDUCTIONS: usize = 10;
 // Upstream counts words in its stack of triplets, excluding the start frame.
 const DAMPEN_INSERT_DEPTH: usize = 40;
 const MAX_INSERT_DEPTH: usize = 100;
+const MIN_LARGE_REDUCTION: usize = 2000; // UTF-16 units
+const MAX_LARGE_REDUCTION_COUNT: usize = 300;
+
+// Lezer 1.4.13 counts reductions across the parse, not per branch.
+#[derive(Default)]
+pub(super) struct LargeReductions {
+    start: Option<usize>, // Byte offsets preserve equality and order.
+    size: usize,
+    count: usize,
+}
+
+impl LargeReductions {
+    fn record(&mut self, start: usize, size: usize) {
+        if size < MIN_LARGE_REDUCTION {
+            return;
+        }
+        if self.start == Some(start) {
+            self.count += 1;
+        } else if self.size < size {
+            self.start = Some(start);
+            self.count = 1;
+        } else {
+            return;
+        }
+        self.size = size;
+    }
+}
 
 impl Parser {
     /// Parse the complete input with bounded error recovery.
@@ -78,9 +105,81 @@ pub(super) struct Recovery<'a, 'input> {
     pub(super) work: &'a Work,
     pub(super) tree: &'a mut TreeBuilder,
     pub(super) tokens: &'a mut TokenCache<'input>,
+    pub(super) large_reductions: Option<&'a mut LargeReductions>,
 }
 
 impl Recovery<'_, '_> {
+    pub(super) fn apply(
+        &mut self,
+        branch: &mut Branch,
+        state: State,
+        candidate: Candidate,
+    ) -> Result<(), ParseError> {
+        let start = if self.large_reductions.is_some()
+            && let ActionKind::Reduce { term, depth, stay, .. } = candidate.0.kind()
+            && depth > 0
+            // Only repeat terms have anonymous node types. A term with no
+            // node type (past EOF) is not anonymous either.
+            && (usize::from(term) < self.parser.names.len() || term > self.parser.eof)
+        {
+            reduction_base(branch.stack.frames.len(), depth, stay)
+                .map(|(base, _)| branch.stack.frames[base].start)
+        } else {
+            None
+        };
+        branch.apply(
+            self.parser,
+            state,
+            candidate,
+            self.work,
+            self.tree,
+            self.tokens,
+        )?;
+        // Keep updates from discarded recovery trials. Use the final reduction
+        // position because applying the action can move it past skipped input.
+        let end = branch.stack.reduce_pos;
+        if let Some(start) = start
+            && end.saturating_sub(start) >= MIN_LARGE_REDUCTION
+            && let Some(reductions) = &mut self.large_reductions
+        {
+            reductions.record(
+                start,
+                self.tokens.utf16_offset(end) - self.tokens.utf16_offset(start),
+            );
+        }
+        Ok(())
+    }
+
+    pub(super) fn unwind_large_reductions(
+        &mut self,
+        branch: &mut Branch,
+    ) -> Result<(), ParseError> {
+        if self
+            .large_reductions
+            .as_ref()
+            .is_none_or(|r| r.count <= MAX_LARGE_REDUCTION_COUNT)
+        {
+            return Ok(());
+        }
+        // Force once before testing the stack start. Each reduction can move
+        // the tracked start earlier, so read it again after each action.
+        while self.force_reduce(branch, true)? && branch.stack.frames.len() > 1 {
+            let top = branch.stack.frames.last().expect("pushed frame");
+            let start = self
+                .large_reductions
+                .as_ref()
+                .and_then(|r| r.start)
+                .expect("tracked start");
+            if top.start < start {
+                break;
+            }
+        }
+        let reductions = self.large_reductions.as_mut().expect("enabled counter");
+        reductions.count = 0;
+        reductions.size = 0;
+        Ok(())
+    }
+
     pub(super) fn run(
         &mut self,
         position: usize,
@@ -128,9 +227,16 @@ impl Recovery<'_, '_> {
                 continue;
             }
             if self.state(&branch).forced_reduce.is_some() {
-                let mut fork = branch.fork(self.work)?;
-                if matches!(self.trial(&mut fork)?, Trial::Advanced) {
-                    self.keep(fork, advanced)?;
+                // Only JSON recovery tracks large reductions.
+                if self.large_reductions.is_some() {
+                    if let Some(fork) = self.trial_json(&mut branch)? {
+                        self.keep(fork, advanced)?;
+                    }
+                } else {
+                    let mut fork = branch.fork(self.work)?;
+                    if matches!(self.trial(&mut fork)?, Trial::Advanced) {
+                        self.keep(fork, advanced)?;
+                    }
                 }
             }
             let lookahead = token.map_or(0, |token| token.term);
@@ -295,14 +401,7 @@ impl Recovery<'_, '_> {
             branch
                 .stack
                 .check_action_depth(self.parser, candidate, self.work)?;
-            branch.apply(
-                self.parser,
-                state,
-                candidate,
-                self.work,
-                self.tree,
-                self.tokens,
-            )?;
+            self.apply(branch, state, candidate)?;
             if branch.stack.pos > position {
                 return Ok(true);
             }
@@ -320,6 +419,51 @@ impl Recovery<'_, '_> {
         Ok(self.state(branch))
     }
 
+    fn trial_json(&mut self, branch: &mut Branch) -> Result<Option<Branch>, ParseError> {
+        debug_assert!(branch.stack.context.is_none());
+        debug_assert!(branch.stack.trial_frames.is_none());
+        let pos = branch.stack.pos;
+        self.work.spend(pos, 1)?;
+        let reduce_pos = branch.stack.reduce_pos;
+        let roots = branch.stack.roots;
+        let idle = branch.idle.clone();
+        let score = branch.score;
+        let records = std::mem::take(&mut branch.records);
+        let lookahead = branch.lookahead;
+        branch.stack.trial_frames = Some(TrialFrames {
+            start: branch.stack.frames.len(),
+            saved: Vec::new(),
+        });
+
+        let result = self.trial(branch);
+        let journal = branch
+            .stack
+            .trial_frames
+            .take()
+            .expect("active force trial");
+        let candidate = match result {
+            Ok(Trial::Advanced) => branch.fork(self.work).map(|mut fork| {
+                // This trial already started with a fresh local record count.
+                fork.records = branch.records;
+                Some(fork)
+            }),
+            Ok(_) => Ok(None),
+            Err(error) => Err(error),
+        };
+        // Restore the stopped branch for insertion and deletion. The tree
+        // arena, token cache, and parse-wide reduction counts stay shared.
+        branch.stack.frames.truncate(journal.start);
+        branch.stack.frames.extend(journal.saved.into_iter().rev());
+        branch.stack.pos = pos;
+        branch.stack.reduce_pos = reduce_pos;
+        branch.stack.roots = roots;
+        branch.idle = idle;
+        branch.score = score;
+        branch.records = records;
+        branch.lookahead = lookahead;
+        candidate
+    }
+
     fn trial(&mut self, branch: &mut Branch) -> Result<Trial, ParseError> {
         for _ in 0..MAX_FORCED_REDUCTIONS {
             if !self.force_reduce(branch, false)? {
@@ -332,18 +476,27 @@ impl Recovery<'_, '_> {
         Ok(Trial::Exhausted)
     }
 
-    // Close a staged branch without scanning at the cutoff, treating it as
-    // EOF, or running deletion/insertion trials there. Work and the branch's
-    // idle budget also bound a forced reduction cycle.
-    pub(super) fn close_at_cutoff(&mut self, branch: &mut Branch) -> Result<(), ParseError> {
+    pub(super) fn close_at_cutoff(&mut self, branch: &mut Branch) -> Result<bool, ParseError> {
+        let accepting = self.force_close_at_cutoff(branch)?;
+        if !accepting {
+            let at = branch.stack.pos;
+            self.mark(branch, at..at, None);
+        }
+        Ok(accepting)
+    }
+
+    // Close only the staged branch. A forced reduction can add an empty error
+    // node even in strict mode. Do not scan or try deletion or insertion.
+    pub(super) fn force_close_at_cutoff(
+        &mut self,
+        branch: &mut Branch,
+    ) -> Result<bool, ParseError> {
         while !self.state(branch).is_accepting() {
             if !self.force_reduce(branch, false)? {
-                let at = branch.stack.pos;
-                self.mark(branch, at..at, None);
-                break;
+                return Ok(false);
             }
         }
-        Ok(())
+        Ok(true)
     }
 
     // As in Lezer's forceAll, use only the forced slot after score selection.
@@ -362,11 +515,11 @@ impl Recovery<'_, '_> {
         }
     }
 
-    fn force_reduce(&mut self, branch: &mut Branch, at_cut: bool) -> Result<bool, ParseError> {
+    fn force_reduce(&mut self, branch: &mut Branch, before_scan: bool) -> Result<bool, ParseError> {
         let position = branch.stack.pos;
         self.work.spend(position, 1)?;
         let state = self.state(branch);
-        if !at_cut && position == self.tokens.source().len() && state.is_accepting() {
+        if !before_scan && position == self.tokens.source().len() && state.is_accepting() {
             return Ok(false);
         }
         let Some(action) = state.forced_reduce else {
@@ -381,13 +534,19 @@ impl Recovery<'_, '_> {
         let Some((_, from)) = reduction_base(branch.stack.frames.len(), depth, stay) else {
             return Ok(false);
         };
-        if !stay
-            && self
-                .parser
-                .strict_goto(branch.stack.frames[from].state, term, position, self.work)?
-                .is_none()
-        {
-            return Ok(false);
+        if !stay {
+            let source = branch.stack.frames[from].state;
+            // A Java repair trial can share this checked goto with the
+            // reduction below. Leave the stack-cut preflight unchanged.
+            let target = if self.parser.prune_recovery_frontier && !before_scan {
+                self.parser
+                    .reduction_goto(source, term, position, self.work, self.tokens)?
+            } else {
+                self.parser.strict_goto(source, term, position, self.work)?
+            };
+            if target.is_none() {
+                return Ok(false);
+            }
         }
         let mut ordinary = state.default_reduce == Some(action);
         if !ordinary {
@@ -409,8 +568,8 @@ impl Recovery<'_, '_> {
             branch.score = branch.score.saturating_sub(REDUCE_COST);
         }
         branch.stack.reduce_pos = position;
-        branch.apply(
-            self.parser,
+        self.apply(
+            branch,
             state,
             (
                 action,
@@ -419,17 +578,19 @@ impl Recovery<'_, '_> {
                     end: position,
                 },
             ),
-            self.work,
-            self.tree,
-            self.tokens,
         )?;
         Ok(true)
     }
 
     fn keep(&self, branch: Branch, advanced: &mut Vec<Branch>) -> Result<(), ParseError> {
         let position = branch.stack.pos;
+        let compare_starts = self
+            .parser
+            .context_tracker
+            .as_ref()
+            .is_some_and(|tracker| tracker.reduce_reads_start);
         for other in advanced.iter_mut() {
-            if branch.equivalent(other, position, self.work)? {
+            if branch.equivalent(other, position, self.work, compare_starts)? {
                 if branch.score > other.score {
                     *other = branch;
                 }

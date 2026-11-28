@@ -70,6 +70,7 @@ mod source_snippets;
 mod source_tab_focus;
 pub mod source_tooltip;
 mod source_visual;
+mod standalone_lint_tooltip;
 use source_completion::{
     CloseCompletion, CompletionPageDown, CompletionPageUp, OpenCompletion, SourceCompletion,
 };
@@ -174,8 +175,11 @@ pub struct Editor {
     completion: Option<SourceCompletion>,
     source_collab: Option<source_collab::SourceCollab>,
     diagnostics: SourceDiagnostics,
+    standalone_lint_hover: standalone_lint_tooltip::StandaloneLintHover,
     #[cfg(target_os = "macos")]
     source_lsp: Option<source_lsp::SourceLsp>,
+    #[cfg(target_os = "macos")]
+    signature_timer: source_lsp::SignatureTimer,
     #[cfg(target_os = "macos")]
     reference_panel_ui: source_lsp::ReferencePanelUi,
     source_tooltip: Option<source_tooltip::SourceTooltip>,
@@ -281,6 +285,7 @@ impl Editor {
             editor.dismiss_keyboard_diagnostic_hover();
             editor.dismiss_source_lsp_tooltips();
             editor.clear_source_tooltip();
+            editor.standalone_lint_hover.clear();
             editor.finish_composition();
             editor.cancel_source_snippet(cx);
             editor.report_native_focus(false);
@@ -289,8 +294,11 @@ impl Editor {
         .detach();
         cx.observe_window_activation(window, |editor, window, cx| {
             if !window.is_window_active() {
-                let diagnostic = editor.dismiss_keyboard_diagnostic_hover();
-                if editor.clear_source_tooltip() || diagnostic {
+                let lint_gutter = editor.standalone_lint_hover.clear();
+                let dismissed = editor.dismiss_keyboard_diagnostic_hover() || lint_gutter;
+                #[cfg(target_os = "macos")]
+                let dismissed = editor.dismiss_source_lsp_signature() || dismissed;
+                if editor.clear_source_tooltip() || dismissed {
                     cx.notify();
                 }
             }
@@ -313,8 +321,11 @@ impl Editor {
             completion: None,
             source_collab,
             diagnostics: SourceDiagnostics::new(cx.focus_handle()),
+            standalone_lint_hover: Default::default(),
             #[cfg(target_os = "macos")]
             source_lsp: None,
+            #[cfg(target_os = "macos")]
+            signature_timer: source_lsp::SignatureTimer::new(window, cx),
             #[cfg(target_os = "macos")]
             reference_panel_ui: source_lsp::ReferencePanelUi::new(cx),
             source_tooltip: None,
@@ -423,6 +434,7 @@ impl Editor {
     pub fn set_path(&mut self, path: Option<PathBuf>, workspace: Option<Workspace>) {
         if self.path != path {
             self.highlighting.invalidate();
+            self.invalidate_standalone_diagnostics();
         }
         self.path = path;
         self.workspace = workspace;
@@ -449,12 +461,14 @@ impl Editor {
             goto_line.set_editable(enabled, cx);
         }
         if !enabled {
+            self.invalidate_standalone_diagnostics();
             self.finish_typing();
             self.selecting = false;
             self.completion = None;
             self.dismiss_keyboard_diagnostic_hover();
             self.dismiss_source_lsp_tooltips();
             self.clear_source_tooltip();
+            self.standalone_lint_hover.clear();
         }
         cx.notify();
     }
@@ -1117,15 +1131,21 @@ impl Editor {
         let block = item
             .filter(|item| matches!(item.paint, ItemPaint::Block(_)))
             .map(|item| item.source.clone());
-        if !event.modifiers.shift
-            && let Some(range) = item
-                .filter(|item| matches!(item.paint, ItemPaint::Fold(_)))
-                .map(|item| item.source.clone())
-            && self.open_source_fold(range, cx)
+        if let Some(range) = item
+            .filter(|item| matches!(item.paint, ItemPaint::Fold(_)))
+            .map(|item| item.source.clone())
         {
-            self.selecting = false;
-            window.focus(&self.focus);
-            return;
+            if !self.is_markdown() && !event.modifiers.modified() {
+                if layout.standalone_fold_hit_is_current(self.view.state()) {
+                    self.open_source_fold(range, cx);
+                }
+                window.prevent_default();
+                return;
+            }
+            if self.is_markdown() && !event.modifiers.shift && self.open_source_fold(range, cx) {
+                window.focus(&self.focus);
+                return;
+            }
         }
         let in_source = self.active.as_ref().is_some_and(|active| {
             active.content.start <= position
@@ -1189,7 +1209,8 @@ impl Editor {
         })
     }
 
-    fn mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn mouse_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.track_standalone_lint_hover(event, window, cx);
         if self.drag_source_rectangle(event.position, cx) {
             return;
         }
@@ -1434,7 +1455,8 @@ impl EntityInputHandler for Editor {
         if starting {
             self.finish_typing();
             let lsp = self.dismiss_source_lsp_tooltips();
-            if self.clear_source_tooltip() || lsp {
+            let lint_gutter = self.standalone_lint_hover.clear();
+            if self.clear_source_tooltip() || lsp || lint_gutter {
                 cx.notify();
             }
             self.cancel_source_snippet(cx);
@@ -1528,6 +1550,7 @@ impl Render for Editor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_caret_blink(window, cx);
         if self.is_reviewing_changes() {
+            self.standalone_lint_hover.clear();
             #[cfg(test)]
             {
                 self.painted_source_tooltip = None;
@@ -1537,30 +1560,62 @@ impl Render for Editor {
         #[cfg(target_os = "macos")]
         self.retain_source_lsp_diagnostics();
         self.sync_source_diagnostics(cx);
+        let panel_style = view_style(self.view.state()).map(|style| style.panels);
+        let themed = panel_style.is_some();
+        let find = self.render_find(window, cx, themed);
+        let goto = self.render_goto_line(window, cx, themed);
+        #[cfg(test)]
+        let [find, goto] = [
+            (find, one_dark_tests::panel_menu::Role::Find),
+            (goto, one_dark_tests::panel_menu::Role::GotoLine),
+        ]
+        .map(|(panel, role)| panel.map(|panel| one_dark_tests::panel_menu::probe(panel, role)));
+        let panels = [
+            find.map(IntoElement::into_any_element),
+            goto.map(IntoElement::into_any_element),
+            self.render_source_diagnostics(window, cx, themed),
+        ];
+        let element = div().flex().flex_col().size_full();
+        let element = if let Some(style) = panel_style
+            && panels.iter().any(Option::is_some)
+        {
+            let group = div()
+                .debug_selector(|| "editor-top-panels".into())
+                .flex()
+                .flex_col()
+                .flex_none()
+                .w_full()
+                .bg(rgba(style.background.rgba32()))
+                .text_color(rgba(style.foreground.rgba32()))
+                .border_b(px(f32::from(style.top_border.width_px)))
+                .border_color(rgba(style.top_border.color.rgba32()))
+                .children(panels.into_iter().flatten());
+            #[cfg(test)]
+            let group = one_dark_tests::panel_menu::probe(
+                group,
+                one_dark_tests::panel_menu::Role::TopPanels,
+            );
+            element.child(group)
+        } else {
+            element.children(panels.into_iter().flatten())
+        };
         let editor = cx.entity();
         // The Shell can change the body width without resizing the window. Use
         // the space GPUI assigned us before laying out the scrollable document.
-        let element = div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .children(self.render_find(window, cx))
-            .children(self.render_goto_line(window, cx))
-            .children(self.render_source_diagnostics(window, cx))
-            .child(
-                canvas(
-                    move |bounds, window, cx| {
-                        let mut body =
-                            editor.update(cx, |editor, cx| editor.body(bounds.size, window, cx));
-                        body.prepaint_as_root(bounds.origin, bounds.size.into(), window, cx);
-                        body
-                    },
-                    |_, mut body, window, cx| body.paint(window, cx),
-                )
-                .flex_1()
-                .min_h_0()
-                .w_full(),
-            );
+        let element = element.child(
+            canvas(
+                move |bounds, window, cx| {
+                    let mut body =
+                        editor.update(cx, |editor, cx| editor.body(bounds.size, window, cx));
+                    body.prepaint_as_root(bounds.origin, bounds.size.into(), window, cx);
+                    body
+                },
+                |_, mut body, window, cx| body.paint(window, cx),
+            )
+            .flex_1()
+            .min_h_0()
+            .w_full(),
+        );
         #[cfg(target_os = "macos")]
         let element = element.children(self.render_source_lsp_references(window, cx));
         element.into_any_element()
@@ -1732,6 +1787,7 @@ impl Editor {
             );
         element
             .on_action(cx.listener(|editor, _: &CloseCompletion, _, cx| {
+                let lint_gutter = editor.standalone_lint_hover.clear();
                 let dismissed = if editor.is_composing() {
                     false
                 } else {
@@ -1739,12 +1795,13 @@ impl Editor {
                     let lsp = editor.dismiss_source_lsp_tooltips();
                     editor.clear_source_tooltip() || lsp || lint
                 };
-                if dismissed {
+                if dismissed || lint_gutter {
                     cx.notify();
                 }
                 if editor.is_composing()
                     || (!editor.close_source_completion(cx)
                         && !editor.cancel_source_snippet(cx)
+                        && !lint_gutter
                         && !editor.collapse_multiple_selections(cx)
                         && !dismissed)
                 {
@@ -1812,11 +1869,14 @@ impl Editor {
                 }
             }))
             .on_hover(cx.listener(|editor, hovered, _, cx| {
-                if !hovered
-                    && (editor.hover.take().is_some()
-                        || lint::diagnostic_count(editor.view.state()) != 0)
-                {
-                    cx.notify();
+                if !hovered {
+                    let lint_gutter = editor.standalone_lint_hover.clear();
+                    if editor.hover.take().is_some()
+                        || lint_gutter
+                        || lint::diagnostic_count(editor.view.state()) != 0
+                    {
+                        cx.notify();
+                    }
                 }
             }))
             .on_mouse_up(
@@ -1898,10 +1958,15 @@ impl Editor {
                         let mut layout = layout;
                         layout.origin = bounds.origin;
                         let viewport = window.content_mask().bounds;
+                        layout.set_standalone_lint_viewport(viewport);
                         let bracket_marks = overlay_editor.update(cx, |e, _| {
                             layout.prepare_fold_gutter(e, viewport);
-                            if e.focus.is_focused(window) {
+                            if !e.focus.is_focused(window) {
+                                Vec::new()
+                            } else if e.is_markdown() {
                                 e.source_bracket_marks()
+                            } else if layout.theme.view.is_some() {
+                                e.standalone_bracket_marks()
                             } else {
                                 Vec::new()
                             }
@@ -1915,8 +1980,6 @@ impl Editor {
                             window,
                             completion.is_some(),
                         );
-                        #[cfg(test)]
-                        let overlay_text = overlay.as_ref().map(|overlay| overlay.text.clone());
                         let source_tooltip = if overlay.is_none()
                             && completion.is_none()
                             && overlay_editor.read(cx).source_tooltip.is_some()
@@ -1927,6 +1990,14 @@ impl Editor {
                         } else {
                             None
                         };
+                        let lint_gutter_tooltip = overlay_editor.read(cx).standalone_lint_overlay(
+                            &layout,
+                            window,
+                            overlay.is_none() && completion.is_none() && source_tooltip.is_none(),
+                        );
+                        let overlay = overlay.or(lint_gutter_tooltip);
+                        #[cfg(test)]
+                        let overlay_text = overlay.as_ref().map(|overlay| overlay.text.clone());
                         let overlay = overlay
                             .and_then(|overlay| overlay.prepaint(theme, tooltip, window, cx));
                         #[cfg(test)]
@@ -1953,6 +2024,9 @@ impl Editor {
                     ),
                           window,
                           cx| {
+                        if layout.standalone_lint_viewport().is_some() {
+                            standalone_lint_tooltip::listen_for_window_exit(&editor, window);
+                        }
                         #[cfg(target_os = "macos")]
                         layout.prepare_isolated_paint(isolation_cache.as_ref(), window, cx);
                         let e = editor.read(cx);
@@ -1973,6 +2047,13 @@ impl Editor {
                             focused,
                             e.input_enabled,
                         );
+                        let standalone = !e.is_markdown();
+                        let standalone_lines = if standalone && e.input_enabled && !e.is_composing()
+                        {
+                            layout.standalone_active_lines(e.view.state())
+                        } else {
+                            Vec::new()
+                        };
                         let diagnostic_marks = e.source_diagnostic_paint_marks();
                         if e.input_enabled {
                             window.handle_input(
@@ -2010,7 +2091,50 @@ impl Editor {
                                 Some((find, selection))
                             })
                             .unwrap_or_default();
+                        #[cfg(test)]
+                        use layout::ContentPaintLayer;
                         for row in visible_rows {
+                            let row_bounds = Bounds::new(
+                                layout.origin + point(px(0.), row.y),
+                                size(row.width, row.height),
+                            );
+                            let standalone_line = layout.standalone_active_line_quad(
+                                row,
+                                bounds.size.width,
+                                &standalone_lines,
+                            );
+                            let selection_under_content = standalone_line.is_some()
+                                || (standalone
+                                    && row.items.iter().any(|item| {
+                                        item.is_text()
+                                            && bracket_marks
+                                                .iter()
+                                                .any(|mark| mark.overlaps(&item.source))
+                                    }))
+                                || (theme.view.is_some()
+                                    && layout
+                                        .source_frame
+                                        .as_ref()
+                                        .is_some_and(|frame| frame.contains_row(row)));
+                            if selection_under_content {
+                                // CodeMirror's selection layer is below active lines and bracket marks.
+                                for item in &row.items {
+                                    document_find::paint_ordinary_selection(
+                                        (Some(&selection), &secondary),
+                                        item,
+                                        row_bounds,
+                                        theme,
+                                        window,
+                                        #[cfg(test)]
+                                        &mut layout.painted_find_quads,
+                                    );
+                                }
+                                #[cfg(test)]
+                                layout.painted_layer_order.record(
+                                    ContentPaintLayer::SelectionAndFind,
+                                    &layout.painted_find_quads,
+                                );
+                            }
                             if let Some(frame) = &layout.source_frame {
                                 active_lines.paint_row(
                                     frame,
@@ -2030,10 +2154,15 @@ impl Editor {
                                     #[cfg(test)]
                                     &mut layout.painted_active_lines,
                                 );
+                            } else if let Some(quad) = standalone_line {
+                                #[cfg(test)]
+                                layout.painted_active_lines.content.push(quad.clone());
+                                window.paint_quad(quad);
                             }
-                            let row_bounds = Bounds::new(
-                                layout.origin + point(px(0.), row.y),
-                                size(row.width, row.height),
+                            #[cfg(test)]
+                            layout.painted_layer_order.record(
+                                ContentPaintLayer::ActiveLine,
+                                &layout.painted_active_lines.content,
                             );
                             for item in &row.items {
                                 let top = layout.origin + point(item.left, row.y);
@@ -2089,6 +2218,11 @@ impl Editor {
                                         #[cfg(test)]
                                         &mut layout.painted_bracket_quads,
                                     );
+                                    #[cfg(test)]
+                                    layout.painted_layer_order.record(
+                                        ContentPaintLayer::Brackets,
+                                        &layout.painted_bracket_quads,
+                                    );
                                 }
                                 if let Some(marks) = &selection_marks
                                     && item.is_text()
@@ -2104,7 +2238,18 @@ impl Editor {
                                         &mut layout.painted_find_quads,
                                     );
                                 }
-                                document_find::paint_find_and_selection(
+                                if theme.view.is_some() && !selection_under_content {
+                                    document_find::paint_ordinary_selection(
+                                        (Some(&selection), &secondary),
+                                        item,
+                                        row_bounds,
+                                        theme,
+                                        window,
+                                        #[cfg(test)]
+                                        &mut layout.painted_find_quads,
+                                    );
+                                }
+                                document_find::paint_find_and_fallback_selection(
                                     find_marks.as_deref(),
                                     (&selection, &secondary),
                                     item,
@@ -2114,9 +2259,21 @@ impl Editor {
                                     #[cfg(test)]
                                     &mut layout.painted_find_quads,
                                 );
+                                #[cfg(test)]
+                                layout.painted_layer_order.record(
+                                    ContentPaintLayer::SelectionAndFind,
+                                    &layout.painted_find_quads,
+                                );
                                 match &item.paint {
                                     ItemPaint::Text(line) => {
-                                        let _ = line.paint(top, row.height, window, cx);
+                                        let _painted = line.paint(top, row.height, window, cx);
+                                        #[cfg(test)]
+                                        if standalone && _painted.is_ok() {
+                                            let order = &mut layout.painted_layer_order;
+                                            order
+                                                .standalone_text_after_quads
+                                                .push(order.quads.len());
+                                        }
                                     }
                                     #[cfg(target_os = "macos")]
                                     ItemPaint::Isolated(native) => native.paint(top, window),

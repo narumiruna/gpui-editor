@@ -5,7 +5,7 @@ use crate::Text;
 use super::{
     super::{
         HighlightSpan, IndentOptions, StreamSettings,
-        html::{HtmlDocument, HtmlNodeKind, HtmlOptions},
+        html::{HtmlDocument, HtmlNesting, HtmlNodeKind, HtmlOptions},
     },
     PhpDocument,
 };
@@ -26,7 +26,11 @@ pub struct PhpHtml {
 }
 
 impl PhpHtml {
-    pub(super) fn parse(php: &PhpDocument) -> Option<Self> {
+    pub(super) fn parse(
+        php: &PhpDocument,
+        options: HtmlOptions,
+        nesting: HtmlNesting<'_>,
+    ) -> Option<Self> {
         let mut text = String::new();
         let mut segments = Vec::new();
         for node in php.nodes().filter(|node| node.name() == "Text") {
@@ -44,12 +48,20 @@ impl PhpHtml {
         if segments.is_empty() {
             return None;
         }
-        let document = HtmlDocument::parse_with_options(
+        // Parse the compact text, but include any PHP gaps when reading route names and values.
+        let original = |range: Range<usize>| {
+            let first =
+                segments.get(segments.partition_point(|s| s.projected.end <= range.start))?;
+            let last = segments.get(segments.partition_point(|s| s.projected.end < range.end))?;
+            let start = first.source.start + (range.start - first.projected.start);
+            let end = last.source.start + (range.end - last.projected.start);
+            Some(start..end)
+        };
+        let document = HtmlDocument::parse_projected(
             Text::new(text),
-            HtmlOptions {
-                match_closing_tags: false,
-                ..HtmlOptions::default()
-            },
+            options,
+            nesting,
+            (php.text().as_str(), &original),
         );
         Some(Self { document, segments })
     }
