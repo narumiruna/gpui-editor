@@ -1,3 +1,29 @@
+## 0.3.0
+
+### Minor Changes
+
+- Use configured JSON and Lezer delimiter roles and fold rules in editable Markdown code fences.
+
+- Display Markdown inline code in a monospaced font. Show its backticks when the caret enters the span so you can edit the source in place.
+
+- Add Find and Replace, multiple selections, and Go to Line. In supported Markdown code fences, add native syntax services such as highlighting, folding, and completion. Review and restore individual groups of unsaved changes without saving the document.
+
+- Open and edit existing UTF-8 plain text files from the workspace tree, including source files and files without an extension. Markdown files keep their formatted view. Plain text uses a monospaced font and keeps its filename and untouched line endings when saved.
+
+- Highlight syntax in editable Python, Rust, Go, TypeScript, JavaScript, TOML, YAML, JSON, and other recognized source and configuration files. Unrecognized formats still open as plain text.
+
+- Pair GPUI Editor with Pi on Windows to send feedback and read recent editor diagnostics. Windows supports pasted images; native window capture remains available only on macOS.
+
+- Run the Markdown editor on Windows instead of exiting with a macOS-only error. Support native Windows shortcuts, settings, session restore, image previews, and conflict-checked file saves. Window capture remains macOS-only.
+
+### Patch Changes
+
+- Keep each input method composition in one undo step. Undo and redo now store changed text instead of full Markdown snapshots.
+
+- Replace only the primary Find match, paste copied CRLF lines above target carets, block deletion keys in read-only editors, and use displayed line boundaries for rectangular selections in code fences.
+
+- Undo a run of typing in one step. Moving the caret, changing the selection, or pausing for at least one second ends the run. Paste, line breaks, and input method composition stay separate.
+
 ## 0.2.0
 
 ### Minor Changes
