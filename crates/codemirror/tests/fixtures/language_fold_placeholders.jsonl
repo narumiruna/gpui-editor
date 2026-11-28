@@ -1,9 +1,0 @@
-{"phase":"before","doc":"猫 lead\n[old]\n","markers":[],"calls":[]}
-{"phase":"fold_after_edit","doc":"猫 lead\n[fresh]\n","edit":[10,13,"fresh"],"fold":[10,15],"markers":[[10,15,"first:fresh",null,null]],"calls":[["猫 lead\n[fresh]\n",[10,15],"fresh"]]}
-{"phase":"mapped","doc":"💡猫 lead\n[fresh]\n","edit":[0,0,"💡"],"markers":[[14,19,"first:fresh",null,null]],"calls":[]}
-{"phase":"duplicate","doc":"💡猫 lead\n[fresh]\n","fold":[14,19],"markers":[[14,19,"first:fresh",null,null]],"calls":[]}
-{"phase":"renderer","doc":"💡猫 lead\n[fresh]\n","markers":[[14,19,"second:fresh",null,null]],"calls":[]}
-{"phase":"clear_before_paint","doc":"💡猫 lead\n[fresh]\n","fold":[8,12],"head":9,"markers":[[14,19,"second:fresh",null,null]],"calls":[["💡猫 lead\n[fresh]\n",[8,12],"lead"]]}
-{"phase":"restored","doc":"💡猫 lead\n[fresh]\n","markers":[[14,19,"second:-",null,null]],"calls":[]}
-{"phase":"stock_label","doc":"💡猫 lead\n[fresh]\n","markers":[[14,19,"hidden","show source","hidden source"]],"calls":[]}
-{"phase":"unfold","doc":"💡猫 lead\n[fresh]\n","fold":[14,19],"markers":[],"calls":[]}

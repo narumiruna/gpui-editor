@@ -89,7 +89,7 @@ fn pinned_arrow_box(above: bool) -> Size<Pixels> {
     }
     let fixture = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../codemirror/tests/fixtures/tooltip_arrow_browser.jsonl"
+        "/tests/fixtures/codemirror/tooltip_arrow_browser.jsonl"
     ));
     let name = if above {
         "arrow-above-focused"
@@ -456,7 +456,7 @@ fn stock_diagnostic_and_completion_keep_priority_and_geometry(cx: &mut TestAppCo
     cx.simulate_keystrokes("f8");
     cx.run_until_parked();
     let diagnostic_text = captured_overlay_text();
-    let pins = include_str!("../../../../codemirror/tests/fixtures/tooltip_arrow_browser.jsonl");
+    let pins = include_str!("../../../tests/fixtures/codemirror/tooltip_arrow_browser.jsonl");
     let pinned = pins
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
@@ -497,7 +497,7 @@ fn stock_diagnostic_and_completion_keep_priority_and_geometry(cx: &mut TestAppCo
     let completion_bounds = cx.debug_bounds("source-completion: color").unwrap();
     let completion_text = captured_overlay_text();
     let pins: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../codemirror/tests/fixtures/theme_one_dark_chromium.json"
+        "../../../tests/fixtures/codemirror/theme_one_dark_chromium.json"
     ))
     .unwrap();
     let roles = &pins["viewRoles"];

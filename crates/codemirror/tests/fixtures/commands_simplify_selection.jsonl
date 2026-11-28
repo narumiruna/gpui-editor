@@ -1,5 +1,0 @@
-{"name":"keep cursor metadata","doc":"é 😀 abcdef","before":{"main":1,"ranges":[[0,0,0,null,null,false],[9,9,-1,3,20,false]]},"handled":true,"after":{"main":0,"ranges":[[9,9,-1,3,20,false]]},"event":"select","scroll":true}
-{"name":"keep reversed range metadata","doc":"é 😀 abcdef","before":{"main":1,"ranges":[[0,0,0,null,null,false],[11,9,-1,2,9,false]]},"handled":true,"after":{"main":0,"ranges":[[11,9,-1,2,9,false]]},"event":"select","scroll":true}
-{"name":"keep undirectional range","doc":"é 😀 abcdef","before":{"main":0,"ranges":[[2,7,0,0,null,true],[9,9,0,null,null,false]]},"handled":true,"after":{"main":0,"ranges":[[2,7,0,0,null,true]]},"event":"select","scroll":true}
-{"name":"collapse single range","doc":"é 😀 abcdef","before":{"main":0,"ranges":[[11,9,-1,2,9,false]]},"handled":true,"after":{"main":0,"ranges":[[9,9,0,null,null,false]]},"event":"select","scroll":true}
-{"name":"decline single cursor","doc":"é 😀 abcdef","before":{"main":0,"ranges":[[9,9,1,3,20,false]]},"handled":false,"after":{"main":0,"ranges":[[9,9,1,3,20,false]]}}

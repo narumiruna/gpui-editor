@@ -133,7 +133,7 @@ fn keyboard_navigation_activates_lint_hover_and_tracks_accepted_updates(cx: &mut
         tooltip: Option<Vec<String>>,
     }
     let fixture: Fixture = serde_json::from_str(include_str!(
-        "../../../../codemirror/tests/fixtures/lint_navigation_hover.jsonl"
+        "../../../tests/fixtures/codemirror/lint_navigation_hover.jsonl"
     ))
     .unwrap();
     let first = fixture.source.find("abc").unwrap();

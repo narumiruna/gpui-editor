@@ -185,7 +185,7 @@ fn configured_fences_repaint_draft_and_fallback_preview_on_same_text_swap(cx: &m
 }
 
 fn host_case(name: &str) -> serde_json::Value {
-    include_str!("../../../../codemirror/tests/fixtures/wast_host_commands.jsonl")
+    include_str!("../../../tests/fixtures/codemirror/wast_host_commands.jsonl")
         .lines()
         .map(|row| serde_json::from_str::<serde_json::Value>(row).unwrap())
         .find(|row| row["name"] == name)

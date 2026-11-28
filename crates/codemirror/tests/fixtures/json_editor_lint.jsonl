@@ -1,7 +1,0 @@
-{"name":"missing colon after CRLF and an astral scalar","source":"\r\n{\"名😀\" 1}","diagnostics":[[13,13,"error","Expected ':' after property name in JSON at position 8 (line 2 column 8)"]]}
-{"name":"missing separator after mixed endings","source":"[\r   \"😀\"\r\n  false,\r  null\r]","diagnostics":[[15,15,"error","Expected ',' or ']' after array element in JSON at position 12 (line 3 column 3)"]]}
-{"name":"unterminated string at EOF","source":"\r\n[\r\n  \"名😀","diagnostics":[[15,15,"error","Unterminated string in JSON at position 9 (line 3 column 7)"]]}
-{"name":"leading CRLF before an unexpected token","source":"\r\n?😀","diagnostics":[[0,0,"error","Unexpected token '?', \"\n?😀\" is not valid JSON"]]}
-{"name":"lone CR quoted in the engine message","source":"tr\re","diagnostics":[[0,0,"error","Unexpected token '\n', \"tr\ne\" is not valid JSON"]]}
-{"name":"surrogate split in an excerpt after CRLF","source":"?a\r\naaaaaaa😀bbbbbbbbbbb","diagnostics":[[0,0,"error","Unexpected token '?', \"?a\naaaaaaa\"... is not valid JSON"]]}
-{"name":"valid JSON with mixed endings","source":"[\r\n\"😀\",\r\r\ntrue,\rfalse\n]","diagnostics":[]}

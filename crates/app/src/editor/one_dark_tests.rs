@@ -36,7 +36,7 @@ pub(super) fn panel_input_colors(
 
     let (surface, text, border) = if dark {
         let fixture =
-            include_str!("../../../codemirror/tests/fixtures/one_dark_panel_input_browser.jsonl");
+            include_str!("../../tests/fixtures/codemirror/one_dark_panel_input_browser.jsonl");
         let row = fixture
             .lines()
             .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())

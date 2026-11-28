@@ -1,5 +1,0 @@
-{"length":5,"changes":[{"from":2,"insert":"x"}],"input":{"range":[2,2],"x":"nearest","y":"nearest","xMargin":5,"yMargin":5},"mapped":{"range":[2,2],"x":"nearest","y":"nearest","xMargin":5,"yMargin":5}}
-{"length":5,"changes":[{"from":0,"insert":"xx"},{"from":4,"insert":"x"}],"input":{"range":[4,1],"x":"end","y":"center","xMargin":12,"yMargin":9.5},"mapped":{"range":[6,3],"x":"end","y":"center","xMargin":12,"yMargin":9.5}}
-{"length":5,"changes":[{"from":1,"insert":"A"},{"from":4,"insert":"B"}],"input":{"range":[1,4],"x":"start","y":"nearest","xMargin":5,"yMargin":0},"mapped":{"range":[2,5],"x":"start","y":"nearest","xMargin":5,"yMargin":0}}
-{"length":5,"changes":[],"input":{"range":[1,4],"x":"nearest","y":"end","xMargin":1.25,"yMargin":5},"mapped":{"range":[1,4],"x":"nearest","y":"end","xMargin":1.25,"yMargin":5}}
-{"length":5,"changes":[{"from":1,"to":4}],"input":{"range":[4,1],"x":"nearest","y":"nearest","xMargin":5,"yMargin":5},"mapped":{"range":[1,1],"x":"nearest","y":"nearest","xMargin":5,"yMargin":5}}

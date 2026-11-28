@@ -1,4 +1,4 @@
-// Replay with crates/codemirror/tests/fixtures/capture_browser_fixture.mjs
+// Replay with ../codemirror-rs/crates/codemirror/tests/fixtures/capture_browser_fixture.mjs
 // <archive-root> <chrome-executable> @codemirror/autocomplete,@codemirror/theme-one-dark <this file>
 import {autocompletion, startCompletion} from '@codemirror/autocomplete';
 import {Compartment} from '@codemirror/state';

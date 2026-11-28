@@ -1,7 +1,0 @@
-{"event":"install","length":12010,"viewport":281,"rootEnd":3001,"through":3000,"marker":"first","complete":false}
-{"event":"ensure","length":12010,"viewport":281,"rootEnd":3001,"through":5000,"marker":"first","complete":false,"stage":5001,"stageMarker":"first","unchanged":true,"available":true}
-{"event":"force","length":12010,"viewport":281,"rootEnd":5001,"through":5000,"marker":"first","complete":false,"forced":true,"sameStage":true,"retained":true}
-{"event":"idle","length":12010,"viewport":281,"rootEnd":12010,"through":12010,"marker":"first","complete":true,"callbacks":1}
-{"event":"selection","length":12010,"viewport":281,"rootEnd":12010,"through":12010,"marker":"first","complete":true,"sameTree":true}
-{"event":"reconfigure","length":12010,"viewport":281,"rootEnd":3001,"through":3000,"marker":"second","complete":false,"retainedMarker":"first"}
-{"event":"detach","length":12010,"viewport":281,"rootEnd":0,"through":0,"marker":null,"complete":false}

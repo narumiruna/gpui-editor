@@ -155,8 +155,7 @@ fn assert_quads(
 
 #[gpui::test]
 fn active_line_paints_pinned_blocks_and_independent_gutters_in_canvas(cx: &mut TestAppContext) {
-    let mut fixture =
-        include_str!("../../../../codemirror/tests/fixtures/active_line.jsonl").lines();
+    let mut fixture = include_str!("../../../tests/fixtures/codemirror/active_line.jsonl").lines();
     let doc: Document = serde_json::from_str(fixture.next().unwrap()).unwrap();
     let prefix = "Prose 🐱\r\n\r\n```text\r\n";
     let source = format!("{prefix}{}\r\n```\r\n\r\nAfter", doc.body);

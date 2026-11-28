@@ -140,7 +140,7 @@ fn independent_exact_base_authority_rebases_unicode_and_maps_native_undo_redo(
     }
     let trace: Trace = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../codemirror/tests/fixtures/collab_host_trace.json"
+        "/tests/fixtures/codemirror/collab_host_trace.json"
     )))
     .unwrap();
     let source = format!("{PREFIX}{BODY}");
@@ -596,7 +596,7 @@ fn committed_ime_edit_converges_with_a_waiting_peer_update_and_one_undo_step(
 ) {
     let trace: serde_json::Value = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../codemirror/tests/fixtures/collab_ime_host_trace.json"
+        "/tests/fixtures/codemirror/collab_ime_host_trace.json"
     )))
     .unwrap();
     let source = format!("{PREFIX}{BODY}");

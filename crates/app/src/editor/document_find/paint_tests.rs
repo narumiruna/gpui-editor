@@ -131,7 +131,7 @@ fn find_hides_only_the_overlapping_part_of_selection_match_paint(cx: &mut TestAp
     }
     let fixture = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../codemirror/tests/fixtures/search_selection_overlap.jsonl"
+        "/tests/fixtures/codemirror/search_selection_overlap.jsonl"
     ));
     for (line, installed) in fixture
         .lines()
@@ -210,7 +210,7 @@ fn configured_selection_matches_follow_the_pinned_view_in_actual_paint(cx: &mut 
 
     let fixture = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../codemirror/tests/fixtures/search_selection_config.jsonl"
+        "/tests/fixtures/codemirror/search_selection_config.jsonl"
     ));
     let mut failures = Vec::new();
     let mut measured = 0;

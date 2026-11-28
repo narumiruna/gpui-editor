@@ -7,7 +7,7 @@ fn java_quote_input_matches_the_pinned_editor(cx: &mut TestAppContext) {
         "java",
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../codemirror/tests/fixtures/java_quotes.jsonl"
+            "/tests/fixtures/codemirror/java_quotes.jsonl"
         )),
     );
 }
@@ -19,7 +19,7 @@ fn rust_quote_input_matches_the_pinned_editor(cx: &mut TestAppContext) {
         "rust",
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../codemirror/tests/fixtures/rust_quotes.jsonl"
+            "/tests/fixtures/codemirror/rust_quotes.jsonl"
         )),
     );
 }
@@ -31,7 +31,7 @@ fn go_quote_input_matches_the_pinned_editor(cx: &mut TestAppContext) {
         "go",
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../codemirror/tests/fixtures/go_quotes.jsonl"
+            "/tests/fixtures/codemirror/go_quotes.jsonl"
         )),
     );
 }
@@ -43,7 +43,7 @@ fn javascript_family_quote_input_matches_the_pinned_editor(cx: &mut TestAppConte
         "js",
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../codemirror/tests/fixtures/javascript_quotes.jsonl"
+            "/tests/fixtures/codemirror/javascript_quotes.jsonl"
         )),
     );
 }
@@ -55,7 +55,7 @@ fn xml_quote_input_matches_the_pinned_editor(cx: &mut TestAppContext) {
         "xml",
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../codemirror/tests/fixtures/xml_quotes.jsonl"
+            "/tests/fixtures/codemirror/xml_quotes.jsonl"
         )),
     );
 }
@@ -67,7 +67,7 @@ fn cpp_quote_input_matches_the_pinned_editor(cx: &mut TestAppContext) {
         "cpp",
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../codemirror/tests/fixtures/cpp_quotes.jsonl"
+            "/tests/fixtures/codemirror/cpp_quotes.jsonl"
         )),
     );
 }

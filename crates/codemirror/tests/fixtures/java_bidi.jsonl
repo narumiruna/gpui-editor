@@ -1,7 +1,0 @@
-{"name":"default","source":"class C { String s = \"אב\"; // عرب\n }","explicit":false,"always":false,"annotated":[["StringLiteral",21,27],["LineComment",29,38]],"marks":[]}
-{"name":"comments-and-strings","source":"class C { String s = \"אב\"; // عرب\r\n /* גד\r\n abc */ char p = 'ז'; int x = 0;\r\n }","explicit":true,"always":false,"annotated":[["StringLiteral",21,27],["LineComment",29,38],["BlockComment",41,57],["CharacterLiteral",67,71]],"marks":[[21,27,"auto"],[29,38,"auto"],[41,57,"auto"],[67,71,"auto"]]}
-{"name":"mixed-lines","source":"// עברית\rclass C {\r\n  String s = \"😀 عرب\";\r  // more 中文\r\n }","explicit":true,"always":false,"annotated":[["LineComment",0,13],["StringLiteral",38,51],["LineComment",55,69]],"marks":[[0,13,"auto"],[38,51,"auto"]]}
-{"name":"ascii","source":"class C { String s = \"abc\"; // ASCII\n }","explicit":true,"always":false,"annotated":[["StringLiteral",21,26],["LineComment",28,36]],"marks":[]}
-{"name":"always","source":"class C { String s = \"abc\"; // ASCII\n }","explicit":true,"always":true,"annotated":[["StringLiteral",21,26],["LineComment",28,36]],"marks":[[21,26,"auto"],[28,36,"auto"]]}
-{"name":"text-block","source":"class C { String s = \"\"\"\r\nאב😀\r\n abc\r\n\"\"\"; }","explicit":true,"always":true,"annotated":[],"marks":[]}
-{"name":"missing-end","source":"class C {\r\n String s = \"אב😀;\r\n}","explicit":true,"always":false,"annotated":[],"marks":[]}

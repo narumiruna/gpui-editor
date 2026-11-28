@@ -1,4 +1,0 @@
-{"name":"type a closing brace","source":"package p\r\nfunc f() {\r  println(\"名😀\")\r    \r\n","caret":47,"typed":"}","event":"input.type","result":"package p\r\nfunc f() {\r  println(\"名😀\")\r}\r\n","finalCaret":44}
-{"name":"finish the case keyword","source":"func f(x int) {\r\n  switch x {\r      cas\r\n  }\r}\r\n","caret":39,"typed":"e","event":"input.type","result":"func f(x int) {\r\n  switch x {\r  case\r\n  }\r}\r\n","finalCaret":36}
-{"name":"finish the default keyword","source":"func f(x int) {\r\n  switch x {\r      defaul\r\n  }\r}\r\n","caret":42,"typed":"t","event":"input.complete","result":"func f(x int) {\r\n  switch x {\r  default\r\n  }\r}\r\n","finalCaret":39}
-{"name":"keep indentation on paste","source":"package p\r\nfunc f() {\r  println(\"名😀\")\r    \r\n","caret":47,"typed":"}","event":"input.paste","result":"package p\r\nfunc f() {\r  println(\"名😀\")\r    }\r\n","finalCaret":48}

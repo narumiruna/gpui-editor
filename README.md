@@ -107,7 +107,11 @@ LaTeX previews use STIX Two Math through Mathra. See the [STIX Two Math license]
 
 ## Develop
 
-The Cargo workspace separates the [app](crates/app/), [editor core](crates/codemirror/), [Markdown model](crates/document/), [previews](crates/preview/), and [file handling](crates/workspace/). App-only changes reuse the other compiled crates. The crates share the root `target/` directory and lockfile.
+The Cargo workspace contains the [app](crates/app/), [Markdown model](crates/document/), [previews](crates/preview/), and [file handling](crates/workspace/). The crates share the root `target/` directory and lockfile.
+
+The app uses [codemirror-rs](https://crates.io/crates/codemirror-rs) as its editor core. Cargo downloads it from crates.io. A separate checkout is not required to build or test the app.
+
+The app keeps its [CodeMirror test fixtures](crates/app/tests/fixtures/codemirror/) in this repository. The fixture scripts use [pinned upstream packages](docs/codemirror-upstream.json). To replay browser fixtures, use `capture_browser_fixture.mjs` from the [codemirror-rs fixture tools](https://github.com/narumiruna/codemirror-rs/tree/main/crates/codemirror/tests/fixtures).
 
 Run checks for a single component with `-p`. For example, this tests the Markdown model without building GPUI:
 

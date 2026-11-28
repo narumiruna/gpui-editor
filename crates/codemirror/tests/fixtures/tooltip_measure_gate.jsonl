@@ -1,6 +1,0 @@
-{"step":"visible","active":true,"inView":true,"clipAnchor":false,"anchorReads":1,"spaceReads":1,"visible":true}
-{"step":"clipped anchor","active":true,"inView":true,"clipAnchor":true,"anchorReads":1,"spaceReads":1,"visible":false}
-{"step":"offscreen editor","active":true,"inView":false,"clipAnchor":false,"anchorReads":0,"spaceReads":0,"visible":false}
-{"step":"back in view","active":true,"inView":true,"clipAnchor":false,"anchorReads":1,"spaceReads":1,"visible":true}
-{"step":"no tooltip","active":false,"inView":true,"clipAnchor":false,"anchorReads":0,"spaceReads":0,"visible":false}
-{"step":"reopened","active":true,"inView":true,"clipAnchor":false,"anchorReads":1,"spaceReads":1,"visible":true}
